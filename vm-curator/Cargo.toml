@@ -3,7 +3,7 @@ name = "vm-curator"
 version = "0.1.0"
 edition = "2021"
 description = "A TUI application to manage QEMU VM library"
-authors = ["Michael Roboff"]
+authors = ["Mark Roboff"]
 license = "MIT"
 
 [dependencies]
