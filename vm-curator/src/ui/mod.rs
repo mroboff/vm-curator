@@ -2,11 +2,10 @@ pub mod screens;
 pub mod widgets;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::prelude::*;
 use ratatui::backend::CrosstermBackend;
-use std::io::{self, Stdout};
-use std::time::Duration;
+use std::io::Stdout;
 
 use crate::app::{App, ConfirmAction, InputMode, Screen};
 use crate::vm::{launch_vm_sync, BootMode};
@@ -16,10 +15,11 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
     loop {
         terminal.draw(|frame| render(app, frame))?;
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                handle_key(app, key)?;
-            }
+        // Block until an event is available (responsive input)
+        match event::read()? {
+            Event::Key(key) => handle_key(app, key)?,
+            Event::Mouse(mouse) => handle_mouse(app, mouse)?,
+            _ => {}
         }
 
         if app.should_quit {
@@ -27,6 +27,24 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
         }
     }
 
+    Ok(())
+}
+
+/// Handle mouse input
+fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<()> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            if app.screen == Screen::MainMenu {
+                app.select_prev();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if app.screen == Screen::MainMenu {
+                app.select_next();
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 

@@ -30,18 +30,7 @@ impl<'a> VmListWidget<'a> {
             .iter()
             .map(|&idx| {
                 let vm = &self.vms[idx];
-                let name = vm.display_name();
-                let running_indicator = if crate::vm::lifecycle::is_vm_running(vm) {
-                    " [*]"
-                } else {
-                    ""
-                };
-                let snapshot_indicator = if vm.config.supports_snapshots() {
-                    ""
-                } else {
-                    ""
-                };
-                ListItem::new(format!("{}{}{}", name, running_indicator, snapshot_indicator))
+                ListItem::new(vm.display_name())
             })
             .collect();
 
