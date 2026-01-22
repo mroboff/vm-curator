@@ -113,30 +113,39 @@ fn main() -> Result<()> {
     }
 }
 
+/// Guard that ensures terminal is restored on drop (even on panic)
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        // Best effort restoration - ignore errors since we may be panicking
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
+        let _ = crossterm::cursor::Show;
+    }
+}
+
 fn run_tui(config: Config) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+    // Create guard AFTER setup so it only cleans up if setup succeeded
+    let _guard = TerminalGuard;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // Create app state
     let mut app = App::new(config)?;
 
-    // Run the app
-    let result = ui::run(&mut terminal, &mut app);
-
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    result
+    // Run the app - guard will restore terminal even if this panics
+    ui::run(&mut terminal, &mut app)
 }
 
 fn cmd_list(config: &Config) -> Result<()> {
