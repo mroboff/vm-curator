@@ -22,7 +22,7 @@ use config::Config;
 
 #[derive(Parser)]
 #[command(name = "vm-curator")]
-#[command(author = "Michael Roboff")]
+#[command(author = "Mark Roboff")]
 #[command(version = "0.1.0")]
 #[command(about = "A TUI application to manage your QEMU VM library")]
 struct Cli {
