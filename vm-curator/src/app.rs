@@ -1,5 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::Instant;
 
 use crate::config::Config;
 use crate::hardware::UsbDevice;
@@ -31,6 +33,18 @@ pub enum Screen {
     Help,
     /// Search/filter
     Search,
+    /// File browser (for ISO selection)
+    FileBrowser,
+    /// Text input dialog
+    TextInput(TextInputContext),
+    /// Error dialog (scrollable)
+    ErrorDialog,
+}
+
+/// Context for text input dialogs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextInputContext {
+    SnapshotName,
 }
 
 /// Actions that need confirmation
@@ -86,8 +100,44 @@ pub struct App {
     pub filtered_indices: Vec<usize>,
     /// Status message
     pub status_message: Option<String>,
+    /// When status message was set (for auto-clearing)
+    pub status_time: Option<Instant>,
     /// Whether the app should quit
     pub should_quit: bool,
+    /// File browser current directory
+    pub file_browser_dir: PathBuf,
+    /// File browser entries (directories first, then files)
+    pub file_browser_entries: Vec<FileBrowserEntry>,
+    /// File browser selected index
+    pub file_browser_selected: usize,
+    /// Text input buffer (for dialogs)
+    pub text_input_buffer: String,
+    /// Channel for background operation results
+    pub background_rx: Receiver<BackgroundResult>,
+    /// Sender for background operations (clone this for threads)
+    pub background_tx: Sender<BackgroundResult>,
+    /// Whether a background operation is in progress
+    pub loading: bool,
+    /// Error dialog content (for detailed errors)
+    pub error_detail: Option<String>,
+    /// Error dialog scroll position
+    pub error_scroll: u16,
+}
+
+/// Entry in file browser
+#[derive(Debug, Clone)]
+pub struct FileBrowserEntry {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+}
+
+/// Background operation result
+pub enum BackgroundResult {
+    SnapshotCreated { name: String, success: bool, error: Option<String> },
+    SnapshotRestored { name: String, success: bool, error: Option<String> },
+    SnapshotDeleted { name: String, success: bool, error: Option<String> },
+    SnapshotsLoaded { snapshots: Vec<Snapshot>, error: Option<String> },
 }
 
 impl App {
@@ -108,6 +158,7 @@ impl App {
         ascii_art.merge(user_art);
 
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let (background_tx, background_rx) = mpsc::channel();
 
         Ok(Self {
             screen: Screen::MainMenu,
@@ -127,7 +178,17 @@ impl App {
             input_mode: InputMode::Normal,
             filtered_indices,
             status_message: None,
+            status_time: None,
             should_quit: false,
+            file_browser_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            file_browser_entries: Vec::new(),
+            file_browser_selected: 0,
+            text_input_buffer: String::new(),
+            background_rx,
+            background_tx,
+            loading: false,
+            error_detail: None,
+            error_scroll: 0,
         })
     }
 
@@ -280,18 +341,156 @@ impl App {
         }
     }
 
-    /// Set a status message
+    /// Set a status message (auto-clears after 5 seconds)
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some(msg.into());
+        self.status_time = Some(Instant::now());
+    }
+
+    /// Show a detailed error in a scrollable dialog
+    pub fn show_error(&mut self, error: impl Into<String>) {
+        self.error_detail = Some(error.into());
+        self.error_scroll = 0;
+        self.push_screen(Screen::ErrorDialog);
     }
 
     /// Clear status message
     pub fn clear_status(&mut self) {
         self.status_message = None;
+        self.status_time = None;
+    }
+
+    /// Check and clear status if expired (call in event loop)
+    pub fn check_status_expiry(&mut self) {
+        if let Some(time) = self.status_time {
+            if time.elapsed().as_secs() >= 5 {
+                self.clear_status();
+            }
+        }
+    }
+
+    /// Check for background operation results (call in event loop)
+    pub fn check_background_results(&mut self) {
+        // Non-blocking check for results
+        while let Ok(result) = self.background_rx.try_recv() {
+            self.loading = false;
+            match result {
+                BackgroundResult::SnapshotCreated { name, success, error } => {
+                    if success {
+                        self.set_status(format!("Created snapshot: {}", name));
+                        // Reload snapshots
+                        let _ = self.load_snapshots();
+                    } else if let Some(e) = error {
+                        self.set_status(format!("Error creating snapshot: {}", e));
+                    }
+                }
+                BackgroundResult::SnapshotRestored { name, success, error } => {
+                    if success {
+                        self.set_status(format!("Restored snapshot: {}", name));
+                    } else if let Some(e) = error {
+                        self.set_status(format!("Error restoring snapshot: {}", e));
+                    }
+                }
+                BackgroundResult::SnapshotDeleted { name, success, error } => {
+                    if success {
+                        self.set_status(format!("Deleted snapshot: {}", name));
+                        let _ = self.load_snapshots();
+                    } else if let Some(e) = error {
+                        self.set_status(format!("Error deleting snapshot: {}", e));
+                    }
+                }
+                BackgroundResult::SnapshotsLoaded { snapshots, error } => {
+                    if let Some(e) = error {
+                        self.set_status(format!("Error loading snapshots: {}", e));
+                    } else {
+                        self.snapshots = snapshots;
+                        self.selected_snapshot = 0;
+                    }
+                }
+            }
+        }
     }
 
     /// Get grouped VMs for display
     pub fn grouped_vms(&self) -> Vec<(&'static str, Vec<&DiscoveredVm>)> {
         group_vms_by_category(&self.vms)
+    }
+
+    /// Load file browser entries for current directory
+    pub fn load_file_browser(&mut self) {
+        self.file_browser_entries.clear();
+        self.file_browser_selected = 0;
+
+        // Add parent directory entry if not at root
+        if let Some(parent) = self.file_browser_dir.parent() {
+            self.file_browser_entries.push(FileBrowserEntry {
+                name: "..".to_string(),
+                path: parent.to_path_buf(),
+                is_dir: true,
+            });
+        }
+
+        // Read directory entries
+        if let Ok(entries) = std::fs::read_dir(&self.file_browser_dir) {
+            let mut dirs = Vec::new();
+            let mut files = Vec::new();
+
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    // Skip hidden files
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    let entry = FileBrowserEntry {
+                        name,
+                        path: entry.path(),
+                        is_dir: metadata.is_dir(),
+                    };
+                    if metadata.is_dir() {
+                        dirs.push(entry);
+                    } else if entry.name.ends_with(".iso") || entry.name.ends_with(".ISO") {
+                        files.push(entry);
+                    }
+                }
+            }
+
+            // Sort alphabetically
+            dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+            self.file_browser_entries.extend(dirs);
+            self.file_browser_entries.extend(files);
+        }
+    }
+
+    /// Navigate into directory or select file in file browser
+    pub fn file_browser_enter(&mut self) -> Option<PathBuf> {
+        if let Some(entry) = self.file_browser_entries.get(self.file_browser_selected) {
+            if entry.is_dir {
+                self.file_browser_dir = entry.path.clone();
+                self.load_file_browser();
+                None
+            } else {
+                // Return selected file
+                Some(entry.path.clone())
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Move selection up in file browser
+    pub fn file_browser_prev(&mut self) {
+        if self.file_browser_selected > 0 {
+            self.file_browser_selected -= 1;
+        }
+    }
+
+    /// Move selection down in file browser
+    pub fn file_browser_next(&mut self) {
+        if self.file_browser_selected < self.file_browser_entries.len().saturating_sub(1) {
+            self.file_browser_selected += 1;
+        }
     }
 }

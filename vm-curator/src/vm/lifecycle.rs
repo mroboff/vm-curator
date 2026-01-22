@@ -1,10 +1,15 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use tokio::process::Command as AsyncCommand;
 
 use super::discovery::DiscoveredVm;
 use super::qemu_config::BootMode;
+
+/// Convert a path to a string, returning an error if the path contains invalid UTF-8
+fn path_to_str(path: &Path) -> Result<&str> {
+    path.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Path contains invalid UTF-8: {:?}", path))
+}
 
 /// Launch options for starting a VM
 #[derive(Debug, Clone, Default)]
@@ -33,45 +38,7 @@ impl UsbPassthrough {
     }
 }
 
-/// Launch a VM using its launch.sh script
-pub async fn launch_vm(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
-    let mut cmd = AsyncCommand::new("bash");
-    cmd.current_dir(&vm.path);
-
-    // Build arguments based on boot mode
-    let mut args = vec![vm.launch_script.to_string_lossy().to_string()];
-
-    match &options.boot_mode {
-        BootMode::Normal => {}
-        BootMode::Install => {
-            args.push("--install".to_string());
-        }
-        BootMode::Cdrom(iso_path) => {
-            args.push("--cdrom".to_string());
-            args.push(iso_path.to_string_lossy().to_string());
-        }
-        BootMode::Network => {
-            args.push("--netboot".to_string());
-        }
-    }
-
-    // Add extra args
-    args.extend(options.extra_args.clone());
-
-    cmd.args(&args);
-
-    // Spawn the process detached
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    let _child = cmd.spawn().context("Failed to launch VM")?;
-
-    // Don't wait for the child - let it run independently
-    Ok(())
-}
-
-/// Launch a VM synchronously (blocking)
+/// Launch a VM synchronously
 pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
     let mut cmd = Command::new("bash");
     cmd.current_dir(&vm.path);
@@ -84,6 +51,13 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
             args.push("--install".to_string());
         }
         BootMode::Cdrom(iso_path) => {
+            // Validate ISO path exists before attempting to launch
+            if !iso_path.exists() {
+                bail!("ISO file not found: {:?}", iso_path);
+            }
+            if !iso_path.is_file() {
+                bail!("ISO path is not a file: {:?}", iso_path);
+            }
             args.push("--cdrom".to_string());
             args.push(iso_path.to_string_lossy().to_string());
         }
@@ -128,13 +102,14 @@ pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
             .context("Failed to remove old disk")?;
 
         // Create new disk with backing file
+        let disk_str = path_to_str(disk_path)?;
         let output = Command::new("qemu-img")
             .args([
                 "create",
                 "-f", "qcow2",
                 "-F", "qcow2",
                 "-b", backing,
-                disk_path.to_str().unwrap_or(""),
+                disk_str,
             ])
             .output()
             .context("Failed to create disk from backing file")?;
