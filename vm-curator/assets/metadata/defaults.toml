@@ -1,11 +1,79 @@
 # Default OS metadata for vm-curator
-# This file is embedded at compile time
+# This file is embedded at compile time but can be overridden at runtime
+#
+# Fields:
+#   display_name - Full formatted name shown in VM list (with trademarks)
+#   name - Short name for info panel headers
+#   publisher - Company/organization
+#   release_date - Initial release date (YYYY-MM-DD)
+#   architecture - Target architecture (i386, x86_64, ppc, m68k, etc.)
+#   fun_facts - Array of interesting trivia
+#   blurb.short - One-line description
+#   blurb.long - Multi-paragraph description
+
+# =============================================================================
+# Microsoft DOS
+# =============================================================================
+
+[ms-dos]
+display_name = "Microsoft® MS-DOS"
+name = "MS-DOS"
+publisher = "Microsoft Corporation"
+release_date = "1981-08-12"
+architecture = "i386"
+fun_facts = [
+    "DOS was originally called QDOS (Quick and Dirty Operating System)",
+    "Microsoft paid $25,000 for the rights to DOS",
+    "IBM originally wanted to license CP/M from Digital Research",
+    "MS-DOS 4.01 was considered so buggy that many users downgraded"
+]
+
+[ms-dos.blurb]
+short = "The operating system that launched the PC revolution."
+long = """
+MS-DOS (Microsoft Disk Operating System) was the foundation of the IBM PC compatible ecosystem. Originally purchased from Seattle Computer Products as QDOS, Microsoft licensed it to IBM and later sold it directly.
+
+DOS provided a simple command-line interface with core utilities like DIR, COPY, and FORMAT. It remained relevant for over two decades and ran early versions of Windows."""
+
+[my-first-pc]
+display_name = "Microsoft® MS-DOS / Windows 3.1 (My First PC)"
+name = "My First PC (DOS + Windows 3.1)"
+publisher = "Microsoft Corporation"
+release_date = "1992-04-06"
+architecture = "i386"
+fun_facts = [
+    "Windows 3.1 required only 1 MB of RAM",
+    "The 'Solitaire' game was included to teach mouse skills",
+    "Minesweeper taught users about right-clicking"
+]
+install_steps = [
+    { number = 1, title = "Install MS-DOS", instructions = "Boot from DOS disk and run FDISK to partition, then FORMAT C: /S", boot_mode = "install", completion_hint = "You should see the C:\\> prompt" },
+    { number = 2, title = "Install Windows 3.1", instructions = "Insert Windows 3.1 disk and run SETUP from DOS", boot_mode = "normal", completion_hint = "Windows Program Manager should launch" }
+]
+
+[my-first-pc.blurb]
+short = "Experience the early 90s PC with DOS and Windows 3.1."
+long = """
+This VM recreates the classic early 1990s PC experience: booting to DOS and launching Windows 3.1. Windows 3.1 was the first commercially successful version of Windows, selling over 10 million copies in its first two months.
+
+Windows 3.1 introduced TrueType fonts, OLE (Object Linking and Embedding), and multimedia extensions. It was the version of Windows that finally convinced many users to leave DOS applications behind."""
+
+# =============================================================================
+# Microsoft Windows 9x
+# =============================================================================
 
 [windows-95]
+display_name = "Microsoft® Windows 95"
 name = "Windows 95"
 publisher = "Microsoft Corporation"
 release_date = "1995-08-24"
 architecture = "i386"
+fun_facts = [
+    "The startup sound was composed by Brian Eno in just one day",
+    "Microsoft paid $3 million to license 'Start Me Up' for the launch",
+    "The release was so anticipated that stores opened at midnight",
+    "Bill Gates personally demonstrated Windows 95 on The Tonight Show"
+]
 
 [windows-95.blurb]
 short = "The OS that changed everything - Start Menu, taskbar, and 32-bit computing for the masses."
@@ -16,19 +84,17 @@ Released on August 24, 1995, it was a consumer-oriented operating system that co
 
 Windows 95 introduced Plug and Play, long file names (up to 255 characters), and the Windows Explorer file manager. It was also the first Windows version to include Internet Explorer."""
 
-[windows-95.fun_facts]
-facts = [
-    "The startup sound was composed by Brian Eno in just one day",
-    "Microsoft paid $3 million to license 'Start Me Up' for the launch",
-    "The release was so anticipated that stores opened at midnight",
-    "Bill Gates personally demonstrated Windows 95 on The Tonight Show"
-]
-
 [windows-98]
+display_name = "Microsoft® Windows 98"
 name = "Windows 98"
 publisher = "Microsoft Corporation"
 release_date = "1998-06-25"
 architecture = "i386"
+fun_facts = [
+    "Windows 98 famously crashed during its live demo at COMDEX 1998",
+    "Bill Gates quipped 'That must be why we're not shipping Windows 98 yet'",
+    "It was the last version of Windows based on MS-DOS"
+]
 
 [windows-98.blurb]
 short = "The refined successor to Windows 95, bringing USB support and better internet integration."
@@ -37,18 +103,36 @@ Windows 98 built on the foundation of Windows 95, adding native USB support, FAT
 
 The Second Edition (SE) release in 1999 fixed many bugs and added Internet Connection Sharing, making it easier to share a single internet connection among multiple computers."""
 
-[windows-98.fun_facts]
-facts = [
-    "Windows 98 famously crashed during its live demo at COMDEX 1998",
-    "Bill Gates quipped 'That must be why we're not shipping Windows 98 yet'",
-    "It was the last version of Windows based on MS-DOS"
+[windows-98se]
+display_name = "Microsoft® Windows 98 Second Edition"
+name = "Windows 98 SE"
+publisher = "Microsoft Corporation"
+release_date = "1999-05-05"
+architecture = "i386"
+fun_facts = [
+    "Windows 98 SE was considered the most stable Windows 9x release",
+    "It added Internet Connection Sharing for home networks",
+    "Many users preferred it over Windows ME"
 ]
 
+[windows-98se.blurb]
+short = "The refined and more stable update to Windows 98."
+long = """
+Windows 98 Second Edition addressed many stability issues from the original release and added Internet Connection Sharing, allowing multiple computers to share a single internet connection.
+
+It became the preferred choice for many users who wanted the stability of NT but needed compatibility with DOS games and applications."""
+
 [windows-me]
+display_name = "Microsoft® Windows Me"
 name = "Windows Millennium Edition"
 publisher = "Microsoft Corporation"
 release_date = "2000-09-14"
 architecture = "i386"
+fun_facts = [
+    "ME stands for 'Millennium Edition'",
+    "It was only supported by Microsoft for 5 years",
+    "PC World named it the 4th worst tech product of all time"
+]
 
 [windows-me.blurb]
 short = "The final DOS-based Windows, known for System Restore and Windows Movie Maker."
@@ -57,18 +141,60 @@ Windows ME (Millennium Edition) was the last operating system in the Windows 9x 
 
 While criticized for stability issues, it removed real-mode DOS access in favor of a pure 32-bit environment. It served as a bridge between the consumer Windows 9x line and the NT-based Windows XP."""
 
-[windows-me.fun_facts]
-facts = [
-    "ME stands for 'Millennium Edition'",
-    "It was only supported by Microsoft for 5 years",
-    "PC World named it the 4th worst tech product of all time"
+# =============================================================================
+# Microsoft Windows NT Line
+# =============================================================================
+
+[windows-nt]
+display_name = "Microsoft® Windows NT 4.0"
+name = "Windows NT 4.0"
+publisher = "Microsoft Corporation"
+release_date = "1996-07-31"
+architecture = "i386"
+fun_facts = [
+    "NT originally stood for 'New Technology'",
+    "Windows NT 4.0 brought the Windows 95 interface to NT",
+    "It was the first Windows to support multiple CPUs"
 ]
 
+[windows-nt.blurb]
+short = "The enterprise-grade Windows with true 32-bit architecture."
+long = """
+Windows NT 4.0 brought the familiar Windows 95 user interface to the robust NT kernel. It was designed for business and enterprise use, offering better security and stability than the consumer Windows 9x line.
+
+NT 4.0 supported multiple processors and was available in both Workstation and Server editions."""
+
+[windows-2000]
+display_name = "Microsoft® Windows 2000"
+name = "Windows 2000"
+publisher = "Microsoft Corporation"
+release_date = "2000-02-17"
+architecture = "i386"
+fun_facts = [
+    "Windows 2000 was originally called Windows NT 5.0",
+    "It introduced Active Directory for enterprise management",
+    "The Plug and Play support finally matched Windows 98"
+]
+
+[windows-2000.blurb]
+short = "The bridge between NT 4.0 and XP, bringing enterprise features to a modern interface."
+long = """
+Windows 2000 unified the stability of Windows NT with improved hardware support and a refined user interface. It introduced Active Directory, the Encrypting File System, and much better Plug and Play support.
+
+Available in Professional, Server, Advanced Server, and Datacenter editions, it was widely adopted in enterprise environments."""
+
 [windows-xp]
+display_name = "Microsoft® Windows XP"
 name = "Windows XP"
 publisher = "Microsoft Corporation"
 release_date = "2001-10-25"
 architecture = "i386"
+fun_facts = [
+    "The default wallpaper 'Bliss' is an unedited photo of Napa Valley",
+    "Photographer Charles O'Rear took it with a medium format camera",
+    "XP stood for 'eXPerience'",
+    "Over 400 million copies were sold in its first five years"
+]
 
 [windows-xp.blurb]
 short = "The legendary NT-based consumer Windows that defined a generation of computing."
@@ -77,19 +203,40 @@ Windows XP unified Microsoft's consumer and business operating systems under the
 
 XP introduced Fast User Switching, ClearType font rendering, and Remote Desktop. It remained in use for over a decade, with extended support ending only in 2014."""
 
-[windows-xp.fun_facts]
-facts = [
-    "The default wallpaper 'Bliss' is an unedited photo of Napa Valley",
-    "Photographer Charles O'Rear took it with a medium format camera",
-    "XP stood for 'eXPerience'",
-    "Over 400 million copies were sold in its first five years"
+[windows-vista]
+display_name = "Microsoft® Windows Vista"
+name = "Windows Vista"
+publisher = "Microsoft Corporation"
+release_date = "2007-01-30"
+architecture = "x86_64"
+fun_facts = [
+    "Vista was in development for over 5 years",
+    "The Aero Glass interface required a capable GPU",
+    "User Account Control (UAC) was widely criticized at launch"
 ]
 
+[windows-vista.blurb]
+short = "The ambitious but controversial Windows with Aero Glass and enhanced security."
+long = """
+Windows Vista introduced the Aero Glass interface, User Account Control, Windows Search, and a completely redesigned networking stack. It was a major architectural overhaul from Windows XP.
+
+While criticized for high system requirements and UAC prompts, Vista laid the groundwork for the more successful Windows 7."""
+
+# =============================================================================
+# Microsoft Windows Modern
+# =============================================================================
+
 [windows-7]
+display_name = "Microsoft® Windows 7"
 name = "Windows 7"
 publisher = "Microsoft Corporation"
 release_date = "2009-10-22"
 architecture = "x86_64"
+fun_facts = [
+    "Windows 7 was codenamed 'Blackcomb' and later 'Vienna'",
+    "It sold over 100 million copies in its first six months",
+    "The Windows 7 release party kit became an internet meme"
+]
 
 [windows-7.blurb]
 short = "The refined successor to Vista, bringing the Aero interface and improved performance."
@@ -98,18 +245,55 @@ Windows 7 addressed many criticisms of Windows Vista with improved performance, 
 
 Windows 7 remained popular for years, becoming a benchmark for Windows usability. Many users held onto it even after Windows 8 and 10 were released."""
 
-[windows-7.fun_facts]
-facts = [
-    "Windows 7 was codenamed 'Blackcomb' and later 'Vienna'",
-    "It sold over 100 million copies in its first six months",
-    "The Windows 7 release party kit became an internet meme"
+[windows-8]
+display_name = "Microsoft® Windows 8"
+name = "Windows 8"
+publisher = "Microsoft Corporation"
+release_date = "2012-10-26"
+architecture = "x86_64"
+fun_facts = [
+    "Windows 8 removed the Start button, causing widespread backlash",
+    "The Metro/Modern UI was designed for touch screens",
+    "It was the first Windows to include a built-in app store"
 ]
 
+[windows-8.blurb]
+short = "The touch-focused Windows that controversially removed the Start Menu."
+long = """
+Windows 8 introduced the Metro (later Modern) UI with full-screen apps and live tiles, designed primarily for touch devices. The removal of the traditional Start Menu was highly controversial.
+
+Despite the UI changes, Windows 8 included significant under-the-hood improvements including faster boot times and better power management."""
+
+[windows-81]
+display_name = "Microsoft® Windows 8.1"
+name = "Windows 8.1"
+publisher = "Microsoft Corporation"
+release_date = "2013-10-17"
+architecture = "x86_64"
+fun_facts = [
+    "Windows 8.1 brought back the Start button (but not the menu)",
+    "It was offered as a free update from Windows 8",
+    "The update addressed many of the complaints about Windows 8"
+]
+
+[windows-81.blurb]
+short = "The refined Windows 8 with restored Start button and improved desktop experience."
+long = """
+Windows 8.1 addressed many complaints about Windows 8, restoring the Start button and allowing users to boot directly to the desktop. It also improved the Modern UI with better app management.
+
+The update was free for Windows 8 users and represented Microsoft's acknowledgment that the original design went too far."""
+
 [windows-10]
+display_name = "Microsoft® Windows 10"
 name = "Windows 10"
 publisher = "Microsoft Corporation"
 release_date = "2015-07-29"
 architecture = "x86_64"
+fun_facts = [
+    "Microsoft skipped Windows 9, supposedly due to legacy code checking for 'Windows 9*'",
+    "Windows 10 was offered as a free upgrade from Windows 7 and 8",
+    "The initial release was codenamed 'Threshold'"
+]
 
 [windows-10.blurb]
 short = "Microsoft's 'Windows as a Service' platform with continuous updates."
@@ -118,18 +302,17 @@ Windows 10 marked Microsoft's shift to 'Windows as a Service,' with continuous f
 
 The Universal Windows Platform (UWP) allowed apps to run across devices from phones to Xbox to desktop PCs."""
 
-[windows-10.fun_facts]
-facts = [
-    "Microsoft skipped Windows 9, supposedly due to legacy code checking for 'Windows 9*'",
-    "Windows 10 was offered as a free upgrade from Windows 7 and 8",
-    "The initial release was codenamed 'Threshold'"
-]
-
 [windows-11]
+display_name = "Microsoft® Windows 11"
 name = "Windows 11"
 publisher = "Microsoft Corporation"
 release_date = "2021-10-05"
 architecture = "x86_64"
+fun_facts = [
+    "Microsoft had previously said Windows 10 would be 'the last version of Windows'",
+    "The default wallpaper is an actual physical bloom created for the launch",
+    "The startup sound was composed to be 'calming' and play at 4kHz"
+]
 
 [windows-11.blurb]
 short = "The modern Windows with centered taskbar and Android app support."
@@ -138,18 +321,40 @@ Windows 11 introduced a centered Start Menu, rounded corners, and deeper Teams i
 
 Native Android app support through the Windows Subsystem for Android brought mobile apps to the desktop."""
 
-[windows-11.fun_facts]
-facts = [
-    "Microsoft had previously said Windows 10 would be 'the last version of Windows'",
-    "The default wallpaper is an actual physical bloom created for the launch",
-    "The startup sound was composed to be 'calming' and play at 4kHz"
+# =============================================================================
+# Apple Classic Mac OS
+# =============================================================================
+
+[mac-system6]
+display_name = "Apple® Macintosh System 6"
+name = "Macintosh System 6"
+publisher = "Apple Computer, Inc."
+release_date = "1988-04-01"
+architecture = "m68k"
+fun_facts = [
+    "System 6 was the last Mac OS to fit on a single 800K floppy",
+    "MultiFinder allowed running multiple applications",
+    "It was known for its stability and speed"
 ]
 
+[mac-system6.blurb]
+short = "The refined classic Mac OS known for stability and MultiFinder."
+long = """
+System 6 was a refined and stable release that introduced MultiFinder, allowing users to run multiple applications simultaneously. It was widely praised for its performance and reliability.
+
+System 6 remained popular even after System 7's release due to its lower memory requirements."""
+
 [mac-system7]
+display_name = "Apple® Macintosh System 7"
 name = "Macintosh System 7"
 publisher = "Apple Computer, Inc."
 release_date = "1991-05-13"
 architecture = "m68k"
+fun_facts = [
+    "System 7 was the last Mac OS to be sold in floppy disk format",
+    "It introduced the 'happy Mac' startup icon that lasted until OS X",
+    "The 'About This Macintosh' dialog egg hid the names of developers"
+]
 
 [mac-system7.blurb]
 short = "The first Mac OS to support 32-bit addressing and virtual memory."
@@ -158,18 +363,36 @@ System 7 was a major release for the Macintosh, introducing 32-bit addressing, v
 
 System 7 was the first Mac OS to require a hard drive and 2 MB of RAM minimum. The Finder was completely rewritten and introduced the familiar spatial metaphor."""
 
-[mac-system7.fun_facts]
-facts = [
-    "System 7 was the last Mac OS to be sold in floppy disk format",
-    "It introduced the 'happy Mac' startup icon that lasted until OS X",
-    "The 'About This Macintosh' dialog egg hid the names of developers"
+[mac-os8]
+display_name = "Apple® Mac OS 8"
+name = "Mac OS 8"
+publisher = "Apple Computer, Inc."
+release_date = "1997-07-26"
+architecture = "ppc"
+fun_facts = [
+    "Mac OS 8 was one of Apple's best-selling software products ever",
+    "It sold over 1.2 million copies in its first two weeks",
+    "The Platinum appearance was a major visual refresh"
 ]
 
+[mac-os8.blurb]
+short = "The Mac OS that saved Apple with its Platinum interface."
+long = """
+Mac OS 8 introduced the Platinum appearance and a more modern multithreaded Finder. Released during Apple's difficult years, it was a commercial success that helped keep the company afloat.
+
+The update brought spring-loaded folders, contextual menus, and improved AppleScript support."""
+
 [mac-os9]
+display_name = "Apple® Mac OS 9"
 name = "Mac OS 9"
 publisher = "Apple Computer, Inc."
 release_date = "1999-10-23"
-architecture = "m68k/ppc"
+architecture = "ppc"
+fun_facts = [
+    "Mac OS 9 could run in 'Classic' mode within Mac OS X",
+    "It was the last Mac OS to support 68k processors (in software)",
+    "Apple sold 1.6 million copies in the first two weeks"
+]
 
 [mac-os9.blurb]
 short = "The final 'Classic' Mac OS before the Unix-based Mac OS X."
@@ -178,18 +401,21 @@ Mac OS 9 was marketed as 'the best internet operating system ever' and introduce
 
 Steve Jobs famously held a mock funeral for Mac OS 9 at WWDC 2002, marking Apple's full transition to OS X."""
 
-[mac-os9.fun_facts]
-facts = [
-    "Mac OS 9 could run in 'Classic' mode within Mac OS X",
-    "It was the last Mac OS to support 68k processors (in software)",
-    "Apple sold 1.6 million copies in the first two weeks"
-]
+# =============================================================================
+# Apple Mac OS X / macOS
+# =============================================================================
 
 [mac-osx-tiger]
+display_name = "Apple® Mac OS X Tiger"
 name = "Mac OS X Tiger"
 publisher = "Apple Computer, Inc."
 release_date = "2005-04-29"
 architecture = "ppc"
+fun_facts = [
+    "Tiger was the longest-running version of Mac OS X at over 2.5 years",
+    "It was used for the first Intel-based Macs (though released for PPC)",
+    "Dashboard was heavily inspired by the Konfabulator widget engine"
+]
 
 [mac-osx-tiger.blurb]
 short = "The Unix-based Mac with Spotlight search and Dashboard widgets."
@@ -198,18 +424,116 @@ Mac OS X 10.4 Tiger introduced Spotlight desktop search, Dashboard widgets, Auto
 
 Tiger was considered a major step forward for Mac OS X, bringing system-wide search and making the Unix underpinnings more accessible through Automator."""
 
-[mac-osx-tiger.fun_facts]
-facts = [
-    "Tiger was the longest-running version of Mac OS X at over 2.5 years",
-    "It was used for the first Intel-based Macs (though released for PPC)",
-    "Dashboard was heavily inspired by the Konfabulator widget engine"
+[mac-osx-leopard]
+display_name = "Apple® Mac OS X Leopard"
+name = "Mac OS X Leopard"
+publisher = "Apple Inc."
+release_date = "2007-10-26"
+architecture = "x86_64"
+fun_facts = [
+    "Leopard was the first Mac OS X to run on Intel Macs only (initially)",
+    "Time Machine made backups accessible to average users",
+    "It introduced Spaces for virtual desktops"
 ]
 
+[mac-osx-leopard.blurb]
+short = "The Mac OS X with Time Machine backups and Spaces virtual desktops."
+long = """
+Mac OS X 10.5 Leopard introduced Time Machine for automated backups, Spaces for virtual desktops, and Quick Look for file previews. It was a significant update with over 300 new features.
+
+Leopard was certified as Unix 03 compliant, making it an official Unix operating system."""
+
+[mac-osx-snow-leopard]
+display_name = "Apple® Mac OS X Snow Leopard"
+name = "Mac OS X Snow Leopard"
+publisher = "Apple Inc."
+release_date = "2009-08-28"
+architecture = "x86_64"
+fun_facts = [
+    "Snow Leopard focused on refinement rather than new features",
+    "It reduced the OS footprint by 7GB",
+    "Grand Central Dispatch improved multi-core CPU utilization"
+]
+
+[mac-osx-snow-leopard.blurb]
+short = "The 'no new features' Mac OS X focused on performance and polish."
+long = """
+Mac OS X 10.6 Snow Leopard was marketed as having 'zero new features' and instead focused on performance improvements, bug fixes, and reducing the OS footprint.
+
+It introduced Grand Central Dispatch for better multi-core performance and was the last Mac OS X to support PowerPC applications through Rosetta."""
+
+# =============================================================================
+# Linux Distributions
+# =============================================================================
+
+[linux-arch]
+display_name = "Arch Linux (rolling)"
+name = "Arch Linux"
+publisher = "Arch Linux Community"
+release_date = "2002-03-11"
+architecture = "x86_64"
+fun_facts = [
+    "Arch follows a rolling release model with no version numbers",
+    "The Arch Wiki is considered one of the best Linux documentation resources",
+    "Arch's philosophy is 'Keep It Simple, Stupid' (KISS)"
+]
+
+[linux-arch.blurb]
+short = "A lightweight, flexible Linux distribution for experienced users."
+long = """
+Arch Linux is a minimalist, rolling-release distribution that gives users complete control over their system. It follows the KISS principle and provides a simple base for users to build their ideal system.
+
+The Arch Wiki is renowned as one of the most comprehensive Linux documentation resources, useful for users of many distributions."""
+
+[linux-manjaro]
+display_name = "Manjaro Linux (rolling)"
+name = "Manjaro Linux"
+publisher = "Manjaro GmbH & Co. KG"
+release_date = "2011-07-10"
+architecture = "x86_64"
+fun_facts = [
+    "Manjaro delays Arch packages for additional testing",
+    "It offers official editions with Xfce, KDE, and GNOME",
+    "The name comes from Mount Kilimanjaro"
+]
+
+[linux-manjaro.blurb]
+short = "A user-friendly Arch-based distribution with curated rolling updates."
+long = """
+Manjaro brings Arch Linux's rolling release model to a more accessible package. It delays Arch repository updates to provide additional testing and stability.
+
+With official support for multiple desktop environments and a graphical installer, Manjaro makes Arch-based Linux accessible to newcomers."""
+
+[linux-endeavouros]
+display_name = "EndeavourOS (rolling)"
+name = "EndeavourOS"
+publisher = "EndeavourOS Team"
+release_date = "2019-07-15"
+architecture = "x86_64"
+fun_facts = [
+    "EndeavourOS is the spiritual successor to Antergos",
+    "It aims to be 'Arch without the hassle'",
+    "The community is known for being welcoming to newcomers"
+]
+
+[linux-endeavouros.blurb]
+short = "A terminal-centric Arch-based distro with a friendly community."
+long = """
+EndeavourOS provides a near-vanilla Arch experience with a graphical installer and helpful community. It emerged after the discontinuation of Antergos.
+
+Unlike Manjaro, EndeavourOS uses Arch repositories directly, providing the latest packages immediately."""
+
 [linux-fedora]
+display_name = "Fedora Linux"
 name = "Fedora Linux"
 publisher = "Red Hat / Fedora Project"
 release_date = "2003-11-06"
 architecture = "x86_64"
+fun_facts = [
+    "Fedora is named after Red Hat's fedora logo",
+    "Linus Torvalds uses Fedora as his primary desktop",
+    "Fedora Silverblue offers an immutable desktop variant"
+]
 
 [linux-fedora.blurb]
 short = "A cutting-edge Linux distribution sponsored by Red Hat."
@@ -218,56 +542,1512 @@ Fedora is a community-driven Linux distribution sponsored by Red Hat that serves
 
 Fedora was one of the first distributions to adopt GNOME 3, systemd, and Wayland. It follows a roughly six-month release cycle."""
 
-[linux-fedora.fun_facts]
-facts = [
-    "Fedora is named after Red Hat's fedora logo",
-    "Linus Torvalds uses Fedora as his primary desktop",
-    "Fedora Silverblue offers an immutable desktop variant"
+[linux-ubuntu]
+display_name = "Ubuntu"
+name = "Ubuntu"
+publisher = "Canonical Ltd."
+release_date = "2004-10-20"
+architecture = "x86_64"
+fun_facts = [
+    "Ubuntu means 'humanity to others' in Zulu and Xhosa",
+    "Mark Shuttleworth funded Ubuntu after selling Thawte to VeriSign",
+    "Each release is named after an alliterative animal"
 ]
 
-[ms-dos]
-name = "MS-DOS"
-publisher = "Microsoft Corporation"
-release_date = "1981-08-12"
-architecture = "i386"
-
-[ms-dos.blurb]
-short = "The operating system that launched the PC revolution."
+[linux-ubuntu.blurb]
+short = "The most popular desktop Linux distribution."
 long = """
-MS-DOS (Microsoft Disk Operating System) was the foundation of the IBM PC compatible ecosystem. Originally purchased from Seattle Computer Products as QDOS, Microsoft licensed it to IBM and later sold it directly.
+Ubuntu brought Linux to mainstream users with its focus on ease of use and regular release schedule. Based on Debian, it offers LTS (Long Term Support) releases every two years.
 
-DOS provided a simple command-line interface with core utilities like DIR, COPY, and FORMAT. It remained relevant for over two decades and ran early versions of Windows."""
+Ubuntu pioneered many Linux desktop innovations and remains the most widely used Linux distribution for desktops and servers."""
 
-[ms-dos.fun_facts]
-facts = [
-    "DOS was originally called QDOS (Quick and Dirty Operating System)",
-    "Microsoft paid $25,000 for the rights to DOS",
-    "IBM originally wanted to license CP/M from Digital Research",
-    "MS-DOS 4.01 was considered so buggy that many users downgraded"
+[linux-debian]
+display_name = "Debian GNU/Linux"
+name = "Debian"
+publisher = "Debian Project"
+release_date = "1993-08-16"
+architecture = "x86_64"
+fun_facts = [
+    "Debian is named after founder Ian Murdock and his wife Debra",
+    "It's the basis for Ubuntu, Linux Mint, and many other distributions",
+    "Debian releases are named after Toy Story characters"
 ]
 
-[my-first-pc]
-name = "My First PC (DOS + Windows 3.1)"
-publisher = "Microsoft Corporation"
-release_date = "1992-04-06"
-architecture = "i386"
-
-[my-first-pc.blurb]
-short = "Experience the early 90s PC with DOS and Windows 3.1."
+[linux-debian.blurb]
+short = "The universal operating system known for stability and freedom."
 long = """
-This VM recreates the classic early 1990s PC experience: booting to DOS and launching Windows 3.1. Windows 3.1 was the first commercially successful version of Windows, selling over 10 million copies in its first two months.
+Debian is one of the oldest and most influential Linux distributions, serving as the foundation for Ubuntu and many others. It's known for its stability, extensive package repository, and commitment to free software.
 
-Windows 3.1 introduced TrueType fonts, OLE (Object Linking and Embedding), and multimedia extensions. It was the version of Windows that finally convinced many users to leave DOS applications behind."""
+The Debian Social Contract and Free Software Guidelines have influenced the broader open source community."""
 
-[my-first-pc.install_steps]
-steps = [
-    { number = 1, title = "Install MS-DOS", instructions = "Boot from DOS disk and run FDISK to partition, then FORMAT C: /S", boot_mode = "install", completion_hint = "You should see the C:\\> prompt" },
-    { number = 2, title = "Install Windows 3.1", instructions = "Insert Windows 3.1 disk and run SETUP from DOS", boot_mode = "normal", completion_hint = "Windows Program Manager should launch" }
+[linux-mint]
+display_name = "Linux Mint"
+name = "Linux Mint"
+publisher = "Linux Mint Team"
+release_date = "2006-08-27"
+architecture = "x86_64"
+fun_facts = [
+    "Linux Mint started as an Ubuntu derivative",
+    "The Cinnamon desktop was created specifically for Mint",
+    "It's often recommended for Windows users switching to Linux"
 ]
 
-[my-first-pc.fun_facts]
-facts = [
-    "Windows 3.1 required only 1 MB of RAM",
-    "The 'Solitaire' game was included to teach mouse skills",
-    "Minesweeper taught users about right-clicking"
+[linux-mint.blurb]
+short = "A user-friendly Ubuntu-based distribution with the Cinnamon desktop."
+long = """
+Linux Mint focuses on providing a complete out-of-the-box experience with proprietary codecs and drivers pre-installed. The Cinnamon desktop provides a traditional desktop experience.
+
+Mint is frequently recommended for users migrating from Windows due to its familiar interface and ease of use."""
+
+[linux-suse]
+display_name = "openSUSE Tumbleweed (rolling)"
+name = "openSUSE Tumbleweed"
+publisher = "openSUSE Project / SUSE"
+release_date = "2014-11-04"
+architecture = "x86_64"
+fun_facts = [
+    "Tumbleweed is a rolling release, while Leap follows a fixed schedule",
+    "YaST is one of the most comprehensive system configuration tools",
+    "The chameleon mascot is named Geeko"
 ]
+
+[linux-suse.blurb]
+short = "A rolling-release distribution with enterprise-grade tools."
+long = """
+openSUSE Tumbleweed provides a rolling release with the latest stable packages, backed by the openSUSE Build Service and automated testing through openQA.
+
+It features YaST, a comprehensive system administration tool, and benefits from SUSE's enterprise Linux development."""
+
+[linux-opensuse-leap]
+display_name = "openSUSE Leap"
+name = "openSUSE Leap"
+publisher = "openSUSE Project / SUSE"
+release_date = "2015-11-04"
+architecture = "x86_64"
+fun_facts = [
+    "Leap shares its core with SUSE Linux Enterprise",
+    "It bridges community and enterprise Linux",
+    "Major versions align with SLE releases"
+]
+
+[linux-opensuse-leap.blurb]
+short = "A stable, regular-release openSUSE with enterprise foundations."
+long = """
+openSUSE Leap combines community packages with the core of SUSE Linux Enterprise, providing a stable base with regular releases.
+
+It's ideal for users who want openSUSE's tools and community but prefer predictable release cycles over rolling updates."""
+
+[linux-gentoo]
+display_name = "Gentoo Linux (rolling)"
+name = "Gentoo Linux"
+publisher = "Gentoo Foundation"
+release_date = "2002-03-31"
+architecture = "x86_64"
+fun_facts = [
+    "Gentoo compiles all software from source by default",
+    "USE flags allow fine-grained control over features",
+    "The name comes from the Gentoo penguin"
+]
+
+[linux-gentoo.blurb]
+short = "A source-based distribution offering extreme customization."
+long = """
+Gentoo Linux compiles all software from source, allowing users to optimize for their specific hardware and enable only the features they need. The Portage package manager and USE flags provide unparalleled customization.
+
+While requiring more expertise and time, Gentoo offers deep insight into how Linux systems work."""
+
+[linux-void]
+display_name = "Void Linux (rolling)"
+name = "Void Linux"
+publisher = "Void Linux Contributors"
+release_date = "2008-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Void uses runit instead of systemd",
+    "It maintains its own package repository (not based on others)",
+    "XBPS is one of the fastest package managers"
+]
+
+[linux-void.blurb]
+short = "An independent rolling-release distribution with runit and XBPS."
+long = """
+Void Linux is an independent distribution featuring the runit init system and XBPS package manager. It's not based on any other distribution and maintains its own package repository.
+
+Void is popular among users who prefer alternatives to systemd while still wanting a modern, rolling-release system."""
+
+[linux-nixos]
+display_name = "NixOS (rolling)"
+name = "NixOS"
+publisher = "NixOS Foundation"
+release_date = "2003-06-01"
+architecture = "x86_64"
+fun_facts = [
+    "NixOS configuration is fully declarative",
+    "You can roll back to any previous system configuration",
+    "The Nix package manager can be used on other Linux distros and macOS"
+]
+
+[linux-nixos.blurb]
+short = "A declarative Linux distribution with atomic upgrades and rollbacks."
+long = """
+NixOS takes a unique approach where the entire system is configured declaratively in a single file. This enables atomic upgrades, rollbacks, and reproducible system configurations.
+
+The Nix package manager allows multiple versions of packages to coexist and ensures builds are reproducible."""
+
+[nix-os]
+display_name = "NixOS"
+name = "NixOS"
+publisher = "NixOS Foundation"
+release_date = "2003-06-01"
+architecture = "x86_64"
+fun_facts = [
+    "NixOS configuration is fully declarative - your entire system is defined in a single file",
+    "You can roll back to any previous system configuration instantly",
+    "The Nix package manager can be used on other Linux distros and macOS",
+    "NixOS guarantees that installing a package won't break other packages"
+]
+
+[nix-os.blurb]
+short = "A declarative Linux distribution with atomic upgrades and rollbacks."
+long = """
+NixOS takes a radically different approach to system configuration. Instead of modifying system state imperatively, the entire system is configured declaratively in a single configuration.nix file.
+
+This enables powerful features like atomic upgrades (the system either fully updates or not at all), instant rollbacks to any previous configuration, and perfectly reproducible system builds. If a configuration works on one machine, it will work identically on another.
+
+The underlying Nix package manager uses a functional approach where packages are stored in isolation and never overwrite each other, eliminating dependency conflicts entirely."""
+
+# =============================================================================
+# IBM OS/2
+# =============================================================================
+
+[os2-warp3]
+display_name = "IBM® OS/2 Warp 3"
+name = "OS/2 Warp 3"
+publisher = "IBM Corporation"
+release_date = "1994-10-01"
+architecture = "i386"
+fun_facts = [
+    "Warp 3 was named after Star Trek's warp drive",
+    "It included a BonusPak with productivity applications",
+    "IBM marketed it as 'a better DOS than DOS, a better Windows than Windows'"
+]
+
+[os2-warp3.blurb]
+short = "IBM's 32-bit operating system that competed with Windows 95."
+long = """
+OS/2 Warp 3 was IBM's attempt to bring OS/2 to mainstream users. It could run DOS and 16-bit Windows applications better than Windows itself, and offered true preemptive multitasking.
+
+Despite technical superiority in many areas, OS/2 struggled against Microsoft's marketing and Windows 95's momentum."""
+
+[os2-warp4]
+display_name = "IBM® OS/2 Warp 4"
+name = "OS/2 Warp 4"
+publisher = "IBM Corporation"
+release_date = "1996-09-25"
+architecture = "i386"
+fun_facts = [
+    "Warp 4 included voice recognition with VoiceType",
+    "The Workplace Shell was one of the most customizable desktop environments",
+    "OS/2 continued in ATMs and industrial systems for decades"
+]
+
+[os2-warp4.blurb]
+short = "The final major OS/2 release with voice recognition and Java support."
+long = """
+OS/2 Warp 4 added voice recognition, Java support, and the OpenDoc compound document framework. It represented IBM's final major push for the desktop market.
+
+While it failed on the desktop, OS/2 found a lasting niche in ATMs, point-of-sale systems, and industrial applications where its stability was valued."""
+
+# =============================================================================
+# BSD Family
+# =============================================================================
+
+[freebsd]
+display_name = "FreeBSD"
+name = "FreeBSD"
+publisher = "The FreeBSD Project"
+release_date = "1993-11-01"
+architecture = "x86_64"
+fun_facts = [
+    "FreeBSD powers Netflix's content delivery network",
+    "PlayStation 4 and 5 operating systems are based on FreeBSD",
+    "WhatsApp's infrastructure runs on FreeBSD"
+]
+
+[freebsd.blurb]
+short = "A free Unix-like operating system descended from BSD Unix."
+long = """
+FreeBSD is a free and open-source Unix-like operating system descended from the Berkeley Software Distribution (BSD). It's known for its advanced networking, security features, and performance.
+
+FreeBSD's ports collection contains over 30,000 applications and the system is widely used for servers, embedded systems, and as the basis for other operating systems."""
+
+[openbsd]
+display_name = "OpenBSD"
+name = "OpenBSD"
+publisher = "The OpenBSD Project"
+release_date = "1996-10-01"
+architecture = "x86_64"
+fun_facts = [
+    "OpenBSD has had only two remote holes in the default install in over 20 years",
+    "OpenSSH was developed by the OpenBSD project",
+    "The project releases a new song with each version"
+]
+
+[openbsd.blurb]
+short = "A security-focused BSD operating system."
+long = """
+OpenBSD is known for its focus on security, code correctness, and proactive security features. It pioneered many security technologies including OpenSSH, PF firewall, and various memory protection features.
+
+The project follows a strict policy of code auditing and has a reputation for clean, well-documented code."""
+
+[netbsd]
+display_name = "NetBSD"
+name = "NetBSD"
+publisher = "The NetBSD Foundation"
+release_date = "1993-04-19"
+architecture = "x86_64"
+fun_facts = [
+    "NetBSD's motto is 'Of course it runs NetBSD'",
+    "It has been ported to over 50 hardware platforms",
+    "NetBSD was the first BSD to support 64-bit processors"
+]
+
+[netbsd.blurb]
+short = "A highly portable BSD operating system."
+long = """
+NetBSD is known for its portability, supporting more hardware platforms than any other operating system. Its clean design and well-documented code make it popular for embedded systems and research.
+
+The pkgsrc package system originated in NetBSD and is now used on many other platforms."""
+
+[dragonflybsd]
+display_name = "DragonFly BSD"
+name = "DragonFly BSD"
+publisher = "DragonFly BSD Project"
+release_date = "2004-07-12"
+architecture = "x86_64"
+fun_facts = [
+    "DragonFly was forked from FreeBSD 4.8",
+    "It features the unique HAMMER filesystem",
+    "The kernel uses a different threading model than other BSDs"
+]
+
+[dragonflybsd.blurb]
+short = "A BSD with unique clustering and filesystem capabilities."
+long = """
+DragonFly BSD was forked from FreeBSD to explore different approaches to SMP, clustering, and filesystems. It features the HAMMER filesystem with built-in mirroring and history.
+
+The system is designed for high-performance computing and provides unique features for managing large storage systems."""
+
+[ghostbsd]
+display_name = "GhostBSD"
+name = "GhostBSD"
+publisher = "GhostBSD Project"
+release_date = "2009-11-20"
+architecture = "x86_64"
+fun_facts = [
+    "GhostBSD aims to be a user-friendly FreeBSD desktop",
+    "It uses the MATE desktop environment by default",
+    "Originally based on GNOME, then switched to MATE"
+]
+
+[ghostbsd.blurb]
+short = "A user-friendly FreeBSD-based desktop operating system."
+long = """
+GhostBSD provides a simple, elegant desktop experience based on FreeBSD. It comes with a pre-configured desktop environment and graphical tools for system administration.
+
+The distribution aims to make BSD accessible to users coming from Linux or other operating systems."""
+
+# =============================================================================
+# Unix Family - Solaris / illumos
+# =============================================================================
+
+[solaris]
+display_name = "Oracle Solaris"
+name = "Solaris"
+publisher = "Oracle Corporation"
+release_date = "1992-06-01"
+architecture = "x86_64"
+fun_facts = [
+    "Solaris introduced ZFS, now used by many operating systems",
+    "DTrace, a dynamic tracing framework, originated in Solaris",
+    "Sun Microsystems originally developed Solaris"
+]
+
+[solaris.blurb]
+short = "A Unix operating system known for ZFS and DTrace."
+long = """
+Solaris is a Unix operating system originally developed by Sun Microsystems, now owned by Oracle. It introduced revolutionary technologies like ZFS, DTrace, and Zones containers.
+
+Solaris was widely used in enterprise environments for its reliability, scalability, and advanced features."""
+
+[solaris-10]
+display_name = "Sun Solaris 10"
+name = "Solaris 10"
+publisher = "Sun Microsystems"
+release_date = "2005-01-31"
+architecture = "x86_64"
+fun_facts = [
+    "Solaris 10 introduced ZFS to the world",
+    "It was the first Solaris to include DTrace",
+    "Zones containerization was introduced in Solaris 10"
+]
+
+[solaris-10.blurb]
+short = "The landmark Solaris release with ZFS, DTrace, and Zones."
+long = """
+Solaris 10 was a revolutionary release that introduced ZFS (Zettabyte File System), DTrace for dynamic tracing, and Zones for OS-level virtualization.
+
+This version significantly improved x86 support and was made available for free download, increasing adoption."""
+
+[openindiana]
+display_name = "OpenIndiana"
+name = "OpenIndiana"
+publisher = "OpenIndiana Project"
+release_date = "2010-09-14"
+architecture = "x86_64"
+fun_facts = [
+    "OpenIndiana is the continuation of OpenSolaris",
+    "It maintains binary compatibility with Solaris",
+    "The project preserves Solaris technologies as open source"
+]
+
+[openindiana.blurb]
+short = "An open-source illumos distribution continuing OpenSolaris."
+long = """
+OpenIndiana is a community-driven illumos distribution that aims to continue the legacy of OpenSolaris. It provides ZFS, DTrace, and Zones in an open-source package.
+
+The distribution serves both desktop and server use cases while maintaining compatibility with Solaris software."""
+
+# =============================================================================
+# Commodore / Amiga
+# =============================================================================
+
+[amigaos]
+display_name = "Commodore AmigaOS"
+name = "AmigaOS"
+publisher = "Commodore International"
+release_date = "1985-07-23"
+architecture = "m68k"
+fun_facts = [
+    "AmigaOS was the first multitasking personal computer OS with a GUI",
+    "The Amiga was used extensively for video production and gaming",
+    "AmigaOS 4.x continues development for PowerPC hardware"
+]
+
+[amigaos.blurb]
+short = "The pioneering multitasking OS for the Commodore Amiga."
+long = """
+AmigaOS was revolutionary for its time, offering preemptive multitasking, a sophisticated GUI, and advanced multimedia capabilities in 1985. The Amiga's custom chips made it a powerhouse for graphics and sound.
+
+The system was popular among video professionals, game developers, and demoscene artists. AmigaOS development continues today for PowerPC-based systems."""
+
+[aros]
+display_name = "AROS Research Operating System"
+name = "AROS"
+publisher = "AROS Development Team"
+release_date = "1995-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "AROS aims to be API-compatible with AmigaOS 3.1",
+    "It can run on x86, ARM, and 68k processors",
+    "AROS is open source and freely available"
+]
+
+[aros.blurb]
+short = "An open-source AmigaOS-compatible operating system."
+long = """
+AROS (AROS Research Operating System) is a free, open-source implementation of the AmigaOS 3.1 API. It allows Amiga software to run on modern x86 and ARM hardware.
+
+The project aims to preserve Amiga software compatibility while extending the system with modern features."""
+
+[morphos]
+display_name = "MorphOS"
+name = "MorphOS"
+publisher = "MorphOS Development Team"
+release_date = "2000-08-19"
+architecture = "ppc"
+fun_facts = [
+    "MorphOS runs on PowerPC-based Macs and Amiga hardware",
+    "It includes a compatibility layer for AmigaOS software",
+    "The Ambient desktop is known for its aesthetic design"
+]
+
+[morphos.blurb]
+short = "A lightweight, Amiga-compatible OS for PowerPC systems."
+long = """
+MorphOS is a mixed proprietary and open-source operating system for PowerPC processors, compatible with Amiga software. It features the elegant Ambient desktop environment.
+
+MorphOS runs on various PowerPC Macs and dedicated Amiga hardware, offering modern features while maintaining Amiga compatibility."""
+
+# =============================================================================
+# Be / Haiku
+# =============================================================================
+
+[beos]
+display_name = "Be BeOS"
+name = "BeOS"
+publisher = "Be Inc."
+release_date = "1995-10-03"
+architecture = "i386"
+fun_facts = [
+    "Apple nearly acquired Be Inc. to replace Mac OS",
+    "BeOS was designed from scratch for multimedia",
+    "The BeFS filesystem supported metadata attributes before other OSes"
+]
+
+[beos.blurb]
+short = "A multimedia-focused operating system from Be Inc."
+long = """
+BeOS was designed from the ground up for digital media work, with a modern microkernel, pervasive multithreading, and a 64-bit journaling filesystem. It could handle multiple audio and video streams simultaneously.
+
+Apple considered acquiring Be Inc. before choosing NeXT instead. BeOS was ahead of its time in many respects."""
+
+[haiku]
+display_name = "Haiku"
+name = "Haiku"
+publisher = "Haiku, Inc."
+release_date = "2001-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Haiku is a complete reimplementation of BeOS",
+    "It achieved binary compatibility with BeOS R5 applications",
+    "The first beta was released in 2018 after 17 years of development"
+]
+
+[haiku.blurb]
+short = "An open-source reimplementation of BeOS."
+long = """
+Haiku is a free and open-source operating system compatible with BeOS. It faithfully recreates BeOS's responsive, multimedia-focused design while adding modern features.
+
+The project preserves BeOS's unique approach to desktop computing, including its innovative API and filesystem."""
+
+# =============================================================================
+# NeXT
+# =============================================================================
+
+[nextstep]
+display_name = "NeXTSTEP"
+name = "NeXTSTEP"
+publisher = "NeXT Computer, Inc."
+release_date = "1989-09-18"
+architecture = "m68k"
+fun_facts = [
+    "NeXTSTEP was created by Steve Jobs after leaving Apple",
+    "The World Wide Web was invented on a NeXT computer",
+    "Apple acquired NeXT and used NeXTSTEP as the basis for Mac OS X"
+]
+
+[nextstep.blurb]
+short = "The innovative Unix-based OS that became the foundation of macOS."
+long = """
+NeXTSTEP was a revolutionary object-oriented operating system developed by Steve Jobs's NeXT Computer. It introduced Interface Builder, the Dock, and many concepts still used in macOS today.
+
+Tim Berners-Lee created the World Wide Web on a NeXTcube. Apple acquired NeXT in 1996, and NeXTSTEP evolved into Mac OS X."""
+
+[openstep]
+display_name = "OpenStep"
+name = "OpenStep"
+publisher = "NeXT / Sun Microsystems"
+release_date = "1994-09-01"
+architecture = "i386"
+fun_facts = [
+    "OpenStep was a joint specification by NeXT and Sun",
+    "It could run on multiple Unix platforms",
+    "GNUstep is an open-source implementation of OpenStep"
+]
+
+[openstep.blurb]
+short = "A portable version of NeXTSTEP's API specification."
+long = """
+OpenStep was an open specification created by NeXT and Sun Microsystems, defining a portable object-oriented API. It allowed NeXTSTEP applications to run on Solaris and other platforms.
+
+The OpenStep specification heavily influenced Cocoa and is still implemented by the GNUstep project."""
+
+# =============================================================================
+# Research Operating Systems
+# =============================================================================
+
+[plan9]
+display_name = "Plan 9 from Bell Labs"
+name = "Plan 9"
+publisher = "Bell Labs"
+release_date = "1992-01-01"
+architecture = "i386"
+fun_facts = [
+    "Plan 9 influenced the development of UTF-8 encoding",
+    "Everything in Plan 9 is represented as a file",
+    "The name comes from the Ed Wood film 'Plan 9 from Outer Space'"
+]
+
+[plan9.blurb]
+short = "A distributed operating system from Bell Labs."
+long = """
+Plan 9 from Bell Labs was designed as the successor to Unix, taking the 'everything is a file' concept to its logical conclusion. Resources across the network appear as local files.
+
+Plan 9 introduced many concepts later adopted by Linux and other systems, including /proc, UTF-8, and the 9P protocol."""
+
+[inferno]
+display_name = "Inferno"
+name = "Inferno"
+publisher = "Bell Labs / Vita Nuova"
+release_date = "1996-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Inferno uses the Limbo programming language",
+    "It can run hosted on other operating systems",
+    "The Dis virtual machine predates Java's widespread adoption"
+]
+
+[inferno.blurb]
+short = "A distributed OS using virtual machines, from Bell Labs."
+long = """
+Inferno is a distributed operating system originally from Bell Labs. It runs on a virtual machine called Dis and uses the Limbo programming language.
+
+Inferno can run either natively or hosted on other operating systems, making it highly portable."""
+
+# =============================================================================
+# Alternative Operating Systems
+# =============================================================================
+
+[reactos]
+display_name = "ReactOS"
+name = "ReactOS"
+publisher = "ReactOS Foundation"
+release_date = "1998-01-01"
+architecture = "i386"
+fun_facts = [
+    "ReactOS aims to be binary-compatible with Windows",
+    "It can run many Windows applications and drivers",
+    "Development started as a Windows 95 clone in 1996"
+]
+
+[reactos.blurb]
+short = "A free, open-source operating system compatible with Windows."
+long = """
+ReactOS is an open-source operating system aiming for binary compatibility with Windows applications and drivers. It's built from scratch, not using any Microsoft code.
+
+The project allows running Windows software on a free operating system and is useful for understanding Windows internals."""
+
+[serenityos]
+display_name = "SerenityOS"
+name = "SerenityOS"
+publisher = "SerenityOS Developers"
+release_date = "2018-10-10"
+architecture = "x86_64"
+fun_facts = [
+    "SerenityOS was started as a recovery project by Andreas Kling",
+    "It includes a web browser, office apps, and games",
+    "The system has a retro 1990s aesthetic"
+]
+
+[serenityos.blurb]
+short = "A love letter to 90s user interfaces with modern capabilities."
+long = """
+SerenityOS is a from-scratch operating system with a nostalgic 90s look and feel. It includes a web browser (Ladybird), office suite, games, and development tools.
+
+The project emphasizes learning and fun, with everything written from scratch including the kernel, GUI toolkit, and applications."""
+
+[redoxos]
+display_name = "Redox OS"
+name = "Redox OS"
+publisher = "Redox OS Developers"
+release_date = "2015-04-20"
+architecture = "x86_64"
+fun_facts = [
+    "Redox is written almost entirely in Rust",
+    "It uses a microkernel architecture",
+    "The name comes from 'Reduction-Oxidation' chemical reactions"
+]
+
+[redoxos.blurb]
+short = "A Unix-like operating system written in Rust."
+long = """
+Redox OS is a Unix-like microkernel operating system written in Rust, aiming for safety, reliability, and correctness. It includes a custom filesystem (RedoxFS) and GUI.
+
+The project demonstrates that Rust can be used for low-level systems programming while providing memory safety."""
+
+[templeos]
+display_name = "TempleOS"
+name = "TempleOS"
+publisher = "Terry A. Davis"
+release_date = "2013-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "TempleOS was written entirely by one person over 10 years",
+    "It uses a custom language called HolyC",
+    "The entire OS including compiler fits in 100,000 lines of code"
+]
+
+[templeos.blurb]
+short = "A biblical-themed operating system built by a single developer."
+long = """
+TempleOS is a 64-bit operating system written entirely by Terry A. Davis. It features a custom compiler, flight simulator, and various biblical-themed applications.
+
+Despite its unusual nature, TempleOS demonstrates impressive technical achievement with a complete OS built by one person."""
+
+[kolibrios]
+display_name = "KolibriOS"
+name = "KolibriOS"
+publisher = "KolibriOS Team"
+release_date = "2004-01-01"
+architecture = "i386"
+fun_facts = [
+    "KolibriOS fits on a single floppy disk",
+    "It's written entirely in FASM assembly language",
+    "The entire system boots in about one second"
+]
+
+[kolibrios.blurb]
+short = "A tiny operating system written in assembly language."
+long = """
+KolibriOS is a tiny, fast operating system written entirely in x86 assembly language. It includes a GUI, applications, and games while fitting on a single 1.44MB floppy disk.
+
+KolibriOS demonstrates what's possible with hand-optimized assembly code."""
+
+# =============================================================================
+# Retro Operating Systems
+# =============================================================================
+
+[freedos]
+display_name = "FreeDOS"
+name = "FreeDOS"
+publisher = "FreeDOS Project"
+release_date = "1994-06-29"
+architecture = "i386"
+fun_facts = [
+    "FreeDOS was started when Microsoft announced the end of MS-DOS",
+    "Many PC vendors ship FreeDOS for 'no OS' configurations",
+    "It can run most DOS software and games"
+]
+
+[freedos.blurb]
+short = "A free, open-source DOS-compatible operating system."
+long = """
+FreeDOS is a complete, free, DOS-compatible operating system. It can run classic DOS games, business software, and embedded applications.
+
+The project started in 1994 as a response to Microsoft's announcement that they would discontinue MS-DOS."""
+
+[drdos]
+display_name = "DR-DOS"
+name = "DR-DOS"
+publisher = "Digital Research"
+release_date = "1988-05-01"
+architecture = "i386"
+fun_facts = [
+    "DR-DOS was more advanced than MS-DOS in many ways",
+    "Microsoft allegedly sabotaged DR-DOS compatibility",
+    "Digital Research was acquired by Novell, then Caldera"
+]
+
+[drdos.blurb]
+short = "Digital Research's MS-DOS compatible operating system."
+long = """
+DR-DOS was a DOS-compatible operating system from Digital Research that competed with MS-DOS. It offered features like disk compression and memory management before Microsoft.
+
+The famous 'AARD code' scandal involved Microsoft allegedly making Windows display error messages on DR-DOS."""
+
+[cpm]
+display_name = "CP/M"
+name = "CP/M"
+publisher = "Digital Research"
+release_date = "1974-01-01"
+architecture = "i8080"
+fun_facts = [
+    "CP/M was the dominant OS before DOS",
+    "IBM approached Digital Research before Microsoft for their PC",
+    "MS-DOS was heavily influenced by CP/M"
+]
+
+[cpm.blurb]
+short = "The pioneering microcomputer operating system."
+long = """
+CP/M (Control Program for Microcomputers) was the dominant operating system for 8-bit microcomputers in the late 1970s. It established many conventions still used today.
+
+IBM famously approached Digital Research first for their PC, but the deal fell through, leading to Microsoft and MS-DOS."""
+
+[atari-tos]
+display_name = "Atari TOS"
+name = "Atari TOS"
+publisher = "Atari Corporation"
+release_date = "1985-01-01"
+architecture = "m68k"
+fun_facts = [
+    "TOS stands for 'The Operating System'",
+    "It ran on Atari ST computers, competitors to the Amiga",
+    "GEM desktop was licensed from Digital Research"
+]
+
+[atari-tos.blurb]
+short = "The operating system for Atari ST computers."
+long = """
+Atari TOS was the operating system for the Atari ST line of computers. It featured the GEM desktop environment licensed from Digital Research.
+
+The Atari ST was popular in Europe and especially among musicians due to its built-in MIDI ports."""
+
+[geos]
+display_name = "GEOS"
+name = "GEOS"
+publisher = "Berkeley Softworks"
+release_date = "1986-01-01"
+architecture = "i386"
+fun_facts = [
+    "GEOS provided a GUI for the Commodore 64",
+    "It was also available for Apple II and IBM PC",
+    "The GUI ran on computers with as little as 64KB RAM"
+]
+
+[geos.blurb]
+short = "A graphical operating system for 8-bit computers."
+long = """
+GEOS (Graphic Environment Operating System) brought a graphical user interface to 8-bit computers like the Commodore 64. It demonstrated that GUIs could work on limited hardware.
+
+GEOS included applications like geoWrite and geoPaint, providing productivity software for home computers."""
+
+[riscos]
+display_name = "RISC OS"
+name = "RISC OS"
+publisher = "RISC OS Developments"
+release_date = "1987-01-01"
+architecture = "arm"
+fun_facts = [
+    "RISC OS was designed for ARM processors from the start",
+    "It features a unique three-button mouse interface",
+    "The system is still actively developed for Raspberry Pi"
+]
+
+[riscos.blurb]
+short = "The original operating system for ARM computers."
+long = """
+RISC OS was developed by Acorn for their ARM-based computers, making it the original ARM operating system. It features a distinctive desktop with a permanent icon bar.
+
+RISC OS continues to be developed and runs on modern hardware including the Raspberry Pi."""
+
+# =============================================================================
+# Additional Linux Distributions
+# =============================================================================
+
+[linux-cachyos]
+display_name = "CachyOS (rolling)"
+name = "CachyOS"
+publisher = "CachyOS Team"
+release_date = "2021-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "CachyOS uses optimized x86-64-v3 packages",
+    "It features custom kernel optimizations",
+    "The name refers to CPU cache optimization"
+]
+
+[linux-cachyos.blurb]
+short = "An Arch-based distribution focused on performance."
+long = """
+CachyOS is an Arch-based distribution that focuses on maximizing system performance through compiler optimizations, custom kernels, and package tuning.
+
+It uses x86-64-v3 optimizations and custom scheduler patches for improved desktop responsiveness."""
+
+[linux-bazzite]
+display_name = "Bazzite (rolling)"
+name = "Bazzite"
+publisher = "Universal Blue"
+release_date = "2023-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Bazzite is designed for gaming on Linux",
+    "It's based on Fedora Silverblue/Kinoite",
+    "Features automatic Steam and Lutris integration"
+]
+
+[linux-bazzite.blurb]
+short = "An immutable Fedora-based distribution for gaming."
+long = """
+Bazzite is a gaming-focused immutable Linux distribution based on Fedora. It includes pre-configured drivers, Steam, and gaming optimizations out of the box.
+
+The system uses rpm-ostree for atomic updates, ensuring system stability while gaming."""
+
+[linux-garuda]
+display_name = "Garuda Linux (rolling)"
+name = "Garuda Linux"
+publisher = "Garuda Linux Team"
+release_date = "2020-03-26"
+architecture = "x86_64"
+fun_facts = [
+    "Garuda is named after the mythical bird-like creature",
+    "It uses the BTRFS filesystem with automatic snapshots",
+    "Garuda offers a gaming-focused edition"
+]
+
+[linux-garuda.blurb]
+short = "A performance-oriented Arch-based distribution."
+long = """
+Garuda Linux is a rolling-release distribution based on Arch Linux, featuring the BTRFS filesystem with automatic snapshots and a focus on performance.
+
+It offers multiple desktop editions including a gaming-focused version with pre-configured Steam and Wine."""
+
+[linux-pop]
+display_name = "Pop!_OS"
+name = "Pop!_OS"
+publisher = "System76"
+release_date = "2017-10-19"
+architecture = "x86_64"
+fun_facts = [
+    "Pop!_OS is developed by Linux hardware vendor System76",
+    "It features a custom tiling window extension",
+    "The distribution includes first-class NVIDIA support"
+]
+
+[linux-pop.blurb]
+short = "A developer and creator-focused Ubuntu derivative."
+long = """
+Pop!_OS is developed by System76 for their Linux hardware. It features automatic window tiling, excellent GPU support, and a streamlined workflow for developers.
+
+The distribution includes a custom recovery partition and disk encryption by default."""
+
+[linux-zorin]
+display_name = "Zorin OS"
+name = "Zorin OS"
+publisher = "Zorin Group"
+release_date = "2009-07-01"
+architecture = "x86_64"
+fun_facts = [
+    "Zorin OS is designed to ease the transition from Windows",
+    "It includes layouts mimicking Windows 7, 10, and macOS",
+    "The project was started by two teenage brothers from Ireland"
+]
+
+[linux-zorin.blurb]
+short = "A user-friendly Ubuntu-based distribution for Windows users."
+long = """
+Zorin OS is designed to make Linux accessible to Windows users, featuring familiar layouts and interface options. It includes Wine for running Windows applications.
+
+The distribution offers both free and paid Pro editions with additional features and support."""
+
+[linux-mandrake-8]
+display_name = "Mandrake Linux 8"
+name = "Mandrake Linux 8"
+publisher = "MandrakeSoft"
+release_date = "2001-04-17"
+architecture = "i386"
+fun_facts = [
+    "Mandrake was one of the most user-friendly Linux distros of its era",
+    "It pioneered graphical configuration tools",
+    "Mandrake later became Mandriva, then Mageia"
+]
+
+[linux-mandrake-8.blurb]
+short = "A user-friendly Linux distribution from the early 2000s."
+long = """
+Mandrake Linux 8 was known for its excellent hardware detection and graphical configuration tools, making Linux accessible to newcomers.
+
+The distribution was popular for desktop use and influenced many user-friendly practices still common today."""
+
+[linux-redhat-7]
+display_name = "Red Hat Linux 7"
+name = "Red Hat Linux 7"
+publisher = "Red Hat, Inc."
+release_date = "2000-09-25"
+architecture = "i386"
+fun_facts = [
+    "Red Hat Linux 7 was not related to RHEL 7",
+    "It was one of the most popular desktop Linux distributions",
+    "Red Hat Linux evolved into Fedora and RHEL"
+]
+
+[linux-redhat-7.blurb]
+short = "A classic Linux distribution from Red Hat's consumer line."
+long = """
+Red Hat Linux 7 was part of Red Hat's consumer desktop line, before the company split into Fedora (community) and RHEL (enterprise). It was widely used in both homes and businesses.
+
+This version introduced many improvements in installation and hardware support."""
+
+[linux-suse-7]
+display_name = "SuSE Linux 7"
+name = "SuSE Linux 7"
+publisher = "SuSE GmbH"
+release_date = "2000-10-15"
+architecture = "i386"
+fun_facts = [
+    "SuSE was based in Germany and popular in Europe",
+    "YaST was already a standout feature",
+    "SuSE later became Novell SUSE, then SUSE Linux"
+]
+
+[linux-suse-7.blurb]
+short = "A classic German Linux distribution."
+long = """
+SuSE Linux 7 was a popular distribution known for its excellent KDE integration and the powerful YaST configuration tool.
+
+SuSE was particularly popular in European enterprise environments and later evolved into openSUSE."""
+
+[linux-slackware]
+display_name = "Slackware Linux"
+name = "Slackware"
+publisher = "Patrick Volkerding"
+release_date = "1993-07-17"
+architecture = "x86_64"
+fun_facts = [
+    "Slackware is the oldest surviving Linux distribution",
+    "It follows a 'keep it simple' philosophy",
+    "Patrick Volkerding has maintained it for over 30 years"
+]
+
+[linux-slackware.blurb]
+short = "The oldest actively maintained Linux distribution."
+long = """
+Slackware is the oldest Linux distribution still in active development. It emphasizes simplicity, stability, and a Unix-like experience without excessive automation.
+
+Slackware teaches users how Linux works under the hood and is favored by those who prefer manual configuration."""
+
+[linux-centos]
+display_name = "CentOS"
+name = "CentOS"
+publisher = "CentOS Project / Red Hat"
+release_date = "2004-05-14"
+architecture = "x86_64"
+fun_facts = [
+    "CentOS was a free rebuild of RHEL",
+    "Red Hat shifted CentOS to Stream in 2020",
+    "Rocky Linux and AlmaLinux emerged as replacements"
+]
+
+[linux-centos.blurb]
+short = "A free enterprise Linux distribution compatible with RHEL."
+long = """
+CentOS was a community rebuild of Red Hat Enterprise Linux, providing a free, stable platform for servers. It was widely used in web hosting and enterprise environments.
+
+In 2020, Red Hat shifted focus to CentOS Stream, leading to the creation of Rocky Linux and AlmaLinux."""
+
+[linux-rocky]
+display_name = "Rocky Linux"
+name = "Rocky Linux"
+publisher = "Rocky Enterprise Software Foundation"
+release_date = "2021-06-21"
+architecture = "x86_64"
+fun_facts = [
+    "Rocky was created by CentOS co-founder Gregory Kurtzer",
+    "It's named after co-founder Rocky McGaugh",
+    "Rocky aims to be 100% bug-for-bug compatible with RHEL"
+]
+
+[linux-rocky.blurb]
+short = "An enterprise Linux distribution, successor to CentOS."
+long = """
+Rocky Linux was created after Red Hat changed CentOS's direction. It provides a free, production-ready downstream version of Red Hat Enterprise Linux.
+
+The distribution is widely adopted as a CentOS replacement in enterprise environments."""
+
+[linux-alma]
+display_name = "AlmaLinux"
+name = "AlmaLinux"
+publisher = "AlmaLinux OS Foundation"
+release_date = "2021-03-30"
+architecture = "x86_64"
+fun_facts = [
+    "AlmaLinux was initially sponsored by CloudLinux",
+    "'Alma' means 'soul' in Spanish and Latin",
+    "It's another CentOS replacement focused on community governance"
+]
+
+[linux-alma.blurb]
+short = "A community-driven RHEL-compatible distribution."
+long = """
+AlmaLinux is a free, community-owned and governed enterprise Linux distribution compatible with RHEL. It emerged as an alternative after CentOS's shift to Stream.
+
+The distribution emphasizes community governance and long-term stability."""
+
+[linux-mx]
+display_name = "MX Linux"
+name = "MX Linux"
+publisher = "MX Linux Team"
+release_date = "2014-03-24"
+architecture = "x86_64"
+fun_facts = [
+    "MX Linux has topped DistroWatch rankings",
+    "It's a collaboration between antiX and MEPIS communities",
+    "MX features unique tools like the MX Package Installer"
+]
+
+[linux-mx.blurb]
+short = "A user-friendly Debian-based distribution."
+long = """
+MX Linux combines the stability of Debian with custom tools and a focus on efficiency. It's designed to be elegant, efficient, and simple to use.
+
+The distribution is known for its excellent system tools and works well on older hardware."""
+
+[linux-elementary]
+display_name = "elementary OS"
+name = "elementary OS"
+publisher = "elementary, Inc."
+release_date = "2011-03-31"
+architecture = "x86_64"
+fun_facts = [
+    "elementary OS features the custom Pantheon desktop",
+    "Its design is inspired by macOS",
+    "The project pioneered 'pay what you want' for Linux distros"
+]
+
+[linux-elementary.blurb]
+short = "A beautiful Ubuntu-based distribution with a macOS-like feel."
+long = """
+elementary OS features a custom-designed Pantheon desktop environment with a focus on beauty and usability. It's known for its curated AppCenter and attention to detail.
+
+The distribution emphasizes a cohesive user experience with custom applications."""
+
+[linux-kali]
+display_name = "Kali Linux"
+name = "Kali Linux"
+publisher = "Offensive Security"
+release_date = "2013-03-13"
+architecture = "x86_64"
+fun_facts = [
+    "Kali includes over 600 penetration testing tools",
+    "It's the successor to BackTrack Linux",
+    "Kali is used by security professionals worldwide"
+]
+
+[linux-kali.blurb]
+short = "A Debian-based distribution for penetration testing."
+long = """
+Kali Linux is a Debian-based distribution designed for digital forensics and penetration testing. It includes hundreds of security tools pre-installed.
+
+The distribution is used by security professionals, ethical hackers, and for security education."""
+
+[linux-alpine]
+display_name = "Alpine Linux"
+name = "Alpine Linux"
+publisher = "Alpine Linux Development Team"
+release_date = "2006-08-01"
+architecture = "x86_64"
+fun_facts = [
+    "Alpine uses musl libc instead of glibc",
+    "A minimal install is under 10MB",
+    "Docker uses Alpine as its official lightweight base image"
+]
+
+[linux-alpine.blurb]
+short = "A security-oriented, lightweight Linux distribution."
+long = """
+Alpine Linux is designed for security, simplicity, and resource efficiency. It uses musl libc and busybox, resulting in a very small footprint.
+
+Alpine is extremely popular for Docker containers due to its small size and security focus."""
+
+[linux-deepin]
+display_name = "Deepin"
+name = "Deepin"
+publisher = "Wuhan Deepin Technology"
+release_date = "2004-02-28"
+architecture = "x86_64"
+fun_facts = [
+    "Deepin is developed in China",
+    "The Deepin Desktop Environment is used by other distros",
+    "It's known for having one of the most beautiful Linux desktops"
+]
+
+[linux-deepin.blurb]
+short = "A Chinese distribution with a stunning custom desktop."
+long = """
+Deepin features the Deepin Desktop Environment (DDE), known for its beautiful, modern design. It includes custom applications for system management and daily tasks.
+
+The distribution aims to provide an elegant, easy-to-use operating system."""
+
+[linux-solus]
+display_name = "Solus"
+name = "Solus"
+publisher = "Solus Project"
+release_date = "2015-12-27"
+architecture = "x86_64"
+fun_facts = [
+    "Solus created the Budgie desktop environment",
+    "It's built from scratch, not based on other distributions",
+    "Solus uses a curated rolling release model"
+]
+
+[linux-solus.blurb]
+short = "An independent distribution with the Budgie desktop."
+long = """
+Solus is an independently developed distribution featuring the Budgie desktop environment. It's built from scratch with a focus on desktop computing.
+
+The distribution uses a curated rolling release model, balancing new software with stability."""
+
+[linux-mageia]
+display_name = "Mageia"
+name = "Mageia"
+publisher = "Mageia.Org"
+release_date = "2011-06-01"
+architecture = "x86_64"
+fun_facts = [
+    "Mageia is a fork of Mandriva Linux",
+    "It's run by a non-profit organization",
+    "Many former Mandriva developers work on Mageia"
+]
+
+[linux-mageia.blurb]
+short = "A community fork of the classic Mandriva distribution."
+long = """
+Mageia is a community-driven fork of Mandriva Linux, continuing its tradition of user-friendliness. It includes the Mageia Control Center for system administration.
+
+The distribution is developed by a non-profit and maintains Mandriva's welcoming approach to new users."""
+
+[linux-pclinuxos]
+display_name = "PCLinuxOS"
+name = "PCLinuxOS"
+publisher = "PCLinuxOS Team"
+release_date = "2003-10-24"
+architecture = "x86_64"
+fun_facts = [
+    "PCLinuxOS uses a rolling release model",
+    "It was originally derived from Mandrake Linux",
+    "The distribution is known for its KDE implementation"
+]
+
+[linux-pclinuxos.blurb]
+short = "A user-friendly rolling release distribution."
+long = """
+PCLinuxOS is a rolling release distribution that emphasizes ease of use. It features excellent KDE integration and a simple, clean design.
+
+The distribution is known for its stability despite being rolling release, and its friendly community."""
+
+[linux-puppy]
+display_name = "Puppy Linux"
+name = "Puppy Linux"
+publisher = "Puppy Linux Team"
+release_date = "2003-06-01"
+architecture = "i386"
+fun_facts = [
+    "Puppy Linux runs entirely in RAM",
+    "A typical ISO is under 300MB",
+    "It can boot from USB and save state to the drive"
+]
+
+[linux-puppy.blurb]
+short = "An extremely lightweight Linux distribution."
+long = """
+Puppy Linux is designed to be small, fast, and portable. It runs entirely in RAM after booting, making it extremely responsive even on old hardware.
+
+The distribution is perfect for reviving old computers or creating portable systems."""
+
+[linux-tails]
+display_name = "Tails"
+name = "Tails"
+publisher = "Tails Project"
+release_date = "2009-06-23"
+architecture = "x86_64"
+fun_facts = [
+    "Tails stands for 'The Amnesic Incognito Live System'",
+    "Edward Snowden used Tails for secure communication",
+    "It routes all traffic through Tor by default"
+]
+
+[linux-tails.blurb]
+short = "A privacy-focused live operating system."
+long = """
+Tails is a live operating system designed to preserve privacy and anonymity. It routes all network traffic through Tor and leaves no trace on the host computer.
+
+The distribution is used by journalists, activists, and anyone needing secure, anonymous communication."""
+
+[linux-parrot]
+display_name = "Parrot Security OS"
+name = "Parrot OS"
+publisher = "Parrot Security"
+release_date = "2013-04-10"
+architecture = "x86_64"
+fun_facts = [
+    "Parrot is designed for security and development",
+    "It includes tools for digital forensics",
+    "The distribution is lighter than Kali Linux"
+]
+
+[linux-parrot.blurb]
+short = "A Debian-based security and development distribution."
+long = """
+Parrot OS is designed for security professionals, developers, and privacy-conscious users. It includes penetration testing tools, development environments, and privacy utilities.
+
+The distribution is known for being lighter and more user-friendly than other security distributions."""
+
+[linux-antix]
+display_name = "antiX Linux"
+name = "antiX"
+publisher = "antiX Project"
+release_date = "2007-07-01"
+architecture = "i386"
+fun_facts = [
+    "antiX is designed for older computers",
+    "It uses lightweight window managers like IceWM",
+    "antiX is systemd-free"
+]
+
+[linux-antix.blurb]
+short = "A lightweight, systemd-free Debian-based distribution."
+long = """
+antiX is a fast, lightweight distribution designed for older computers. It avoids systemd in favor of traditional init systems and uses lightweight desktop components.
+
+The distribution is ideal for reviving old hardware and users who prefer traditional Unix-like systems."""
+
+[linux-clear]
+display_name = "Clear Linux"
+name = "Clear Linux"
+publisher = "Intel Corporation"
+release_date = "2015-03-26"
+architecture = "x86_64"
+fun_facts = [
+    "Clear Linux is optimized for Intel processors",
+    "It holds records for fast boot times",
+    "The distribution pioneered many performance optimizations"
+]
+
+[linux-clear.blurb]
+short = "Intel's performance-optimized Linux distribution."
+long = """
+Clear Linux is developed by Intel, optimized for performance on Intel hardware. It features aggressive compiler optimizations and a unique update system.
+
+The distribution is often used for benchmarking and serves as a reference for performance optimizations."""
+
+[linux-nix-os]
+display_name = "NixOS (rolling)"
+name = "NixOS"
+publisher = "NixOS Foundation"
+release_date = "2003-06-01"
+architecture = "x86_64"
+fun_facts = [
+    "NixOS configuration is fully declarative",
+    "You can roll back to any previous system configuration",
+    "The Nix package manager can be used on other Linux distros and macOS"
+]
+
+[linux-nix-os.blurb]
+short = "A declarative Linux distribution with atomic upgrades and rollbacks."
+long = """
+NixOS takes a unique approach where the entire system is configured declaratively in a single file. This enables atomic upgrades, rollbacks, and reproducible system configurations.
+
+The Nix package manager allows multiple versions of packages to coexist and ensures builds are reproducible."""
+
+# =============================================================================
+# Additional macOS Versions
+# =============================================================================
+
+[mac-osx-panther]
+display_name = "Apple® Mac OS X Panther"
+name = "Mac OS X Panther"
+publisher = "Apple Computer, Inc."
+release_date = "2003-10-24"
+architecture = "ppc"
+fun_facts = [
+    "Panther introduced Expose for window management",
+    "FileVault disk encryption debuted in Panther",
+    "Safari became the default browser"
+]
+
+[mac-osx-panther.blurb]
+short = "Mac OS X 10.3 with Expose and improved Finder."
+long = """
+Mac OS X 10.3 Panther introduced Expose, a revolutionary window management feature. It also brought a brushed metal look to many applications.
+
+Panther was considered a significant improvement in speed and usability over its predecessors."""
+
+[mac-osx-jaguar]
+display_name = "Apple® Mac OS X Jaguar"
+name = "Mac OS X Jaguar"
+publisher = "Apple Computer, Inc."
+release_date = "2002-08-23"
+architecture = "ppc"
+fun_facts = [
+    "Jaguar was the first OS X shown on television ads",
+    "Quartz Extreme added GPU acceleration to the UI",
+    "Rendezvous (later Bonjour) was introduced"
+]
+
+[mac-osx-jaguar.blurb]
+short = "Mac OS X 10.2 with Quartz Extreme graphics."
+long = """
+Mac OS X 10.2 Jaguar brought significant performance improvements through Quartz Extreme, which used the GPU for window compositing.
+
+This version also introduced Rendezvous (now Bonjour) for zero-configuration networking."""
+
+[mac-osx-lion]
+display_name = "Apple® Mac OS X Lion"
+name = "Mac OS X Lion"
+publisher = "Apple Inc."
+release_date = "2011-07-20"
+architecture = "x86_64"
+fun_facts = [
+    "Lion was the first Mac OS X sold only through the App Store",
+    "It introduced natural scrolling (reversed)",
+    "Full-screen apps and Mission Control were new features"
+]
+
+[mac-osx-lion.blurb]
+short = "Mac OS X 10.7 with full-screen apps and gestures."
+long = """
+Mac OS X Lion brought iOS-inspired features to the Mac, including Launchpad, natural scrolling, and full-screen applications. It was the first to be distributed via the App Store.
+
+Lion marked Apple's shift toward touch-friendly interfaces on the Mac."""
+
+[mac-osx-mountain-lion]
+display_name = "Apple® OS X Mountain Lion"
+name = "OS X Mountain Lion"
+publisher = "Apple Inc."
+release_date = "2012-07-25"
+architecture = "x86_64"
+fun_facts = [
+    "Mountain Lion dropped 'Mac' from the name",
+    "It introduced Notification Center from iOS",
+    "iCloud integration was significantly expanded"
+]
+
+[mac-osx-mountain-lion.blurb]
+short = "OS X 10.8 with deeper iOS integration."
+long = """
+OS X Mountain Lion continued the iOS integration with Notification Center, Messages (replacing iChat), and AirPlay Mirroring.
+
+This release brought over 200 features from iOS to the Mac."""
+
+[macos-sierra]
+display_name = "Apple® macOS Sierra"
+name = "macOS Sierra"
+publisher = "Apple Inc."
+release_date = "2016-09-20"
+architecture = "x86_64"
+fun_facts = [
+    "Sierra introduced Siri to the Mac",
+    "It was the first 'macOS' (not 'OS X')",
+    "Apple Watch could unlock Sierra Macs"
+]
+
+[macos-sierra.blurb]
+short = "The first macOS, introducing Siri to the desktop."
+long = """
+macOS Sierra marked the renaming from OS X to macOS. It brought Siri to the Mac and added Apple Watch unlock functionality.
+
+Sierra also introduced optimized storage and Universal Clipboard across Apple devices."""
+
+[macos-high-sierra]
+display_name = "Apple® macOS High Sierra"
+name = "macOS High Sierra"
+publisher = "Apple Inc."
+release_date = "2017-09-25"
+architecture = "x86_64"
+fun_facts = [
+    "High Sierra introduced APFS as the default filesystem",
+    "It added HEVC and HEIF media support",
+    "Metal 2 improved graphics performance"
+]
+
+[macos-high-sierra.blurb]
+short = "macOS 10.13 with the new Apple File System."
+long = """
+macOS High Sierra focused on deep system improvements, including the new Apple File System (APFS) for SSDs. It brought better graphics through Metal 2.
+
+The release modernized many core technologies while maintaining compatibility."""
+
+[macos-mojave]
+display_name = "Apple® macOS Mojave"
+name = "macOS Mojave"
+publisher = "Apple Inc."
+release_date = "2018-09-24"
+architecture = "x86_64"
+fun_facts = [
+    "Mojave introduced Dark Mode",
+    "It was the last macOS to support 32-bit apps",
+    "The Mac App Store was redesigned"
+]
+
+[macos-mojave.blurb]
+short = "macOS 10.14 with Dark Mode and desktop stacks."
+long = """
+macOS Mojave introduced Dark Mode and dynamic desktops that change throughout the day. Desktop Stacks automatically organized files.
+
+This was the last macOS to support 32-bit applications and some older Mac models."""
+
+[macos-catalina]
+display_name = "Apple® macOS Catalina"
+name = "macOS Catalina"
+publisher = "Apple Inc."
+release_date = "2019-10-07"
+architecture = "x86_64"
+fun_facts = [
+    "Catalina removed iTunes, splitting it into three apps",
+    "It dropped all 32-bit app support",
+    "Sidecar allowed using iPad as second display"
+]
+
+[macos-catalina.blurb]
+short = "macOS 10.15 with Sidecar and 64-bit only support."
+long = """
+macOS Catalina split iTunes into Music, TV, and Podcasts apps. It added Sidecar for using iPad as a display and required all apps to be 64-bit.
+
+Catalina also introduced a read-only system volume for security."""
+
+[macos-big-sur]
+display_name = "Apple® macOS Big Sur"
+name = "macOS Big Sur"
+publisher = "Apple Inc."
+release_date = "2020-11-12"
+architecture = "x86_64"
+fun_facts = [
+    "Big Sur was the first macOS for Apple Silicon (M1)",
+    "It featured the biggest design update since OS X",
+    "Version number jumped to 11.0"
+]
+
+[macos-big-sur.blurb]
+short = "macOS 11 with a new design and Apple Silicon support."
+long = """
+macOS Big Sur introduced a completely redesigned interface with iOS-inspired elements. It was the first macOS to run on Apple Silicon.
+
+The version number jumped from 10.x to 11, marking a new era for the Mac."""
+
+[macos-monterey]
+display_name = "Apple® macOS Monterey"
+name = "macOS Monterey"
+publisher = "Apple Inc."
+release_date = "2021-10-25"
+architecture = "x86_64"
+fun_facts = [
+    "Monterey introduced Universal Control across devices",
+    "SharePlay enabled shared media experiences",
+    "Shortcuts came to the Mac"
+]
+
+[macos-monterey.blurb]
+short = "macOS 12 with Universal Control and Shortcuts."
+long = """
+macOS Monterey brought Universal Control for using one mouse across Mac and iPad, along with Shortcuts from iOS.
+
+FaceTime added SharePlay for watching content together and spatial audio."""
+
+[macos-ventura]
+display_name = "Apple® macOS Ventura"
+name = "macOS Ventura"
+publisher = "Apple Inc."
+release_date = "2022-10-24"
+architecture = "x86_64"
+fun_facts = [
+    "Ventura introduced Stage Manager for window management",
+    "System Settings replaced System Preferences",
+    "Continuity Camera turns iPhone into Mac webcam"
+]
+
+[macos-ventura.blurb]
+short = "macOS 13 with Stage Manager and redesigned settings."
+long = """
+macOS Ventura introduced Stage Manager for organizing windows and apps. System Settings was redesigned to match iOS settings.
+
+Continuity Camera allowed using iPhone as a Mac webcam with features like Center Stage."""
+
+[macos-sonoma]
+display_name = "Apple® macOS Sonoma"
+name = "macOS Sonoma"
+publisher = "Apple Inc."
+release_date = "2023-09-26"
+architecture = "x86_64"
+fun_facts = [
+    "Sonoma added interactive desktop widgets",
+    "Game Mode optimizes performance for gaming",
+    "Video conferencing features were significantly enhanced"
+]
+
+[macos-sonoma.blurb]
+short = "macOS 14 with desktop widgets and Game Mode."
+long = """
+macOS Sonoma brought interactive widgets to the desktop and introduced Game Mode for improved gaming performance.
+
+The update also enhanced video conferencing with presenter overlay and reactions."""

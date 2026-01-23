@@ -1698,6 +1698,7 @@ dependencies = [
  "libudev",
  "nom 8.0.0",
  "ratatui",
+ "regex",
  "serde",
  "serde_json",
  "toml",

@@ -91,10 +91,20 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<()> {
                         && click_y >= list_inner_y
                         && click_y < list_inner_y + list_inner_height
                     {
-                        // Calculate which item was clicked
-                        let item_index = (click_y - list_inner_y) as usize;
-                        if item_index < app.filtered_indices.len() {
-                            app.selected_vm = item_index;
+                        // Calculate which row was clicked
+                        let clicked_row = (click_y - list_inner_y) as usize;
+
+                        // Map clicked row to visual_order index (accounting for header rows)
+                        if let Some(visual_idx) = widgets::click_row_to_visual_index(
+                            &app.vms,
+                            &app.filtered_indices,
+                            &app.hierarchy,
+                            &app.metadata,
+                            &app.visual_order,
+                            clicked_row,
+                        ) {
+                            app.selected_vm = visual_idx;
+                            app.info_scroll = 0; // Reset scroll when VM changes
                         }
                     }
                 }
@@ -105,41 +115,80 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<()> {
     Ok(())
 }
 
+/// Render a dimming overlay over the entire screen
+/// Uses a dark background that the popup's Clear widget will cut through
+fn render_dim_overlay(_frame: &mut Frame) {
+    // Dimming disabled - causing rendering issues
+    // The popup's Clear widget and borders provide sufficient contrast
+}
+
 /// Render the current screen
 fn render(app: &App, frame: &mut Frame) {
     match &app.screen {
         Screen::MainMenu => screens::main_menu::render(app, frame),
-        Screen::Management => screens::management::render(app, frame),
-        Screen::Configuration => screens::configuration::render(app, frame),
+        Screen::Management => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::management::render(app, frame);
+        }
+        Screen::Configuration => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::configuration::render(app, frame);
+        }
+        Screen::RawScript => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::configuration::render_raw_script(app, frame);
+        }
         Screen::DetailedInfo => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_detailed_info(app, frame);
         }
-        Screen::Snapshots => screens::management::render_snapshots(app, frame),
-        Screen::BootOptions => screens::management::render_boot_options(app, frame),
-        Screen::UsbDevices => render_usb_devices(app, frame),
+        Screen::Snapshots => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::management::render_snapshots(app, frame);
+        }
+        Screen::BootOptions => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::management::render_boot_options(app, frame);
+        }
+        Screen::UsbDevices => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            render_usb_devices(app, frame);
+        }
         Screen::Confirm(action) => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_confirm(app, action, frame);
         }
         Screen::Help => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             screens::help::render(frame);
         }
         Screen::Search => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_search(app, frame);
         }
         Screen::FileBrowser => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_file_browser(app, frame);
         }
         Screen::TextInput(context) => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_text_input(app, context, frame);
         }
         Screen::ErrorDialog => {
             screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
             render_error_dialog(app, frame);
         }
     }
@@ -147,8 +196,16 @@ fn render(app: &App, frame: &mut Frame) {
 
 /// Handle key input
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    // Global quit
+    // Global quit with Ctrl+C
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.should_quit = true;
+        return Ok(());
+    }
+
+    // Global quit with q/Q (except in text input modes where q might be typed)
+    if (key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q'))
+        && !matches!(app.screen, Screen::Search | Screen::TextInput(_))
+    {
         app.should_quit = true;
         return Ok(());
     }
@@ -157,6 +214,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::MainMenu => handle_main_menu(app, key)?,
         Screen::Management => handle_management(app, key)?,
         Screen::Configuration => handle_configuration(app, key)?,
+        Screen::RawScript => handle_raw_script(app, key)?,
         Screen::DetailedInfo => handle_detailed_info(app, key)?,
         Screen::Snapshots => handle_snapshots(app, key)?,
         Screen::BootOptions => handle_boot_options(app, key)?,
@@ -174,27 +232,22 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
 fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+        KeyCode::PageDown => {
+            app.info_scroll = app.info_scroll.saturating_add(5);
+        }
+        KeyCode::PageUp => {
+            app.info_scroll = app.info_scroll.saturating_sub(5);
+        }
         KeyCode::Enter => {
             if app.selected_vm().is_some() {
                 app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
             }
         }
-        KeyCode::Char('m') => {
+        KeyCode::Char('m') | KeyCode::Char('M') => {
             if app.selected_vm().is_some() {
                 app.push_screen(Screen::Management);
-            }
-        }
-        KeyCode::Char('c') => {
-            if app.selected_vm().is_some() {
-                app.push_screen(Screen::Configuration);
-            }
-        }
-        KeyCode::Char('i') => {
-            if app.selected_vm().is_some() {
-                app.push_screen(Screen::DetailedInfo);
             }
         }
         KeyCode::Char('/') => {
@@ -212,12 +265,13 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => app.pop_screen(),
         KeyCode::Char('j') | KeyCode::Down => app.menu_next(screens::management::MENU_ITEMS.len()),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
-        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') => {
             let item = match key.code {
                 KeyCode::Char('1') => 0,
                 KeyCode::Char('2') => 1,
                 KeyCode::Char('3') => 2,
                 KeyCode::Char('4') => 3,
+                KeyCode::Char('5') => 4,
                 _ => app.selected_menu_item,
             };
 
@@ -232,6 +286,7 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
                 2 => app.push_screen(Screen::Confirm(ConfirmAction::ResetVm)),
                 3 => app.push_screen(Screen::Confirm(ConfirmAction::DeleteVm)),
+                4 => app.push_screen(Screen::Configuration),
                 _ => {}
             }
         }
@@ -243,9 +298,17 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
 fn handle_configuration(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Esc => app.pop_screen(),
-        KeyCode::Char('r') => {
-            // Toggle raw script view - could add a state for this
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.push_screen(Screen::RawScript);
         }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_raw_script(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => app.pop_screen(),
         _ => {}
     }
     Ok(())
@@ -627,6 +690,7 @@ fn render_search(app: &App, frame: &mut Frame) {
 
 fn render_file_browser(app: &App, frame: &mut Frame) {
     use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+    use ratatui::layout::{Layout, Direction, Constraint};
 
     let area = frame.area();
     let dialog_width = 60.min(area.width.saturating_sub(4));
@@ -645,11 +709,32 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Add top padding
+    let v_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(1),     // Content
+        ])
+        .split(h_chunks[1]);
+
+    let content_area = v_chunks[1];
+
     if app.file_browser_entries.is_empty() {
         let msg = ratatui::widgets::Paragraph::new("No ISO files found in this directory.")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(msg, inner);
+        frame.render_widget(msg, content_area);
         return;
     }
 
@@ -667,11 +752,12 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
     let list = List::new(items)
         .highlight_style(
             Style::default()
+                .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
                 .bg(Color::DarkGray),
         )
         .highlight_symbol("> ");
-    frame.render_stateful_widget(list, inner, &mut state);
+    frame.render_stateful_widget(list, content_area, &mut state);
 }
 
 fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
@@ -802,7 +888,7 @@ fn render_error_dialog(app: &App, frame: &mut Frame) {
 
 fn handle_error_dialog(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+        KeyCode::Esc | KeyCode::Enter => {
             app.error_detail = None;
             app.error_scroll = 0;
             app.pop_screen();
