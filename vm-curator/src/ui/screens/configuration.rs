@@ -1,4 +1,5 @@
 use ratatui::{
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::*,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
@@ -10,7 +11,7 @@ use crate::vm::QemuConfig;
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
     let dialog_width = 70.min(area.width.saturating_sub(4));
-    let dialog_height = 24.min(area.height.saturating_sub(4));
+    let dialog_height = 30.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -28,26 +29,41 @@ pub fn render(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    // Split into config and raw script
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(10), Constraint::Length(2)])
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
         .split(inner);
 
+    // Split into padding, config, bottom padding, and help
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),   // Top padding
+            Constraint::Min(10),     // Config content
+            Constraint::Length(1),   // Bottom padding
+            Constraint::Length(2),   // Help text
+        ])
+        .split(h_chunks[1]);
+
     if let Some(vm) = app.selected_vm() {
-        render_config(&vm.config, chunks[0], frame);
+        render_config(&vm.config, chunks[1], frame);
     } else {
         let msg = Paragraph::new("No VM selected")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(msg, chunks[0]);
+        frame.render_widget(msg, chunks[1]);
     }
 
     // Help text
     let help = Paragraph::new("[r] View raw script  [Esc] Back")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[1]);
+    frame.render_widget(help, chunks[3]);
 }
 
 fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
@@ -180,21 +196,37 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
 pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
+    let vm_name = app.selected_vm()
+        .map(|vm| vm.display_name())
+        .unwrap_or_else(|| "Unknown".to_string());
+
     let block = Block::default()
-        .title(" launch.sh (raw) ")
+        .title(format!(" {} - launch.sh ", vm_name))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Split into script content and help text
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
     if let Some(vm) = app.selected_vm() {
         let script = &vm.config.raw_script;
         let para = Paragraph::new(script.as_str())
             .style(Style::default().fg(Color::White))
             .wrap(Wrap { trim: false });
-        frame.render_widget(para, inner);
+        frame.render_widget(para, chunks[0]);
     }
+
+    // Help text
+    let help = Paragraph::new("[Esc] Back  [q] Quit")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[1]);
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

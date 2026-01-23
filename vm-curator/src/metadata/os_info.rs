@@ -6,7 +6,10 @@ use std::path::Path;
 /// Information about an operating system
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OsInfo {
-    /// Display name (e.g., "Windows 95")
+    /// Full display name for VM list (with trademarks, e.g., "Microsoft® Windows 95")
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Short name for info panel headers (e.g., "Windows 95")
     pub name: String,
     /// Publisher/developer
     pub publisher: String,
@@ -131,6 +134,7 @@ pub fn default_os_info(vm_id: &str) -> OsInfo {
     let (publisher, architecture) = guess_os_details(vm_id);
 
     OsInfo {
+        display_name: None, // Will fall back to name
         name: display_name,
         publisher,
         architecture,

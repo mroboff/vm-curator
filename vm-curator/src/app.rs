@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::hardware::UsbDevice;
-use crate::metadata::{AsciiArtStore, MetadataStore, OsInfo};
+use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo};
+use crate::ui::widgets::build_visual_order;
 use crate::vm::{
     discover_vms, group_vms_by_category, BootMode, DiscoveredVm, LaunchOptions, Snapshot,
 };
@@ -19,6 +20,8 @@ pub enum Screen {
     Management,
     /// Configuration view
     Configuration,
+    /// Raw launch script view
+    RawScript,
     /// Detailed info (history, blurbs)
     DetailedInfo,
     /// Snapshot management
@@ -80,6 +83,8 @@ pub struct App {
     pub metadata: MetadataStore,
     /// ASCII art store
     pub ascii_art: AsciiArtStore,
+    /// Hierarchy configuration for VM categorization
+    pub hierarchy: HierarchyConfig,
     /// Snapshots for current VM (cached)
     pub snapshots: Vec<Snapshot>,
     /// Selected snapshot index
@@ -98,6 +103,8 @@ pub struct App {
     pub input_mode: InputMode,
     /// Filtered VM indices (for search)
     pub filtered_indices: Vec<usize>,
+    /// Visual order of VMs (maps visual position to filtered_idx for hierarchy navigation)
+    pub visual_order: Vec<usize>,
     /// Status message
     pub status_message: Option<String>,
     /// When status message was set (for auto-clearing)
@@ -122,6 +129,8 @@ pub struct App {
     pub error_detail: Option<String>,
     /// Error dialog scroll position
     pub error_scroll: u16,
+    /// Right panel scroll position (for info panel)
+    pub info_scroll: u16,
 }
 
 /// Entry in file browser
@@ -157,7 +166,11 @@ impl App {
         let user_art = AsciiArtStore::load_from_dir(&config.ascii_art_path);
         ascii_art.merge(user_art);
 
+        // Load hierarchy config
+        let hierarchy = HierarchyConfig::load_embedded();
+
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let visual_order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata);
         let (background_tx, background_rx) = mpsc::channel();
 
         Ok(Self {
@@ -168,6 +181,7 @@ impl App {
             selected_vm: 0,
             metadata,
             ascii_art,
+            hierarchy,
             snapshots: Vec::new(),
             selected_snapshot: 0,
             usb_devices: Vec::new(),
@@ -177,6 +191,7 @@ impl App {
             search_query: String::new(),
             input_mode: InputMode::Normal,
             filtered_indices,
+            visual_order,
             status_message: None,
             status_time: None,
             should_quit: false,
@@ -189,15 +204,20 @@ impl App {
             loading: false,
             error_detail: None,
             error_scroll: 0,
+            info_scroll: 0,
         })
     }
 
     /// Get the currently selected VM
     pub fn selected_vm(&self) -> Option<&DiscoveredVm> {
-        if self.filtered_indices.is_empty() {
+        if self.visual_order.is_empty() {
             return None;
         }
-        let actual_idx = self.filtered_indices.get(self.selected_vm)?;
+        // selected_vm is an index into visual_order
+        // visual_order[selected_vm] gives the filtered_idx
+        // filtered_indices[filtered_idx] gives the actual vm index
+        let filtered_idx = self.visual_order.get(self.selected_vm)?;
+        let actual_idx = self.filtered_indices.get(*filtered_idx)?;
         self.vms.get(*actual_idx)
     }
 
@@ -231,17 +251,19 @@ impl App {
         }
     }
 
-    /// Move selection up in VM list
+    /// Move selection up in VM list (follows visual/hierarchy order)
     pub fn select_prev(&mut self) {
-        if !self.filtered_indices.is_empty() && self.selected_vm > 0 {
+        if !self.visual_order.is_empty() && self.selected_vm > 0 {
             self.selected_vm -= 1;
+            self.info_scroll = 0; // Reset scroll when VM changes
         }
     }
 
-    /// Move selection down in VM list
+    /// Move selection down in VM list (follows visual/hierarchy order)
     pub fn select_next(&mut self) {
-        if !self.filtered_indices.is_empty() && self.selected_vm < self.filtered_indices.len() - 1 {
+        if !self.visual_order.is_empty() && self.selected_vm < self.visual_order.len() - 1 {
             self.selected_vm += 1;
+            self.info_scroll = 0; // Reset scroll when VM changes
         }
     }
 
@@ -277,9 +299,12 @@ impl App {
                 .collect();
         }
 
+        // Rebuild visual order for hierarchy navigation
+        self.visual_order = build_visual_order(&self.vms, &self.filtered_indices, &self.hierarchy, &self.metadata);
+
         // Reset selection if out of bounds
-        if self.selected_vm >= self.filtered_indices.len() {
-            self.selected_vm = self.filtered_indices.len().saturating_sub(1);
+        if self.selected_vm >= self.visual_order.len() {
+            self.selected_vm = self.visual_order.len().saturating_sub(1);
         }
     }
 

@@ -21,7 +21,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         .split(area);
 
     // Render title
-    render_title(chunks[0], frame);
+    render_title(app, chunks[0], frame);
 
     // Split main content: VM list on left, info on right
     let main_chunks = Layout::default()
@@ -44,6 +44,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         ascii_art,
         os_info: os_info.as_ref(),
         vm_name: &vm_name,
+        scroll: app.info_scroll,
     }
     .render(main_chunks[1], frame.buffer_mut());
 
@@ -51,16 +52,28 @@ pub fn render(app: &App, frame: &mut Frame) {
     render_help_bar(app, chunks[2], frame);
 }
 
-fn render_title(area: Rect, frame: &mut Frame) {
+fn render_title(app: &App, area: Rect, frame: &mut Frame) {
+    // Format the library path, shortening home directory to ~
+    let library_path = &app.config.vm_library_path;
+    let display_path = if let Some(home) = dirs::home_dir() {
+        if let Ok(stripped) = library_path.strip_prefix(&home) {
+            format!("~/{}", stripped.display())
+        } else {
+            library_path.display().to_string()
+        }
+    } else {
+        library_path.display().to_string()
+    };
+
     let title = Paragraph::new(vec![Line::from(vec![
         Span::styled(
-            " vm-curator ",
+            " VM Curator ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "- QEMU VM Library",
+            format!("(QEMU VM Library in {})", display_path),
             Style::default().fg(Color::Gray),
         ),
     ])])
@@ -80,10 +93,8 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
         Span::raw(" Launch "),
         Span::styled(" [m]", Style::default().fg(Color::Yellow)),
         Span::raw(" Manage "),
-        Span::styled(" [c]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Config "),
-        Span::styled(" [i]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Info "),
+        Span::styled(" [PgUp/Dn]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Scroll "),
         Span::styled(" [/]", Style::default().fg(Color::Yellow)),
         Span::raw(" Search "),
         Span::styled(" [?]", Style::default().fg(Color::Yellow)),

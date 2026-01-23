@@ -11,6 +11,7 @@ pub const MENU_ITEMS: &[&str] = &[
     "Snapshots",
     "Reset VM (recreate disk)",
     "Delete VM",
+    "View Configuration",
 ];
 
 /// Render the management menu
@@ -18,7 +19,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
     // Calculate dialog size
-    let dialog_width = 40.min(area.width.saturating_sub(4));
+    let dialog_width = 50.min(area.width.saturating_sub(4));
     let dialog_height = 16.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
@@ -39,11 +40,25 @@ pub fn render(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    // Split into menu and help
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Split content into padding, menu, and help
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(2)])
-        .split(inner);
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(4),     // Menu items
+            Constraint::Length(2),  // Help text
+        ])
+        .split(h_chunks[1]);
 
     // Create menu items with descriptions
     let items: Vec<ListItem> = MENU_ITEMS
@@ -55,6 +70,7 @@ pub fn render(app: &App, frame: &mut Frame) {
                 1 => "Create, restore, or delete snapshots",
                 2 => "Restore VM to fresh state",
                 3 => "Permanently remove this VM",
+                4 => "View QEMU settings and launch script",
                 _ => "",
             };
 
@@ -82,13 +98,13 @@ pub fn render(app: &App, frame: &mut Frame) {
     let list = List::new(items)
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(list, chunks[0], &mut state);
+    frame.render_stateful_widget(list, chunks[1], &mut state);
 
     // Help text
     let help = Paragraph::new("[Enter] Select  [Esc] Back")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[1]);
+    frame.render_widget(help, chunks[2]);
 }
 
 /// Render boot options submenu
@@ -108,6 +124,25 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
 
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
+
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Add top padding
+    let v_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(1),     // Content
+        ])
+        .split(h_chunks[1]);
 
     let boot_items = [
         ("Normal boot", "Start the VM normally"),
@@ -136,13 +171,15 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
     state.select(Some(app.selected_menu_item));
 
     let list = List::new(items);
-    frame.render_stateful_widget(list, inner, &mut state);
+    frame.render_stateful_widget(list, v_chunks[1], &mut state);
 }
 
 /// Render snapshot management submenu
 pub fn render_snapshots(app: &App, frame: &mut Frame) {
+    use ratatui::widgets::Wrap;
+
     let area = frame.area();
-    let dialog_width = 50.min(area.width.saturating_sub(4));
+    let dialog_width = 55.min(area.width.saturating_sub(4));
     let dialog_height = 18.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
@@ -167,18 +204,39 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Add top padding
+    let v_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(1),     // Content
+        ])
+        .split(h_chunks[1]);
+
+    let content_area = v_chunks[1];
+
     if !supports_snapshots {
-        let msg = Paragraph::new("This VM uses a raw disk image which doesn't support snapshots.\nOnly qcow2 format disks support snapshots.")
+        let msg = Paragraph::new("This VM uses a raw disk image which doesn't support snapshots.\n\nOnly qcow2 format disks support snapshots.")
             .style(Style::default().fg(Color::Yellow))
-            .alignment(Alignment::Center);
-        frame.render_widget(msg, inner);
+            .wrap(Wrap { trim: false });
+        frame.render_widget(msg, content_area);
         return;
     }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(4), Constraint::Length(2)])
-        .split(inner);
+        .constraints([Constraint::Length(3), Constraint::Min(4), Constraint::Length(2)])
+        .split(content_area);
 
     // Action buttons
     let actions = Paragraph::new(vec![

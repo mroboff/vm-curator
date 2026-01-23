@@ -1,0 +1,412 @@
+# VM Hierarchy Configuration
+# Defines OS families, subcategories, and categorization rules
+# This file is embedded at compile time but can be overridden at runtime
+#
+# sort_by: "date" for version-based subcategories (oldest first)
+#          "name" for non-version subcategories (alphabetical) - this is the default
+
+# =============================================================================
+# OS Families - Top-level groupings
+# =============================================================================
+
+[families.alternative]
+name = "Alternative"
+icon = "🚀"
+order = 1
+
+[families.apple]
+name = "Apple"
+icon = "🍎"
+order = 2
+
+[families.be]
+name = "Be / Haiku"
+icon = "🍃"
+order = 3
+
+[families.bsd]
+name = "BSD"
+icon = "😈"
+order = 4
+
+[families.commodore]
+name = "Commodore"
+icon = "🕹️"
+order = 5
+
+[families.ibm]
+name = "IBM"
+icon = "🖥️"
+order = 6
+
+[families.linux]
+name = "Linux"
+icon = "🐧"
+order = 7
+
+[families.microsoft]
+name = "Microsoft"
+icon = "🪟"
+order = 8
+
+[families.next]
+name = "NeXT"
+icon = "⬛"
+order = 9
+
+[families.research]
+name = "Research"
+icon = "🔬"
+order = 10
+
+[families.retro]
+name = "Retro"
+icon = "👾"
+order = 11
+
+[families.unix]
+name = "Unix"
+icon = "🔷"
+order = 12
+
+[families.other]
+name = "Other"
+icon = "📦"
+order = 99
+
+# =============================================================================
+# Subcategories - Second-level groupings within families
+# Patterns are regex matched against VM IDs (case-insensitive)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Microsoft subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.dos]
+name = "DOS"
+family = "microsoft"
+order = 1
+sort_by = "date"
+patterns = ["^ms-?dos", "^dos$", "^my-first", "^dos-"]
+
+[subcategories.windows_early]
+name = "Windows 1.x-3.x"
+family = "microsoft"
+order = 2
+sort_by = "date"
+patterns = ["^windows-(1|2|3|1-0|2-0|3-0|31|3-1|311|3-11)$"]
+
+[subcategories.windows_9x]
+name = "Windows 9x"
+family = "microsoft"
+order = 3
+sort_by = "date"
+patterns = ["^windows-(95|98|me)"]
+
+[subcategories.windows_nt]
+name = "Windows NT"
+family = "microsoft"
+order = 4
+sort_by = "date"
+patterns = ["^windows-(nt|2000|2k|xp|vista|server)"]
+
+[subcategories.windows_modern]
+name = "Windows Modern"
+family = "microsoft"
+order = 5
+sort_by = "date"
+patterns = ["^windows-(7|8|81|8-1|10|11)$"]
+
+# -----------------------------------------------------------------------------
+# IBM subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.os2]
+name = "OS/2"
+family = "ibm"
+order = 1
+sort_by = "date"
+patterns = ["^os-?2", "^ecomstation", "^ecs$", "^arcaos"]
+
+[subcategories.aix]
+name = "AIX"
+family = "ibm"
+order = 2
+sort_by = "date"
+patterns = ["^aix"]
+
+# -----------------------------------------------------------------------------
+# Apple subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.mac_classic]
+name = "Classic Mac OS"
+family = "apple"
+order = 1
+sort_by = "date"
+patterns = ["^mac-(system|os-?[1-9]$|os8|os9)"]
+
+[subcategories.mac_osx_ppc]
+name = "Mac OS X (PowerPC)"
+family = "apple"
+order = 2
+sort_by = "date"
+patterns = ["^mac-osx-(cheetah|puma|jaguar|panther|tiger)"]
+
+[subcategories.mac_osx_intel]
+name = "Mac OS X (Intel)"
+family = "apple"
+order = 3
+sort_by = "date"
+patterns = ["^mac-osx-(leopard|snow-leopard|lion|mountain-lion|mavericks|yosemite|el-capitan)"]
+
+[subcategories.macos]
+name = "macOS"
+family = "apple"
+order = 4
+sort_by = "date"
+patterns = ["^macos-"]
+
+# -----------------------------------------------------------------------------
+# Linux subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.arch_based]
+name = "Arch-based"
+family = "linux"
+order = 1
+sort_by = "name"
+patterns = ["^linux-(arch|manjaro|endeavour|garuda|artix|cachyos|bazzite)"]
+
+[subcategories.debian_based]
+name = "Debian-based"
+family = "linux"
+order = 2
+sort_by = "name"
+patterns = ["^linux-(debian|ubuntu|mint|pop|elementary|mx|zorin|kali|parrot|tails|antix|deepin)"]
+
+[subcategories.independent_linux]
+name = "Independent"
+family = "linux"
+order = 3
+sort_by = "name"
+patterns = ["^linux-(gentoo|void|nixos|alpine|solus|pclinuxos|puppy|clear|mageia|mandrake|mandriva)", "^nix-os$"]
+
+[subcategories.redhat_based]
+name = "Red Hat-based"
+family = "linux"
+order = 4
+sort_by = "name"
+patterns = ["^linux-(fedora|rhel|redhat|centos|rocky|alma)"]
+
+[subcategories.slackware_based]
+name = "Slackware-based"
+family = "linux"
+order = 5
+sort_by = "name"
+patterns = ["^linux-(slackware|slax|porteus|salix)"]
+
+[subcategories.suse_based]
+name = "SUSE-based"
+family = "linux"
+order = 6
+sort_by = "name"
+patterns = ["^linux-(suse|opensuse)"]
+
+# -----------------------------------------------------------------------------
+# BSD subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.dragonfly]
+name = "DragonFly BSD"
+family = "bsd"
+order = 1
+sort_by = "name"
+patterns = ["^dragonfly"]
+
+[subcategories.freebsd]
+name = "FreeBSD"
+family = "bsd"
+order = 2
+sort_by = "name"
+patterns = ["^freebsd", "^ghostbsd", "^trueos", "^pc-bsd"]
+
+[subcategories.netbsd]
+name = "NetBSD"
+family = "bsd"
+order = 3
+sort_by = "name"
+patterns = ["^netbsd"]
+
+[subcategories.openbsd]
+name = "OpenBSD"
+family = "bsd"
+order = 4
+sort_by = "name"
+patterns = ["^openbsd"]
+
+# -----------------------------------------------------------------------------
+# Unix subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.hpux]
+name = "HP-UX"
+family = "unix"
+order = 1
+sort_by = "name"
+patterns = ["^hpux", "^hp-ux"]
+
+[subcategories.irix]
+name = "IRIX"
+family = "unix"
+order = 2
+sort_by = "name"
+patterns = ["^irix"]
+
+[subcategories.minix]
+name = "MINIX"
+family = "unix"
+order = 3
+sort_by = "name"
+patterns = ["^minix"]
+
+[subcategories.qnx]
+name = "QNX"
+family = "unix"
+order = 4
+sort_by = "name"
+patterns = ["^qnx"]
+
+[subcategories.solaris]
+name = "Solaris / illumos"
+family = "unix"
+order = 5
+sort_by = "name"
+patterns = ["^solaris", "^opensolaris", "^openindiana", "^illumos", "^omnios", "^smartos"]
+
+# -----------------------------------------------------------------------------
+# Commodore subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.amigaos]
+name = "AmigaOS"
+family = "commodore"
+order = 1
+sort_by = "date"
+patterns = ["^amigaos", "^amiga-os", "^workbench"]
+
+[subcategories.amiga_compatible]
+name = "Amiga-compatible"
+family = "commodore"
+order = 2
+sort_by = "name"
+patterns = ["^aros", "^morphos"]
+
+# -----------------------------------------------------------------------------
+# Be / Haiku subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.beos]
+name = "BeOS"
+family = "be"
+order = 1
+sort_by = "date"
+patterns = ["^beos", "^be-os"]
+
+[subcategories.haiku]
+name = "Haiku"
+family = "be"
+order = 2
+sort_by = "name"
+patterns = ["^haiku"]
+
+# -----------------------------------------------------------------------------
+# NeXT subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.nextstep]
+name = "NeXTSTEP / OpenStep"
+family = "next"
+order = 1
+sort_by = "date"
+patterns = ["^nextstep", "^openstep", "^next-"]
+
+# -----------------------------------------------------------------------------
+# Research OS subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.plan9]
+name = "Plan 9 / Inferno"
+family = "research"
+order = 1
+sort_by = "name"
+patterns = ["^plan-?9", "^inferno", "^9front"]
+
+# -----------------------------------------------------------------------------
+# Alternative OS subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.hobby_os]
+name = "Hobby / Educational"
+family = "alternative"
+order = 1
+sort_by = "name"
+patterns = ["^serenity", "^redox", "^temple", "^kolibri", "^menuet", "^toaruos"]
+
+[subcategories.reactos]
+name = "ReactOS"
+family = "alternative"
+order = 2
+sort_by = "name"
+patterns = ["^reactos"]
+
+# -----------------------------------------------------------------------------
+# Retro subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.atari]
+name = "Atari"
+family = "retro"
+order = 1
+sort_by = "name"
+patterns = ["^atari", "^tos$"]
+
+[subcategories.cpm]
+name = "CP/M"
+family = "retro"
+order = 2
+sort_by = "name"
+patterns = ["^cpm", "^cp-m"]
+
+[subcategories.freedos]
+name = "FreeDOS / DR-DOS"
+family = "retro"
+order = 3
+sort_by = "name"
+patterns = ["^freedos", "^free-dos", "^drdos", "^dr-dos"]
+
+[subcategories.geos]
+name = "GEOS"
+family = "retro"
+order = 4
+sort_by = "name"
+patterns = ["^geos"]
+
+[subcategories.riscos]
+name = "RISC OS"
+family = "retro"
+order = 5
+sort_by = "name"
+patterns = ["^riscos", "^risc-os"]
+
+# -----------------------------------------------------------------------------
+# Other/Uncategorized
+# -----------------------------------------------------------------------------
+
+[subcategories.uncategorized]
+name = "Other"
+family = "other"
+order = 1
+sort_by = "name"
+patterns = [".*"]

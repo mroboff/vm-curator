@@ -5,11 +5,12 @@ use ratatui::{
 
 use crate::metadata::OsInfo;
 
-/// ASCII art and info display widget
+/// ASCII art and info display widget with scrolling support
 pub struct AsciiInfoWidget<'a> {
     pub ascii_art: &'a str,
     pub os_info: Option<&'a OsInfo>,
     pub vm_name: &'a str,
+    pub scroll: u16,
 }
 
 impl<'a> AsciiInfoWidget<'a> {
@@ -21,51 +22,80 @@ impl<'a> AsciiInfoWidget<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Split the area: ASCII art on top, info below
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(8),  // ASCII art
-                Constraint::Length(3),  // Name and details
-                Constraint::Min(3),     // Blurb
-            ])
-            .split(inner);
+        // Add horizontal padding for elegant margins
+        let padded = Rect {
+            x: inner.x.saturating_add(2),
+            y: inner.y.saturating_add(1),
+            width: inner.width.saturating_sub(4),
+            height: inner.height.saturating_sub(1),
+        };
 
-        // Render ASCII art
-        let ascii = Paragraph::new(self.ascii_art.trim_start_matches('\n'))
-            .style(Style::default().fg(Color::Green));
-        ascii.render(chunks[0], buf);
+        // Build the full content as a single scrollable text
+        let mut lines: Vec<Line> = Vec::new();
 
-        // Render name and details
+        // ASCII art - preserve exact spacing (no trimming)
+        for line in self.ascii_art.trim_start_matches('\n').lines() {
+            lines.push(Line::styled(line, Style::default().fg(Color::Green)));
+        }
+        lines.push(Line::from(""));
+
+        // Name and details
         if let Some(info) = self.os_info {
-            let details = vec![
-                Line::from(vec![
-                    Span::styled(&info.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(vec![
-                    Span::styled(&info.publisher, Style::default().fg(Color::Gray)),
-                    Span::raw(" | "),
-                    Span::styled(&info.release_date, Style::default().fg(Color::Gray)),
-                    Span::raw(" | "),
-                    Span::styled(&info.architecture, Style::default().fg(Color::Gray)),
-                ]),
-            ];
-            let details_para = Paragraph::new(details);
-            details_para.render(chunks[1], buf);
+            lines.push(Line::from(vec![
+                Span::styled(&info.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(&info.publisher, Style::default().fg(Color::Gray)),
+                Span::raw(" | "),
+                Span::styled(&info.release_date, Style::default().fg(Color::Gray)),
+                Span::raw(" | "),
+                Span::styled(&info.architecture, Style::default().fg(Color::Gray)),
+            ]));
+            lines.push(Line::from(""));
 
-            // Render blurb
+            // Short blurb
             if !info.blurb.short.is_empty() {
-                let blurb = Paragraph::new(info.blurb.short.as_str())
-                    .style(Style::default().fg(Color::White))
-                    .wrap(Wrap { trim: true });
-                blurb.render(chunks[2], buf);
+                for line in info.blurb.short.lines() {
+                    lines.push(Line::styled(line, Style::default().fg(Color::White)));
+                }
+                lines.push(Line::from(""));
+            }
+
+            // Long description
+            if !info.blurb.long.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "About",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                for line in info.blurb.long.lines() {
+                    lines.push(Line::from(line.to_string()));
+                }
+                lines.push(Line::from(""));
+            }
+
+            // Fun facts
+            if !info.fun_facts.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "Fun Facts",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                for fact in &info.fun_facts {
+                    lines.push(Line::from(format!("• {}", fact)));
+                }
             }
         } else {
             // Just show the VM name
-            let name = Paragraph::new(self.vm_name)
-                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
-            name.render(chunks[1], buf);
+            lines.push(Line::from(Span::styled(
+                self.vm_name,
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            )));
         }
+
+        // Don't use trim: true as it breaks ASCII art spacing
+        let para = Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((self.scroll, 0));
+        para.render(padded, buf);
     }
 }
 
