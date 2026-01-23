@@ -265,13 +265,14 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => app.pop_screen(),
         KeyCode::Char('j') | KeyCode::Down => app.menu_next(screens::management::MENU_ITEMS.len()),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
-        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') => {
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') | KeyCode::Char('6') => {
             let item = match key.code {
                 KeyCode::Char('1') => 0,
                 KeyCode::Char('2') => 1,
                 KeyCode::Char('3') => 2,
                 KeyCode::Char('4') => 3,
                 KeyCode::Char('5') => 4,
+                KeyCode::Char('6') => 5,
                 _ => app.selected_menu_item,
             };
 
@@ -284,9 +285,30 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.load_snapshots()?;
                     app.push_screen(Screen::Snapshots);
                 }
-                2 => app.push_screen(Screen::Confirm(ConfirmAction::ResetVm)),
-                3 => app.push_screen(Screen::Confirm(ConfirmAction::DeleteVm)),
-                4 => app.push_screen(Screen::Configuration),
+                2 => {
+                    app.load_usb_devices()?;
+                    // Load saved USB passthrough config and pre-select matching devices
+                    if let Some(vm) = app.selected_vm() {
+                        let saved = crate::vm::load_usb_passthrough(vm);
+                        app.selected_usb_devices.clear();
+                        for saved_dev in &saved {
+                            // Find matching device by vendor/product ID
+                            for (i, dev) in app.usb_devices.iter().enumerate() {
+                                if dev.vendor_id == saved_dev.vendor_id
+                                    && dev.product_id == saved_dev.product_id
+                                {
+                                    app.selected_usb_devices.push(i);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    app.selected_menu_item = 0;
+                    app.push_screen(Screen::UsbDevices);
+                }
+                3 => app.push_screen(Screen::Confirm(ConfirmAction::ResetVm)),
+                4 => app.push_screen(Screen::Confirm(ConfirmAction::DeleteVm)),
+                5 => app.push_screen(Screen::Configuration),
                 _ => {}
             }
         }
@@ -308,7 +330,25 @@ fn handle_configuration(app: &mut App, key: KeyEvent) -> Result<()> {
 
 fn handle_raw_script(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Esc => app.pop_screen(),
+        KeyCode::Esc => {
+            app.raw_script_scroll = 0; // Reset scroll when leaving
+            app.pop_screen();
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.raw_script_scroll = app.raw_script_scroll.saturating_add(1);
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.raw_script_scroll = app.raw_script_scroll.saturating_sub(1);
+        }
+        KeyCode::PageDown => {
+            app.raw_script_scroll = app.raw_script_scroll.saturating_add(10);
+        }
+        KeyCode::PageUp => {
+            app.raw_script_scroll = app.raw_script_scroll.saturating_sub(10);
+        }
+        KeyCode::Home => {
+            app.raw_script_scroll = 0;
+        }
         _ => {}
     }
     Ok(())
@@ -401,7 +441,10 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
 
 fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Esc => app.pop_screen(),
+        KeyCode::Esc => {
+            app.selected_menu_item = 2; // Reset to USB Passthrough position in management menu
+            app.pop_screen();
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             app.selected_menu_item = (app.selected_menu_item + 1).min(app.usb_devices.len().saturating_sub(1));
         }
@@ -412,6 +455,73 @@ fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char(' ') | KeyCode::Enter => {
             app.toggle_usb_device(app.selected_menu_item);
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            // Save USB passthrough configuration to launch.sh
+            let save_result = if let Some(vm) = app.selected_vm() {
+                let devices: Vec<crate::vm::UsbPassthrough> = app
+                    .selected_usb_devices
+                    .iter()
+                    .filter_map(|&i| app.usb_devices.get(i))
+                    .map(|d| crate::vm::UsbPassthrough {
+                        vendor_id: d.vendor_id,
+                        product_id: d.product_id,
+                    })
+                    .collect();
+
+                let result = crate::vm::save_usb_passthrough(vm, &devices);
+                Some((result, devices.len()))
+            } else {
+                None
+            };
+
+            if let Some((result, count)) = save_result {
+                match result {
+                    Ok(()) => {
+                        // Reload the script so changes are visible in raw script viewer
+                        app.reload_selected_vm_script();
+                        if count > 0 {
+                            app.set_status(format!("Saved {} USB device(s) to launch.sh", count));
+                        } else {
+                            app.set_status("Cleared USB passthrough from launch.sh");
+                        }
+                    }
+                    Err(e) => {
+                        app.set_status(format!("Error saving USB config: {}", e));
+                    }
+                }
+            }
+        }
+        KeyCode::Char('u') | KeyCode::Char('U') => {
+            // Install udev rules for selected USB devices
+            if app.selected_usb_devices.is_empty() {
+                app.set_status("Select USB devices first, then press 'u' to install permissions");
+            } else {
+                let selected_devices: Vec<_> = app
+                    .selected_usb_devices
+                    .iter()
+                    .filter_map(|&i| app.usb_devices.get(i).cloned())
+                    .collect();
+
+                app.set_status("Installing udev rules (you may be prompted for your password)...");
+
+                // We need to drop the terminal temporarily for the password prompt
+                // The install function will handle elevation
+                match crate::hardware::install_udev_rules(&selected_devices) {
+                    crate::hardware::UdevInstallResult::Success => {
+                        app.set_status("USB permissions installed! Devices should now work without sudo.");
+                    }
+                    crate::hardware::UdevInstallResult::NeedsReboot => {
+                        app.set_status("Rules installed. Please unplug/replug devices or reboot.");
+                    }
+                    crate::hardware::UdevInstallResult::PermissionDenied => {
+                        app.set_status("Permission denied. Authentication cancelled or failed.");
+                    }
+                    crate::hardware::UdevInstallResult::Error(e) => {
+                        app.set_status(format!("Error installing rules: {}", e));
+                    }
+                }
+            }
         }
         _ => {}
     }
@@ -607,17 +717,25 @@ fn render_confirm(app: &App, action: &ConfirmAction, frame: &mut Frame) {
 }
 
 fn render_usb_devices(app: &App, frame: &mut Frame) {
-    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+    use ratatui::layout::{Layout, Direction, Constraint};
 
     let area = frame.area();
-    let dialog_width = 55.min(area.width.saturating_sub(4));
-    let dialog_height = 16.min(area.height.saturating_sub(4));
+    let dialog_width = 80.min(area.width.saturating_sub(4));
+    let dialog_height = 20.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
+    let selected_count = app.selected_usb_devices.len();
+    let title = if selected_count > 0 {
+        format!(" USB Passthrough ({} selected) ", selected_count)
+    } else {
+        " USB Passthrough ".to_string()
+    };
+
     let block = Block::default()
-        .title(" USB Devices ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .style(Style::default().bg(Color::Black));
@@ -625,43 +743,73 @@ fn render_usb_devices(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Split into padding, content, and help
+    let v_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(4),     // Device list
+            Constraint::Length(2),  // Help text
+        ])
+        .split(h_chunks[1]);
+
+    let content_area = v_chunks[1];
+    let help_area = v_chunks[2];
+
     if app.usb_devices.is_empty() {
-        let msg = ratatui::widgets::Paragraph::new("No USB devices found.")
+        let msg = Paragraph::new("No USB devices found.\n\nConnect a USB device and reopen this screen.")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(msg, inner);
-        return;
+        frame.render_widget(msg, content_area);
+    } else {
+        let items: Vec<ListItem> = app.usb_devices
+            .iter()
+            .enumerate()
+            .map(|(i, device)| {
+                let selected = app.selected_usb_devices.contains(&i);
+                let checkbox = if selected { "[✓]" } else { "[ ]" };
+                let style = if i == app.selected_menu_item {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if selected {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+
+                ListItem::new(format!(
+                    "{} {} ({:04x}:{:04x})",
+                    checkbox,
+                    device.display_name(),
+                    device.vendor_id,
+                    device.product_id
+                ))
+                .style(style)
+            })
+            .collect();
+
+        let mut state = ListState::default();
+        state.select(Some(app.selected_menu_item));
+
+        let list = List::new(items)
+            .highlight_symbol("> ");
+        frame.render_stateful_widget(list, content_area, &mut state);
     }
 
-    let items: Vec<ListItem> = app.usb_devices
-        .iter()
-        .enumerate()
-        .map(|(i, device)| {
-            let selected = app.selected_usb_devices.contains(&i);
-            let checkbox = if selected { "[x]" } else { "[ ]" };
-            let style = if i == app.selected_menu_item {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(format!(
-                "{} {} ({:04x}:{:04x})",
-                checkbox,
-                device.display_name(),
-                device.vendor_id,
-                device.product_id
-            ))
-            .style(style)
-        })
-        .collect();
-
-    let mut state = ListState::default();
-    state.select(Some(app.selected_menu_item));
-
-    let list = List::new(items)
-        .highlight_symbol("> ");
-    frame.render_stateful_widget(list, inner, &mut state);
+    // Help text
+    let help = Paragraph::new("[Space] Toggle  [s] Save  [u] Install USB permissions  [Esc] Back")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, help_area);
 }
 
 fn render_search(app: &App, frame: &mut Frame) {

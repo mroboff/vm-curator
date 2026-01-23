@@ -195,6 +195,11 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
 /// Render raw script view
 pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let area = frame.area();
+    let dialog_width = 80.min(area.width.saturating_sub(4));
+    let dialog_height = 35.min(area.height.saturating_sub(4));
+
+    let dialog_area = centered_rect(dialog_width, dialog_height, area);
+    frame.render_widget(Clear, dialog_area);
 
     let vm_name = app.selected_vm()
         .map(|vm| vm.display_name())
@@ -203,30 +208,47 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let block = Block::default()
         .title(format!(" {} - launch.sh ", vm_name))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = block.inner(dialog_area);
+    frame.render_widget(block, dialog_area);
 
-    // Split into script content and help text
+    // Add horizontal margins
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),  // Left margin
+            Constraint::Min(1),     // Content
+            Constraint::Length(2),  // Right margin
+        ])
+        .split(inner);
+
+    // Split into padding, script content, padding, and help text
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(inner);
+        .constraints([
+            Constraint::Length(1),  // Top padding
+            Constraint::Min(1),     // Script content
+            Constraint::Length(1),  // Bottom padding
+            Constraint::Length(1),  // Help text
+        ])
+        .split(h_chunks[1]);
 
     if let Some(vm) = app.selected_vm() {
         let script = &vm.config.raw_script;
         let para = Paragraph::new(script.as_str())
             .style(Style::default().fg(Color::White))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(para, chunks[0]);
+            .wrap(Wrap { trim: false })
+            .scroll((app.raw_script_scroll, 0));
+        frame.render_widget(para, chunks[1]);
     }
 
     // Help text
-    let help = Paragraph::new("[Esc] Back  [q] Quit")
+    let help = Paragraph::new("[↑/↓] Scroll  [Esc] Back  [q] Quit")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[1]);
+    frame.render_widget(help, chunks[3]);
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

@@ -204,6 +204,169 @@ fn read_sysfs_string(path: &std::path::Path, attr: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Result of udev rule installation
+#[derive(Debug)]
+pub enum UdevInstallResult {
+    Success,
+    NeedsReboot,
+    PermissionDenied,
+    Error(String),
+}
+
+/// Generate udev rules content for USB passthrough
+pub fn generate_udev_rules(devices: &[UsbDevice]) -> String {
+    let mut rules = String::new();
+    rules.push_str("# USB Passthrough rules for QEMU (managed by vm-curator)\n");
+    rules.push_str("# These rules allow non-root users to access USB devices for VM passthrough\n\n");
+
+    // Collect unique vendor IDs to avoid duplicate rules
+    let mut seen_vendors = std::collections::HashSet::new();
+
+    for device in devices {
+        if seen_vendors.insert(device.vendor_id) {
+            rules.push_str(&format!(
+                "# {} devices\n",
+                if device.vendor_name.is_empty() {
+                    format!("Vendor {:04x}", device.vendor_id)
+                } else {
+                    device.vendor_name.clone()
+                }
+            ));
+            rules.push_str(&format!(
+                "SUBSYSTEM==\"usb\", ATTR{{idVendor}}==\"{:04x}\", MODE=\"0666\"\n\n",
+                device.vendor_id
+            ));
+        }
+    }
+
+    rules
+}
+
+/// Install udev rules for USB passthrough
+/// Uses pkexec (graphical sudo) if available, falls back to sudo
+pub fn install_udev_rules(devices: &[UsbDevice]) -> UdevInstallResult {
+    if devices.is_empty() {
+        return UdevInstallResult::Error("No devices selected".to_string());
+    }
+
+    let rules_content = generate_udev_rules(devices);
+    let rules_path = "/etc/udev/rules.d/99-vm-curator-usb.rules";
+
+    // Write rules to a temporary file
+    let temp_path = "/tmp/vm-curator-usb-rules.tmp";
+    if let Err(e) = std::fs::write(temp_path, &rules_content) {
+        return UdevInstallResult::Error(format!("Failed to write temp file: {}", e));
+    }
+
+    // Try pkexec first (graphical sudo prompt), then fall back to sudo
+    let install_result = try_pkexec_install(temp_path, rules_path)
+        .or_else(|| try_sudo_install(temp_path, rules_path));
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(temp_path);
+
+    match install_result {
+        Some(true) => {
+            // Reload udev rules
+            let reload_result = reload_udev_rules();
+            if reload_result {
+                UdevInstallResult::Success
+            } else {
+                UdevInstallResult::NeedsReboot
+            }
+        }
+        Some(false) => UdevInstallResult::PermissionDenied,
+        None => UdevInstallResult::Error("No suitable privilege escalation method found".to_string()),
+    }
+}
+
+fn try_pkexec_install(temp_path: &str, rules_path: &str) -> Option<bool> {
+    use std::process::Command;
+
+    // Check if pkexec is available
+    if Command::new("which").arg("pkexec").output().ok()?.status.success() {
+        // Use pkexec to copy the file
+        let status = Command::new("pkexec")
+            .args(["cp", temp_path, rules_path])
+            .status()
+            .ok()?;
+
+        Some(status.success())
+    } else {
+        None
+    }
+}
+
+fn try_sudo_install(temp_path: &str, rules_path: &str) -> Option<bool> {
+    use std::process::{Command, Stdio};
+
+    // Check if sudo is available
+    if !Command::new("which").arg("sudo").output().ok()?.status.success() {
+        return None;
+    }
+
+    // Use sudo with -A flag to use SSH_ASKPASS or similar for password prompt
+    // If that fails, try regular sudo which will use the terminal
+    let status = Command::new("sudo")
+        .args(["cp", temp_path, rules_path])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .ok()?;
+
+    Some(status.success())
+}
+
+fn reload_udev_rules() -> bool {
+    use std::process::Command;
+
+    // Try to reload udev rules using pkexec or sudo
+    let reload_cmd = "udevadm control --reload-rules && udevadm trigger";
+
+    // Try pkexec first
+    if let Ok(status) = Command::new("pkexec")
+        .args(["sh", "-c", reload_cmd])
+        .status()
+    {
+        if status.success() {
+            return true;
+        }
+    }
+
+    // Fall back to sudo
+    if let Ok(status) = Command::new("sudo")
+        .args(["sh", "-c", reload_cmd])
+        .status()
+    {
+        return status.success();
+    }
+
+    false
+}
+
+/// Check if udev rules are already installed for the given devices
+pub fn check_udev_rules_installed(devices: &[UsbDevice]) -> bool {
+    let rules_path = std::path::Path::new("/etc/udev/rules.d/99-vm-curator-usb.rules");
+
+    if !rules_path.exists() {
+        return false;
+    }
+
+    // Read existing rules and check if all device vendors are covered
+    if let Ok(content) = std::fs::read_to_string(rules_path) {
+        for device in devices {
+            let vendor_pattern = format!("{:04x}", device.vendor_id);
+            if !content.contains(&vendor_pattern) {
+                return false;
+            }
+        }
+        true
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

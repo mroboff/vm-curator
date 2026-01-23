@@ -131,6 +131,8 @@ pub struct App {
     pub error_scroll: u16,
     /// Right panel scroll position (for info panel)
     pub info_scroll: u16,
+    /// Raw script view scroll position
+    pub raw_script_scroll: u16,
 }
 
 /// Entry in file browser
@@ -205,6 +207,7 @@ impl App {
             error_detail: None,
             error_scroll: 0,
             info_scroll: 0,
+            raw_script_scroll: 0,
         })
     }
 
@@ -344,6 +347,22 @@ impl App {
             self.selected_usb_devices.remove(pos);
         } else {
             self.selected_usb_devices.push(index);
+        }
+    }
+
+    /// Reload the selected VM's raw script from disk
+    pub fn reload_selected_vm_script(&mut self) {
+        if self.visual_order.is_empty() {
+            return;
+        }
+        if let Some(filtered_idx) = self.visual_order.get(self.selected_vm) {
+            if let Some(actual_idx) = self.filtered_indices.get(*filtered_idx) {
+                if let Some(vm) = self.vms.get_mut(*actual_idx) {
+                    if let Ok(content) = std::fs::read_to_string(&vm.launch_script) {
+                        vm.config.raw_script = content;
+                    }
+                }
+            }
         }
     }
 

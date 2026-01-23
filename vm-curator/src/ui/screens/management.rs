@@ -9,6 +9,7 @@ use crate::app::App;
 pub const MENU_ITEMS: &[&str] = &[
     "Boot Options",
     "Snapshots",
+    "USB Passthrough",
     "Reset VM (recreate disk)",
     "Delete VM",
     "View Configuration",
@@ -20,7 +21,7 @@ pub fn render(app: &App, frame: &mut Frame) {
 
     // Calculate dialog size
     let dialog_width = 50.min(area.width.saturating_sub(4));
-    let dialog_height = 16.min(area.height.saturating_sub(4));
+    let dialog_height = 18.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
 
@@ -68,9 +69,10 @@ pub fn render(app: &App, frame: &mut Frame) {
             let description = match i {
                 0 => "Normal, install, or custom ISO boot",
                 1 => "Create, restore, or delete snapshots",
-                2 => "Restore VM to fresh state",
-                3 => "Permanently remove this VM",
-                4 => "View QEMU settings and launch script",
+                2 => "Pass USB devices to the VM",
+                3 => "Restore VM to fresh state",
+                4 => "Permanently remove this VM",
+                5 => "View QEMU settings and launch script",
                 _ => "",
             };
 
