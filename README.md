@@ -1,6 +1,12 @@
-## vm-curator
+# vm-curator
 
-A Rust TUI application for managing QEMU virtual machine libraries. Discover, organize, launch, and create VMs with an intuitive terminal interface.
+A fast and friendly Rust TUI for managing QEMU/KVM virtual machines. Discover, create, organize, launch, and manage VMs with an intuitive interface. 
+
+### Important Launch Note ##
+
+Para-virtualized 3D acceleration **works with NVIDIA GPUs** in VMs created by `vm-curator`! 
+
+This was extensively tested by the developer on an RTX-4090 in Arch Linux using NVIDIA driver 590.48.01. The guest OS still has to support QEMU 3D-accelleration. `(virtio-vga-gl with gl=on.)` Note this is not the same as full GPU Passthrough (the kind requiring multiple GPUs and/or jumping through many, many hoops.) Support for full GPU passthrough is being worked on.
 
 ### Features
 
@@ -241,6 +247,35 @@ VM Curator automatically detects OVMF/UEFI firmware paths across Linux distribut
 - Fedora/RHEL: `/usr/share/edk2/ovmf/OVMF_CODE.fd`
 - NixOS: Multiple search paths supported
 - And more...
+
+---
+
+### 🤝 Contributing
+
+Contributions are welcome! If you find a bug or have an idea for an improvement, feel free to open an issue or submit a Pull Request.
+
+**Help Wanted: ASCII Art**
+As a TUI application, `vm-curator` relies on visual flair to stand out. I am specifically looking for help with:
+* **Logo/Banner Art:** A cool ASCII banner for the startup screen.
+* **Iconography:** Small, recognizable ASCII/block character icons for the TUI menus (e.g., stylized hard drives, network cards, or GPU icons).
+
+If you have a knack for terminal aesthetics, your PRs are highly appreciated!
+
+### ☕ Support & Maintenance Status
+
+**`vm-curator`** was built to solve a specific, painful problem: getting high-performance, 3D-accelerated Linux VMs (via QEMU) without the overhead and complexity of `libvirt` or `virt-manager`.
+
+This is a **personal passion project** that I am sharing with the community. While I use this tool daily and will fix critical bugs as I encounter them, please note:
+
+* **Development Pace:** This project is maintained in my spare time. Feature requests will be considered but are not guaranteed.
+* **The "As-Is" Philosophy:** The goal is a lean, transparent TUI. I prioritize stability and performance over comprehensive enterprise feature parity.
+
+**If this tool saved you time or helped you get 3D Acceleration working without having to resort to passthrough:**
+
+If you'd like to say thanks, you can support the project below. **Donations are a "thank you" for existing work, not a payment for future support.**
+
+* **[GitHub Sponsors](https://github.com/sponsors/YOUR_USERNAME):** Best for one-time contributions (Goes to the RTX-Pro 6000 fund!)
+* **[Ko-fi](https://ko-fi.com/YOUR_USERNAME):** Buy me a coffee (or a generic energy drink).
 
 ### License
 
