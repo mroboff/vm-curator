@@ -271,6 +271,9 @@ impl QemuProfileStore {
             "macos" => "macOS",
             "alternative" => "Alternative",
             "retro" => "Retro",
+            "mobile" => "Mobile / Android",
+            "infrastructure" => "Infrastructure",
+            "utilities" => "Utilities",
             _ => "Other",
         }
     }

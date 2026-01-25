@@ -12,6 +12,7 @@ use ratatui::{
 
 use crate::app::{App, WizardStep, WizardField, WizardQemuConfig};
 use crate::metadata::QemuProfileStore;
+use crate::vm::create_vm;
 
 /// Render the create wizard based on current step
 pub fn render(app: &App, frame: &mut Frame) {
@@ -42,7 +43,7 @@ pub fn render(app: &App, frame: &mut Frame) {
 pub fn render_custom_os(app: &App, frame: &mut Frame) {
     let area = frame.area();
     let dialog_width = 70.min(area.width.saturating_sub(4));
-    let dialog_height = 30.min(area.height.saturating_sub(4));
+    let dialog_height = 28.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -56,11 +57,237 @@ pub fn render_custom_os(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    let text = Paragraph::new("Custom OS entry form - Coming soon\n\n[Esc] Cancel")
-        .style(Style::default().fg(Color::Gray))
+    let Some(ref state) = app.wizard_state else {
+        return;
+    };
+
+    let custom_os = state.custom_os.as_ref();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(1),   // Intro text
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(3),   // OS Name
+            Constraint::Length(3),   // Publisher
+            Constraint::Length(3),   // Architecture
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(5),   // Base profile selection
+            Constraint::Length(1),   // Spacer
+            Constraint::Min(3),      // Tips
+            Constraint::Length(2),   // Help
+        ])
+        .split(inner);
+
+    // Intro text
+    let intro = Paragraph::new("Define your custom operating system:")
+        .style(Style::default().fg(Color::Yellow));
+    frame.render_widget(intro, chunks[0]);
+
+    // OS Name input
+    let os_name = custom_os.map(|c| c.name.as_str()).unwrap_or("");
+    let name_focus = state.field_focus == 0;
+    let name_editing = matches!(state.editing_field, Some(WizardField::CustomOsName));
+
+    render_input_field(
+        frame, chunks[2],
+        "OS Name",
+        if os_name.is_empty() { "e.g., My Custom Linux" } else { os_name },
+        os_name.is_empty(),
+        name_focus,
+        name_editing,
+    );
+
+    if name_editing {
+        let cursor_x = chunks[2].x + 1 + os_name.len() as u16;
+        let cursor_y = chunks[2].y + 1;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    // Publisher input
+    let publisher = custom_os.map(|c| c.publisher.as_str()).unwrap_or("");
+    let pub_focus = state.field_focus == 1;
+    let pub_editing = matches!(state.editing_field, Some(WizardField::CustomOsPublisher));
+
+    render_input_field(
+        frame, chunks[3],
+        "Publisher",
+        if publisher.is_empty() { "e.g., Open Source Community" } else { publisher },
+        publisher.is_empty(),
+        pub_focus,
+        pub_editing,
+    );
+
+    if pub_editing {
+        let cursor_x = chunks[3].x + 1 + publisher.len() as u16;
+        let cursor_y = chunks[3].y + 1;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
+
+    // Architecture selection (cycle)
+    let arch = custom_os.map(|c| c.architecture.as_str()).unwrap_or("x86_64");
+    let arch_focus = state.field_focus == 2;
+    render_select_field(
+        frame, chunks[4],
+        "Architecture",
+        arch,
+        arch_focus,
+        "[←/→] to change",
+    );
+
+    // Base profile selection
+    let base_profile = custom_os.map(|c| c.base_profile.as_str()).unwrap_or("generic-other");
+    let base_focus = state.field_focus == 3;
+
+    let base_block = Block::default()
+        .title(" Base QEMU Profile ")
+        .borders(Borders::ALL)
+        .border_style(if base_focus {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Gray)
+        });
+
+    let base_inner = base_block.inner(chunks[6]);
+    frame.render_widget(base_block, chunks[6]);
+
+    let base_display = get_base_profile_display(base_profile);
+    let mut base_lines = Vec::new();
+    base_lines.push(Line::from(vec![
+        Span::styled("Profile: ", Style::default().fg(Color::Yellow)),
+        Span::styled(base_display, if base_focus { Style::default().fg(Color::White).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) }),
+    ]));
+    base_lines.push(Line::from(Span::styled(
+        if base_focus { "[←/→] Change profile" } else { "" },
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let base_text = Paragraph::new(base_lines);
+    frame.render_widget(base_text, base_inner);
+
+    // Tips
+    let tips_block = Block::default()
+        .title(" Tip ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let tips_inner = tips_block.inner(chunks[8]);
+    frame.render_widget(tips_block, chunks[8]);
+
+    let tips_text = Paragraph::new(
+        "You can adjust QEMU settings in step 4.\n\
+         Consider contributing new OS profiles to the project!"
+    )
+    .style(Style::default().fg(Color::DarkGray))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(tips_text, tips_inner);
+
+    // Help
+    let help = Paragraph::new("[Tab] Next field  [Enter] Continue  [Esc] Cancel")
+        .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[9]);
+}
+
+fn render_input_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    is_placeholder: bool,
+    is_focused: bool,
+    is_editing: bool,
+) {
+    let border_style = if is_editing {
+        Style::default().fg(Color::Yellow)
+    } else if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let block = Block::default()
+        .title(format!(" {} ", label))
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let text_style = if is_placeholder {
+        Style::default().fg(Color::DarkGray)
+    } else if is_editing {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let text = Paragraph::new(value).style(text_style);
     frame.render_widget(text, inner);
 }
+
+fn render_select_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    is_focused: bool,
+    hint: &str,
+) {
+    let border_style = if is_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let block = Block::default()
+        .title(format!(" {} ", label))
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut spans = vec![
+        Span::styled(value, if is_focused {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        }),
+    ];
+
+    if is_focused {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    }
+
+    let text = Paragraph::new(Line::from(spans));
+    frame.render_widget(text, inner);
+}
+
+fn get_base_profile_display(profile_id: &str) -> &'static str {
+    match profile_id {
+        "generic-linux" => "Generic Linux (modern, virtio)",
+        "generic-windows" => "Generic Windows (SATA, e1000)",
+        "generic-bsd" => "Generic BSD (IDE, pcnet)",
+        "linux-debian" => "Debian-based Linux",
+        "linux-fedora" => "Fedora/RHEL-based Linux",
+        "linux-arch" => "Arch Linux",
+        _ => "Generic (safe defaults)",
+    }
+}
+
+const ARCH_OPTIONS: &[&str] = &["x86_64", "i386", "arm64", "ppc64", "mips64", "riscv64"];
+const BASE_PROFILE_OPTIONS: &[&str] = &[
+    "generic-other",
+    "generic-linux",
+    "generic-windows",
+    "generic-bsd",
+    "linux-debian",
+    "linux-fedora",
+    "linux-arch",
+];
 
 /// Render ISO download progress
 pub fn render_download(app: &App, frame: &mut Frame) {
@@ -108,11 +335,164 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
 /// Handle key input for custom OS form
 pub fn handle_custom_os_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Esc => {
-            app.pop_screen();
+    let editing = app.wizard_state.as_ref()
+        .map(|s| s.editing_field.is_some())
+        .unwrap_or(false);
+
+    if editing {
+        // Text input mode
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Tab => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.editing_field = None;
+                    if key.code == KeyCode::Tab {
+                        // Move to next field
+                        state.field_focus = (state.field_focus + 1) % 4;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(ref mut state) = app.wizard_state {
+                    if let Some(ref mut custom) = state.custom_os {
+                        match state.editing_field {
+                            Some(WizardField::CustomOsName) => custom.name.push(c),
+                            Some(WizardField::CustomOsPublisher) => custom.publisher.push(c),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut state) = app.wizard_state {
+                    if let Some(ref mut custom) = state.custom_os {
+                        match state.editing_field {
+                            Some(WizardField::CustomOsName) => { custom.name.pop(); }
+                            Some(WizardField::CustomOsPublisher) => { custom.publisher.pop(); }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
-        _ => {}
+    } else {
+        // Navigation mode
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel custom OS and return to wizard
+                if let Some(ref mut state) = app.wizard_state {
+                    state.custom_os = None;
+                }
+                app.pop_screen();
+            }
+            KeyCode::Tab | KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.field_focus = (state.field_focus + 1) % 4;
+                }
+            }
+            KeyCode::BackTab | KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.field_focus = if state.field_focus == 0 { 3 } else { state.field_focus - 1 };
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let delta = if key.code == KeyCode::Right { 1i32 } else { -1i32 };
+                if let Some(ref mut state) = app.wizard_state {
+                    if let Some(ref mut custom) = state.custom_os {
+                        match state.field_focus {
+                            2 => {
+                                // Architecture
+                                let current_idx = ARCH_OPTIONS.iter()
+                                    .position(|&a| a == custom.architecture)
+                                    .unwrap_or(0);
+                                let new_idx = (current_idx as i32 + delta)
+                                    .rem_euclid(ARCH_OPTIONS.len() as i32) as usize;
+                                custom.architecture = ARCH_OPTIONS[new_idx].to_string();
+                            }
+                            3 => {
+                                // Base profile
+                                let current_idx = BASE_PROFILE_OPTIONS.iter()
+                                    .position(|&p| p == custom.base_profile)
+                                    .unwrap_or(0);
+                                let new_idx = (current_idx as i32 + delta)
+                                    .rem_euclid(BASE_PROFILE_OPTIONS.len() as i32) as usize;
+                                custom.base_profile = BASE_PROFILE_OPTIONS[new_idx].to_string();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(' ') => {
+                // Enter edit mode for text fields
+                if let Some(ref mut state) = app.wizard_state {
+                    match state.field_focus {
+                        0 => state.editing_field = Some(WizardField::CustomOsName),
+                        1 => state.editing_field = Some(WizardField::CustomOsPublisher),
+                        _ => {}
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                // Validate and continue
+                let valid = app.wizard_state.as_ref()
+                    .and_then(|s| s.custom_os.as_ref())
+                    .map(|c| !c.name.trim().is_empty())
+                    .unwrap_or(false);
+
+                if valid {
+                    // Extract needed data first
+                    let (base_profile_id, custom_name, vm_name_empty) = {
+                        let state = app.wizard_state.as_ref().unwrap();
+                        let custom = state.custom_os.as_ref().unwrap();
+                        (
+                            custom.base_profile.clone(),
+                            custom.name.clone(),
+                            state.vm_name.is_empty(),
+                        )
+                    };
+
+                    // Get profile settings
+                    let profile_settings = app.qemu_profiles.get(&base_profile_id).cloned();
+
+                    // Now apply changes
+                    if let Some(ref mut state) = app.wizard_state {
+                        // Apply profile settings
+                        if let Some(profile) = profile_settings {
+                            state.qemu_config = WizardQemuConfig::from_profile(&profile);
+                            state.disk_size_gb = profile.disk_size_gb;
+                        }
+
+                        // Set VM name if empty
+                        if vm_name_empty {
+                            state.vm_name = custom_name.clone();
+                            state.update_folder_name();
+                        }
+
+                        // Generate ID from name
+                        let id = custom_name.to_lowercase()
+                            .chars()
+                            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                            .collect::<String>()
+                            .split('-')
+                            .filter(|s| !s.is_empty())
+                            .collect::<Vec<_>>()
+                            .join("-");
+
+                        if let Some(ref mut custom) = state.custom_os {
+                            custom.id = id;
+                        }
+                    }
+
+                    app.pop_screen(); // Return to wizard
+                } else {
+                    if let Some(ref mut state) = app.wizard_state {
+                        state.error_message = Some("Please enter an OS name".to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
     }
     Ok(())
 }
@@ -241,7 +621,7 @@ fn render_os_list(app: &App, frame: &mut Frame, area: Rect) {
     let mut item_index = 0;
 
     // Get categories in display order
-    let category_order = ["windows", "linux", "bsd", "unix", "alternative", "retro", "classic-mac", "macos"];
+    let category_order = ["windows", "linux", "bsd", "unix", "macos", "mobile", "infrastructure", "utilities", "alternative", "retro", "classic-mac"];
 
     for category in &category_order {
         let profiles = app.qemu_profiles.list_by_category(category);
@@ -415,7 +795,7 @@ fn handle_step_select_os(app: &mut App, key: KeyEvent) -> Result<()> {
 /// Count total items in the OS list (categories + visible OSes + custom)
 fn count_os_list_items(app: &App) -> usize {
     let state = app.wizard_state.as_ref().unwrap();
-    let category_order = ["windows", "linux", "bsd", "unix", "alternative", "retro", "classic-mac", "macos"];
+    let category_order = ["windows", "linux", "bsd", "unix", "macos", "mobile", "infrastructure", "utilities", "alternative", "retro", "classic-mac"];
 
     let mut count = 0;
     for category in &category_order {
@@ -453,7 +833,7 @@ fn handle_os_list_action(app: &mut App, proceed: bool) {
     let os_filter = state.os_filter.clone();
     let expanded_categories: Vec<String> = state.expanded_categories.clone();
 
-    let category_order = ["windows", "linux", "bsd", "unix", "alternative", "retro", "classic-mac", "macos"];
+    let category_order = ["windows", "linux", "bsd", "unix", "macos", "mobile", "infrastructure", "utilities", "alternative", "retro", "classic-mac"];
 
     let mut item_index = 0;
     let mut action: Option<OsListAction> = None;
@@ -596,7 +976,7 @@ fn render_step_select_iso(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().fg(Color::White)
         };
         let prefix = if is_selected { "> " } else { "  " };
-        lines.push(Line::styled(format!("{}( ) Download ISO from official source", prefix), style));
+        lines.push(Line::styled(format!("{}( ) Open download page in browser", prefix), style));
         option_idx += 1;
     }
 
@@ -669,9 +1049,20 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
 
             match focus + option_offset {
                 0 => {
-                    // Download ISO
-                    // For now, just go to next step
-                    let _ = app.wizard_next_step();
+                    // Open download page in browser
+                    if let Some(url) = app.wizard_state.as_ref()
+                        .and_then(|s| s.selected_os.as_ref())
+                        .and_then(|id| app.qemu_profiles.get(id))
+                        .and_then(|p| p.iso_url.as_ref())
+                    {
+                        // Try to open in browser
+                        let url = url.clone();
+                        if let Err(e) = open_url_in_browser(&url) {
+                            app.set_status(format!("Failed to open browser: {}", e));
+                        } else {
+                            app.set_status("Opened download page in browser. Use 'Browse for ISO' after downloading.");
+                        }
+                    }
                 }
                 1 => {
                     // Browse for ISO - open file browser
@@ -882,6 +1273,7 @@ enum QemuField {
     DiskInterface,
     Display,
     Kvm,
+    GlAccel,
     Uefi,
     Tpm,
     UsbTablet,
@@ -899,15 +1291,16 @@ impl QemuField {
             5 => Self::DiskInterface,
             6 => Self::Display,
             7 => Self::Kvm,
-            8 => Self::Uefi,
-            9 => Self::Tpm,
-            10 => Self::UsbTablet,
+            8 => Self::GlAccel,
+            9 => Self::Uefi,
+            10 => Self::Tpm,
+            11 => Self::UsbTablet,
             _ => Self::RtcLocal,
         }
     }
 
     fn count() -> usize {
-        12
+        13
     }
 }
 
@@ -1039,20 +1432,24 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     let kvm_selected = focus == 7;
     lines.push(render_toggle_line("KVM Accel:", config.enable_kvm, kvm_selected));
 
+    // 3D/GL acceleration toggle
+    let gl_selected = focus == 8;
+    lines.push(render_toggle_line("3D Accel:", config.gl_acceleration, gl_selected));
+
     // UEFI toggle
-    let uefi_selected = focus == 8;
+    let uefi_selected = focus == 9;
     lines.push(render_toggle_line("UEFI Boot:", config.uefi, uefi_selected));
 
     // TPM toggle
-    let tpm_selected = focus == 9;
+    let tpm_selected = focus == 10;
     lines.push(render_toggle_line("TPM 2.0:", config.tpm, tpm_selected));
 
     // USB Tablet toggle
-    let usb_selected = focus == 10;
+    let usb_selected = focus == 11;
     lines.push(render_toggle_line("USB Tablet:", config.usb_tablet, usb_selected));
 
     // RTC Local toggle
-    let rtc_selected = focus == 11;
+    let rtc_selected = focus == 12;
     lines.push(render_toggle_line("RTC Local:", config.rtc_localtime, rtc_selected));
 
     let settings = Paragraph::new(lines);
@@ -1062,7 +1459,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     let help_text = if editing {
         "[Enter] Done  [←/→] Adjust"
     } else {
-        "[j/k] Navigate  [←/→] Change  [Space] Toggle  [r] Reset  [Enter] Next"
+        "[j/k] Navigate  [←/→] Change  [Space] Toggle  [Esc] Back  [Enter] Continue"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -1212,6 +1609,11 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             Enables near-native speed using CPU virtualization.\n\n\
             Requires: Linux host with Intel VT-x or AMD-V.\n\
             Disable for: Non-x86 guests, nested virt issues.".to_string(),
+        QemuField::GlAccel => "3D/OpenGL acceleration.\n\n\
+            Hardware-accelerated 3D graphics via virtio-gpu.\n\n\
+            Requires: virtio VGA (auto-set when enabled)\n\
+            Best for: Linux guests, Android x86\n\
+            Not for: Windows (no virtio 3D), retro OSes".to_string(),
         QemuField::Uefi => format!(
             "UEFI boot mode for {}.\n\n\
             Modern boot firmware (vs legacy BIOS).\n\n\
@@ -1276,6 +1678,13 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                 let field = QemuField::from_index(state.field_focus);
                 match field {
                     QemuField::Kvm => state.qemu_config.enable_kvm = !state.qemu_config.enable_kvm,
+                    QemuField::GlAccel => {
+                        state.qemu_config.gl_acceleration = !state.qemu_config.gl_acceleration;
+                        // Enabling GL acceleration requires virtio VGA
+                        if state.qemu_config.gl_acceleration && state.qemu_config.vga != "virtio" {
+                            state.qemu_config.vga = "virtio".to_string();
+                        }
+                    }
                     QemuField::Uefi => state.qemu_config.uefi = !state.qemu_config.uefi,
                     QemuField::Tpm => state.qemu_config.tpm = !state.qemu_config.tpm,
                     QemuField::UsbTablet => state.qemu_config.usb_tablet = !state.qemu_config.usb_tablet,
@@ -1490,13 +1899,102 @@ fn handle_step_confirm(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Enter => {
             // Create the VM
-            // TODO: Implement actual VM creation
-            app.set_status("VM creation not yet implemented - coming soon!");
-            app.cancel_wizard();
+            let (library_path, auto_launch) = {
+                let state = app.wizard_state.as_ref().unwrap();
+                let path = app.config.vm_library_path.clone();
+                let launch = state.auto_launch;
+                (path, launch)
+            };
+
+            // Clone the state for creation
+            let state = app.wizard_state.as_ref().unwrap().clone();
+            let vm_name = state.vm_name.clone();
+
+            match create_vm(&library_path, &state) {
+                Ok(created) => {
+                    // Cancel wizard first (closes screens)
+                    app.cancel_wizard();
+
+                    // Refresh VM list to include the new VM
+                    match app.refresh_vms() {
+                        Ok(()) => {
+                            app.set_status(format!("VM created: {}", vm_name));
+                        }
+                        Err(e) => {
+                            app.set_status(format!("VM created but refresh failed: {}", e));
+                        }
+                    }
+
+                    // If auto_launch is enabled, find and launch the new VM
+                    if auto_launch {
+                        // Find the newly created VM and select it
+                        if let Some(idx) = app.vms.iter().position(|vm| {
+                            vm.launch_script == created.launch_script
+                        }) {
+                            // Find in visual order
+                            if let Some(visual_idx) = app.visual_order.iter().position(|&filtered_idx| {
+                                app.filtered_indices.get(filtered_idx) == Some(&idx)
+                            }) {
+                                app.selected_vm = visual_idx;
+
+                                // Set boot mode to install
+                                app.boot_mode = crate::vm::BootMode::Install;
+
+                                // Launch the VM
+                                match launch_created_vm(app) {
+                                    Ok(()) => {
+                                        app.set_status(format!("Launched: {}", vm_name));
+                                    }
+                                    Err(e) => {
+                                        app.set_status(format!("VM created but launch failed: {}", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if let Some(ref mut state) = app.wizard_state {
+                        state.error_message = Some(format!("Failed to create VM: {}", e));
+                    }
+                }
+            }
         }
         _ => {}
     }
     Ok(())
+}
+
+/// Launch a newly created VM
+fn launch_created_vm(app: &mut App) -> Result<()> {
+    if let Some(vm) = app.selected_vm() {
+        let options = app.get_launch_options();
+        crate::vm::launch_vm_sync(vm, &options)?;
+    }
+    Ok(())
+}
+
+/// Open a URL in the default browser
+fn open_url_in_browser(url: &str) -> Result<()> {
+    use std::process::Command;
+
+    // Try xdg-open first (standard on Linux)
+    let result = Command::new("xdg-open")
+        .arg(url)
+        .spawn();
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            // Fallback to other openers
+            for opener in &["firefox", "chromium", "google-chrome", "open"] {
+                if Command::new(opener).arg(url).spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("No browser found. Please visit: {}", url)
+        }
+    }
 }
 
 // =============================================================================

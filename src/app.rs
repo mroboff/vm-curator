@@ -159,6 +159,8 @@ pub struct WizardQemuConfig {
     pub disk_interface: String,
     /// Enable KVM acceleration
     pub enable_kvm: bool,
+    /// Enable 3D/GL acceleration (requires virtio-vga)
+    pub gl_acceleration: bool,
     /// UEFI boot mode
     pub uefi: bool,
     /// TPM emulation
@@ -186,6 +188,7 @@ impl Default for WizardQemuConfig {
             network_model: "e1000".to_string(),
             disk_interface: "ide".to_string(),
             enable_kvm: true,
+            gl_acceleration: false,
             uefi: false,
             tpm: false,
             rtc_localtime: false,
@@ -199,6 +202,11 @@ impl Default for WizardQemuConfig {
 impl WizardQemuConfig {
     /// Create from a QEMU profile
     pub fn from_profile(profile: &crate::metadata::QemuProfile) -> Self {
+        // Check if profile has GL acceleration hints in extra_args
+        let gl_acceleration = profile.extra_args.iter().any(|arg|
+            arg.contains("virtio-vga-gl") || arg.contains("gl=on")
+        );
+
         Self {
             emulator: profile.emulator.clone(),
             memory_mb: profile.memory_mb,
@@ -210,6 +218,7 @@ impl WizardQemuConfig {
             network_model: profile.network_model.clone(),
             disk_interface: profile.disk_interface.clone(),
             enable_kvm: profile.enable_kvm,
+            gl_acceleration,
             uefi: profile.uefi,
             tpm: profile.tpm,
             rtc_localtime: profile.rtc_localtime,
@@ -517,24 +526,40 @@ pub enum BackgroundResult {
 impl App {
     /// Create a new application instance
     pub fn new(config: Config) -> Result<Self> {
-        // Discover VMs
-        let vms = discover_vms(&config.vm_library_path)?;
+        Self::new_with_progress(config, |_, _, _| {})
+    }
 
-        // Load metadata
+    /// Create a new application instance with progress callback
+    pub fn new_with_progress<F>(config: Config, progress: F) -> Result<Self>
+    where
+        F: Fn(usize, usize, &str),
+    {
+        const TOTAL_STEPS: usize = 6;
+
+        // Step 1: Discover VMs
+        progress(1, TOTAL_STEPS, "Discovering VMs...");
+        let vms = discover_vms(&config.vm_library_path)?;
+        progress(1, TOTAL_STEPS, &format!("Found {} VMs", vms.len()));
+
+        // Step 2: Load metadata
+        progress(2, TOTAL_STEPS, "Loading OS metadata...");
         let mut metadata = MetadataStore::load_embedded();
         if let Ok(user_metadata) = MetadataStore::load_from_dir(&config.metadata_path) {
             metadata.merge(user_metadata);
         }
 
-        // Load ASCII art
+        // Step 3: Load ASCII art
+        progress(3, TOTAL_STEPS, "Loading ASCII art...");
         let mut ascii_art = AsciiArtStore::load_embedded();
         let user_art = AsciiArtStore::load_from_dir(&config.ascii_art_path);
         ascii_art.merge(user_art);
 
-        // Load hierarchy config
+        // Step 4: Load hierarchy config
+        progress(4, TOTAL_STEPS, "Loading hierarchy...");
         let hierarchy = HierarchyConfig::load_embedded();
 
-        // Load QEMU profiles
+        // Step 5: Load QEMU profiles
+        progress(5, TOTAL_STEPS, "Loading QEMU profiles...");
         let mut qemu_profiles = QemuProfileStore::load_embedded();
         let config_dir = Config::config_file_path()
             .parent()
@@ -543,6 +568,8 @@ impl App {
         let user_profiles_path = config_dir.join("qemu_profiles.toml");
         qemu_profiles.load_user_overrides(&user_profiles_path);
 
+        // Step 6: Build visual order
+        progress(6, TOTAL_STEPS, "Building VM list...");
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
         let visual_order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata);
         let (background_tx, background_rx) = mpsc::channel();

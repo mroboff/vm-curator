@@ -130,6 +130,19 @@ impl Drop for TerminalGuard {
 }
 
 fn run_tui(config: Config) -> Result<()> {
+    // Show loading screen before entering TUI
+    print_loading_header();
+
+    // Create app state with progress updates
+    let app = App::new_with_progress(config, |step, total, msg| {
+        print_loading_progress(step, total, msg);
+    })?;
+
+    // Clear loading screen
+    print!("\r\x1b[K"); // Clear line
+    println!("\x1b[32m✓\x1b[0m Ready! Starting TUI...");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -141,11 +154,32 @@ fn run_tui(config: Config) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app state
-    let mut app = App::new(config)?;
-
     // Run the app - guard will restore terminal even if this panics
+    let mut app = app;
     ui::run(&mut terminal, &mut app)
+}
+
+fn print_loading_header() {
+    println!();
+    println!("\x1b[1;36m╭─────────────────────────────────────╮\x1b[0m");
+    println!("\x1b[1;36m│\x1b[0m    \x1b[1;33mVM Curator\x1b[0m - QEMU VM Manager     \x1b[1;36m│\x1b[0m");
+    println!("\x1b[1;36m╰─────────────────────────────────────╯\x1b[0m");
+    println!();
+}
+
+fn print_loading_progress(step: usize, total: usize, message: &str) {
+    use std::io::Write;
+
+    let bar_width = 30;
+    let filled = (step * bar_width) / total;
+    let empty = bar_width - filled;
+
+    let bar: String = "█".repeat(filled) + &"░".repeat(empty);
+    let percent = (step * 100) / total;
+
+    print!("\r\x1b[K"); // Clear line
+    print!("\x1b[90m[\x1b[36m{}\x1b[90m]\x1b[0m {:>3}% {}", bar, percent, message);
+    let _ = io::stdout().flush();
 }
 
 fn cmd_list(config: &Config) -> Result<()> {

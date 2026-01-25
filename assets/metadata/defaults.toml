@@ -2051,3 +2051,319 @@ long = """
 macOS Sonoma brought interactive widgets to the desktop and introduced Game Mode for improved gaming performance.
 
 The update also enhanced video conferencing with presenter overlay and reactions."""
+
+[macos-sequoia]
+display_name = "Apple® macOS Sequoia"
+name = "macOS Sequoia"
+publisher = "Apple Inc."
+release_date = "2024-09-16"
+architecture = "x86_64"
+fun_facts = [
+    "Sequoia introduced iPhone Mirroring to control your iPhone from Mac",
+    "Apple Intelligence brings AI features to the Mac",
+    "Window tiling was significantly improved"
+]
+
+[macos-sequoia.blurb]
+short = "macOS 15 with iPhone Mirroring and Apple Intelligence."
+long = """
+macOS Sequoia brings iPhone Mirroring, allowing users to control their iPhone directly from their Mac, including notifications and apps.
+
+Apple Intelligence introduces AI-powered writing tools, image generation, and Siri improvements. Window management gets native tiling support."""
+
+# =============================================================================
+# Mobile / Android
+# =============================================================================
+
+[android-x86]
+display_name = "Android x86"
+name = "Android x86"
+publisher = "Android-x86 Project"
+release_date = "2016-03-24"
+architecture = "x86_64"
+fun_facts = [
+    "Started as a Google Summer of Code project",
+    "Runs most ARM Android apps via native bridge translation",
+    "Can run on real x86 hardware or virtual machines"
+]
+
+[android-x86.blurb]
+short = "Android operating system ported to run on x86 PCs and VMs."
+long = """
+Android-x86 is a community project that ports the Android Open Source Project to x86 platforms, enabling Android to run on PCs and virtual machines.
+
+The project supports many Android apps through binary translation of ARM code, making it useful for development and running Android apps on desktop."""
+
+[lineageos-x86]
+display_name = "LineageOS x86"
+name = "LineageOS x86"
+publisher = "LineageOS"
+release_date = "2016-12-24"
+architecture = "x86_64"
+fun_facts = [
+    "LineageOS is the successor to CyanogenMod",
+    "Focuses on privacy and security",
+    "Supports hundreds of devices"
+]
+
+[lineageos-x86.blurb]
+short = "Privacy-focused Android distribution for x86."
+long = """
+LineageOS is a free and open-source Android distribution known for its privacy features and extended device support. The x86 builds allow running it on PCs and VMs.
+
+It removes Google services by default, giving users more control over their data and device."""
+
+[bliss-os]
+display_name = "Bliss OS"
+name = "Bliss OS"
+publisher = "Bliss Family of ROMs"
+release_date = "2018-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Based on Android-x86 with additional customizations",
+    "Includes gaming-optimized kernel options",
+    "Supports both desktop and tablet interfaces"
+]
+
+[bliss-os.blurb]
+short = "Android-based OS optimized for desktop and laptop use."
+long = """
+Bliss OS is an Android-based operating system designed to work well on PC hardware with keyboards and mice. It includes customizations for desktop productivity.
+
+Features include a taskbar, windowed app support, and keyboard shortcuts that make Android feel more like a desktop OS."""
+
+# =============================================================================
+# Infrastructure / Routers
+# =============================================================================
+
+[pfsense]
+display_name = "pfSense®"
+name = "pfSense"
+publisher = "Netgate"
+release_date = "2004-09-01"
+architecture = "x86_64"
+fun_facts = [
+    "Originally forked from m0n0wall",
+    "Based on FreeBSD",
+    "Powers thousands of enterprise firewalls worldwide"
+]
+
+[pfsense.blurb]
+short = "Enterprise-grade open source firewall and router."
+long = """
+pfSense is a free, open-source firewall and router platform based on FreeBSD. It can be installed on physical hardware or virtual machines to create a dedicated firewall/router.
+
+Features include stateful packet filtering, VPN support (OpenVPN, IPsec), traffic shaping, load balancing, and a web-based management interface."""
+
+[opnsense]
+display_name = "OPNsense®"
+name = "OPNsense"
+publisher = "Deciso B.V."
+release_date = "2015-01-02"
+architecture = "x86_64"
+fun_facts = [
+    "Forked from pfSense in 2015",
+    "More frequent security updates than pfSense",
+    "Includes intrusion detection (Suricata) by default"
+]
+
+[opnsense.blurb]
+short = "Security-focused open source firewall with frequent updates."
+long = """
+OPNsense is a FreeBSD-based firewall and routing platform forked from pfSense. It emphasizes security, code quality, and regular updates.
+
+Notable features include Suricata IDS/IPS integration, Let's Encrypt support, two-factor authentication, and a modern responsive web interface."""
+
+[openwrt]
+display_name = "OpenWrt"
+name = "OpenWrt"
+publisher = "OpenWrt Project"
+release_date = "2004-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Name comes from 'Open Wireless Router'",
+    "Originally developed for Linksys WRT54G routers",
+    "Has over 3,000 packages available"
+]
+
+[openwrt.blurb]
+short = "Linux-based router firmware with extensive package support."
+long = """
+OpenWrt is a Linux-based operating system designed for embedded network devices, especially routers. The x86 version can run on PCs and VMs for testing or as a software router.
+
+It uses opkg for package management and has thousands of packages available including VPN, QoS, ad-blocking, and network monitoring tools."""
+
+[truenas-scale]
+display_name = "TrueNAS® Scale"
+name = "TrueNAS Scale"
+publisher = "iXsystems"
+release_date = "2022-02-22"
+architecture = "x86_64"
+fun_facts = [
+    "Based on Debian Linux instead of FreeBSD",
+    "Supports Docker containers and Kubernetes",
+    "Uses OpenZFS for enterprise-grade storage"
+]
+
+[truenas-scale.blurb]
+short = "Linux-based NAS with containers and ZFS storage."
+long = """
+TrueNAS Scale is a Debian Linux-based network-attached storage (NAS) operating system with OpenZFS. Unlike TrueNAS Core, it supports Docker containers and Kubernetes.
+
+Features include data protection through ZFS snapshots and replication, SMB/NFS/iSCSI sharing, and an app ecosystem for running services."""
+
+[truenas-core]
+display_name = "TrueNAS® Core"
+name = "TrueNAS Core"
+publisher = "iXsystems"
+release_date = "2011-05-05"
+architecture = "x86_64"
+fun_facts = [
+    "Previously known as FreeNAS",
+    "Based on FreeBSD",
+    "ZFS provides enterprise features like deduplication"
+]
+
+[truenas-core.blurb]
+short = "FreeBSD-based NAS with enterprise ZFS features."
+long = """
+TrueNAS Core (formerly FreeNAS) is a FreeBSD-based NAS operating system featuring OpenZFS. It's known for stability and enterprise storage features.
+
+ZFS provides data integrity through checksumming, snapshots, replication, compression, and optional deduplication. Ideal for home labs and small businesses."""
+
+[proxmox]
+display_name = "Proxmox VE"
+name = "Proxmox VE"
+publisher = "Proxmox Server Solutions"
+release_date = "2008-04-15"
+architecture = "x86_64"
+fun_facts = [
+    "Supports both KVM virtual machines and LXC containers",
+    "Web interface allows full management without CLI",
+    "Clustering allows live migration between hosts"
+]
+
+[proxmox.blurb]
+short = "Open source virtualization platform with web management."
+long = """
+Proxmox VE (Virtual Environment) is a Debian-based virtualization platform that combines KVM for VMs and LXC for containers. It includes a web-based management interface.
+
+Features include live migration, high availability clustering, software-defined storage with Ceph, and backup/restore functionality."""
+
+[unraid]
+display_name = "Unraid®"
+name = "Unraid"
+publisher = "Lime Technology"
+release_date = "2005-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Uses a custom parity-based array instead of traditional RAID",
+    "Boots and runs entirely from a USB flash drive",
+    "Supports mixing different sized drives in an array"
+]
+
+[unraid.blurb]
+short = "NAS and VM platform with flexible drive management."
+long = """
+Unraid is a proprietary NAS operating system that uses a unique parity-based storage system allowing drives of different sizes and easy expansion.
+
+It combines NAS functionality with Docker containers and KVM virtual machines. The OS runs from a USB drive, keeping all storage available for data."""
+
+# =============================================================================
+# Utilities / Live Systems
+# =============================================================================
+
+[rescue-system]
+display_name = "SystemRescue"
+name = "SystemRescue"
+publisher = "SystemRescue Team"
+release_date = "2003-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Originally called SystemRescueCd",
+    "Based on Arch Linux",
+    "Includes comprehensive disk and network tools"
+]
+
+[rescue-system.blurb]
+short = "Linux rescue system for system administration and recovery."
+long = """
+SystemRescue is a Linux-based rescue environment bootable from CD/USB designed for administering or repairing systems. It includes tools for partitioning, backup, file recovery, and network diagnostics.
+
+Key tools include GParted, fsarchiver, TestDisk, rsync, and various filesystem utilities for ext4, NTFS, Btrfs, and ZFS."""
+
+[gparted-live]
+display_name = "GParted Live"
+name = "GParted Live"
+publisher = "GParted Project"
+release_date = "2004-03-01"
+architecture = "x86_64"
+fun_facts = [
+    "GParted stands for GNOME Partition Editor",
+    "Supports over 20 filesystem types",
+    "Can resize partitions non-destructively"
+]
+
+[gparted-live.blurb]
+short = "Dedicated partition editing live environment."
+long = """
+GParted Live is a small bootable Linux distribution with a single purpose: running the GParted partition editor. It's the go-to tool for managing disk partitions.
+
+Supports creating, resizing, moving, and copying partitions for most filesystem types including ext4, NTFS, FAT32, Btrfs, and XFS."""
+
+[clonezilla]
+display_name = "Clonezilla"
+name = "Clonezilla"
+publisher = "NCHC Free Software Labs"
+release_date = "2004-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Name is a portmanteau of 'clone' and 'Godzilla'",
+    "Can clone to a remote server over the network",
+    "Server edition can image 40+ machines simultaneously"
+]
+
+[clonezilla.blurb]
+short = "Disk imaging and cloning utility."
+long = """
+Clonezilla is a partition and disk imaging/cloning program. It can clone disks to image files or directly to other disks, similar to commercial tools like Norton Ghost.
+
+Features include support for various filesystems, compression, encryption, and the ability to restore an image to multiple machines via multicast."""
+
+[memtest86]
+display_name = "MemTest86+"
+name = "MemTest86+"
+publisher = "PassMark Software"
+release_date = "2004-07-26"
+architecture = "x86_64"
+fun_facts = [
+    "Descended from the original memtest86 from 1994",
+    "Tests memory outside of any operating system",
+    "Can run for days to detect intermittent failures"
+]
+
+[memtest86.blurb]
+short = "Comprehensive memory testing utility."
+long = """
+MemTest86+ is a free, open-source memory testing utility that runs independently of any operating system. It performs thorough tests to detect memory failures.
+
+Running before the OS loads allows testing all available RAM. It's essential for diagnosing system instability, crashes, and data corruption issues."""
+
+[generic-live]
+display_name = "Generic Live ISO"
+name = "Live ISO"
+publisher = "Various"
+release_date = "2000-01-01"
+architecture = "x86_64"
+fun_facts = [
+    "Live ISOs run entirely in RAM",
+    "No installation required",
+    "Great for testing without modifying the host system"
+]
+
+[generic-live.blurb]
+short = "Boot any live Linux ISO without creating a disk."
+long = """
+This profile is designed for booting live Linux distributions without creating a virtual disk. The system runs entirely in RAM.
+
+Use this for trying out distributions, system recovery, or running portable tools without persistent storage."""

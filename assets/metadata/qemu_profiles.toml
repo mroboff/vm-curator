@@ -49,7 +49,7 @@ rtc_localtime = true
 usb_tablet = true
 display = "gtk"
 extra_args = []
-notes = "Requires TPM 2.0 and Secure Boot. UEFI mode mandatory."
+notes = "Requires TPM 2.0 and Secure Boot. UEFI mandatory. For better disk performance, use virtio with Red Hat VirtIO drivers loaded during install."
 
 [windows-10]
 display_name = "Windows 10"
@@ -71,7 +71,7 @@ rtc_localtime = true
 usb_tablet = true
 display = "gtk"
 extra_args = []
-notes = "UEFI optional but recommended for newer installs."
+notes = "UEFI optional but recommended. For better performance, use virtio disk/network with Red Hat VirtIO drivers."
 
 [windows-81]
 display_name = "Windows 8.1"
@@ -244,14 +244,14 @@ audio = ["sb16"]
 network_model = "rtl8139"
 disk_interface = "ide"
 disk_size_gb = 8
-enable_kvm = true
+enable_kvm = false
 uefi = false
 tpm = false
 rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "Sound Blaster 16 recommended for best audio compatibility."
+notes = "KVM disabled - Windows 9x has timing issues with hardware virtualization. SB16 for audio."
 
 [windows-98se]
 display_name = "Windows 98 SE"
@@ -266,13 +266,14 @@ audio = ["sb16"]
 network_model = "rtl8139"
 disk_interface = "ide"
 disk_size_gb = 4
-enable_kvm = true
+enable_kvm = false
 uefi = false
 tpm = false
 rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
+notes = "KVM disabled - Windows 9x has timing issues with hardware virtualization."
 
 [windows-98]
 display_name = "Windows 98"
@@ -287,13 +288,14 @@ audio = ["sb16"]
 network_model = "rtl8139"
 disk_interface = "ide"
 disk_size_gb = 4
-enable_kvm = true
+enable_kvm = false
 uefi = false
 tpm = false
 rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
+notes = "KVM disabled - Windows 9x has timing issues with hardware virtualization."
 
 [windows-95]
 display_name = "Windows 95"
@@ -308,14 +310,14 @@ audio = ["sb16"]
 network_model = "ne2k_pci"
 disk_interface = "ide"
 disk_size_gb = 2
-enable_kvm = true
+enable_kvm = false
 uefi = false
 tpm = false
 rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "Keep RAM at 128MB or below to avoid memory detection issues."
+notes = "KVM disabled - Win9x timing issues. Keep RAM at 128MB to avoid memory detection issues."
 
 # =============================================================================
 # Microsoft DOS / Windows 3.x (i386)
@@ -2203,6 +2205,29 @@ rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
+notes = "Requires OpenCore. vmxnet3 network may be more stable than e1000."
+
+[macos-sequoia]
+display_name = "macOS 15 Sequoia"
+category = "macos"
+emulator = "qemu-system-x86_64"
+memory_mb = 16384
+cpu_cores = 4
+cpu_model = "Penryn"
+machine = "q35"
+vga = "vmware"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "sata"
+disk_size_gb = 80
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Requires OpenCore. vmxnet3 network may be more stable than e1000."
 
 # =============================================================================
 # Amiga / AROS (m68k/x86_64)
@@ -2437,3 +2462,357 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 notes = "Generic fallback profile for unknown operating systems."
+
+# =============================================================================
+# Mobile / Android (x86_64)
+# =============================================================================
+
+[android-x86]
+display_name = "Android x86"
+category = "mobile"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+iso_url = "https://www.android-x86.org/download.html"
+notes = "Enable 'Native Bridge' in settings for ARM app support. Use virtio-vga-gl for 3D acceleration."
+
+[lineageos-x86]
+display_name = "LineageOS x86"
+category = "mobile"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "LineageOS builds for x86. Enable 'Native Bridge' for ARM app compatibility."
+
+[bliss-os]
+display_name = "Bliss OS"
+category = "mobile"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+iso_url = "https://blissos.org/index.html#download"
+notes = "Android-based OS optimized for desktop/laptop use."
+
+# =============================================================================
+# Infrastructure / Routers (x86_64)
+# =============================================================================
+
+[pfsense]
+display_name = "pfSense"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 16
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://www.pfsense.org/download/"
+notes = "FreeBSD-based firewall/router. Add multiple NICs for WAN/LAN separation."
+
+[opnsense]
+display_name = "OPNsense"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 16
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://opnsense.org/download/"
+notes = "FreeBSD-based firewall/router, fork of pfSense. Add multiple NICs for WAN/LAN."
+
+[openwrt]
+display_name = "OpenWrt"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 512
+cpu_cores = 1
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 1
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://downloads.openwrt.org/"
+notes = "Lightweight router OS. Very low resource requirements."
+
+[truenas-scale]
+display_name = "TrueNAS Scale"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 8192
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://www.truenas.com/download-truenas-scale/"
+notes = "Requires 8GB RAM minimum. For real NAS usage, passthrough HBA cards recommended."
+
+[truenas-core]
+display_name = "TrueNAS Core"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 8192
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://www.truenas.com/download-truenas-core/"
+notes = "FreeBSD-based NAS. 8GB RAM minimum. ZFS needs ECC RAM for production."
+
+[proxmox]
+display_name = "Proxmox VE"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://www.proxmox.com/en/downloads"
+notes = "Debian-based virtualization platform. Nested virtualization may require additional config."
+
+[unraid]
+display_name = "Unraid"
+category = "infrastructure"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "std"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 32
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+notes = "NAS/VM platform. Boots from USB. Commercial license required."
+
+# =============================================================================
+# Utilities / Live Systems (x86_64)
+# =============================================================================
+
+[rescue-system]
+display_name = "System Rescue / Live ISO"
+category = "utilities"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 0
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "gtk"
+extra_args = []
+iso_url = "https://www.system-rescue.org/Download/"
+notes = "Live rescue environment. No disk needed - runs entirely in RAM."
+
+[gparted-live]
+display_name = "GParted Live"
+category = "utilities"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 0
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "gtk"
+extra_args = []
+iso_url = "https://gparted.org/download.php"
+notes = "Partition editor live environment. No disk needed."
+
+[clonezilla]
+display_name = "Clonezilla"
+category = "utilities"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = []
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 0
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "gtk"
+extra_args = []
+iso_url = "https://clonezilla.org/downloads.php"
+notes = "Disk imaging and cloning tool. No disk needed."
+
+[memtest86]
+display_name = "MemTest86+"
+category = "utilities"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 1
+cpu_model = "host"
+machine = "pc"
+vga = "std"
+audio = []
+network_model = "none"
+disk_interface = "ide"
+disk_size_gb = 0
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = false
+usb_tablet = false
+display = "gtk"
+extra_args = []
+iso_url = "https://www.memtest.org/"
+notes = "Memory testing utility. Legacy BIOS mode for compatibility."
+
+[generic-live]
+display_name = "Generic Live ISO"
+category = "utilities"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "virtio"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "virtio"
+disk_interface = "virtio"
+disk_size_gb = 0
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "For booting any live Linux ISO without creating a disk."

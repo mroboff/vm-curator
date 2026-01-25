@@ -1176,11 +1176,23 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('k') | KeyCode::Up => app.file_browser_prev(),
         KeyCode::Enter => {
             if let Some(iso_path) = app.file_browser_enter() {
-                // Selected an ISO file
-                app.boot_mode = BootMode::Cdrom(iso_path);
-                app.pop_screen(); // Close file browser
-                app.pop_screen(); // Close boot options
-                app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
+                // Check if we're in wizard mode
+                if app.wizard_state.is_some() {
+                    // Set the ISO path in wizard state
+                    if let Some(ref mut state) = app.wizard_state {
+                        state.iso_path = Some(iso_path);
+                    }
+                    app.pop_screen(); // Close file browser
+
+                    // Proceed to next step
+                    let _ = app.wizard_next_step();
+                } else {
+                    // Normal boot mode - selected an ISO file
+                    app.boot_mode = BootMode::Cdrom(iso_path);
+                    app.pop_screen(); // Close file browser
+                    app.pop_screen(); // Close boot options
+                    app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
+                }
             }
             // If it was a directory, file_browser_enter already navigated
         }
