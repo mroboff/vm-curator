@@ -277,6 +277,8 @@ If you'd like to say thanks, you can support the project below. **Donations are 
 * **[GitHub Sponsors](https://github.com/sponsors/mroboff):** Best for one-time contributions (Goes to the RTX-Pro 6000 fund!)
 * **[Ko-fi](https://ko-fi.com/mroboff):** Buy me a coffee (or a generic energy drink).
 
+---
+
 ### License
 
 MIT
