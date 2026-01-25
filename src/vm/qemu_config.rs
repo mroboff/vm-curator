@@ -90,6 +90,7 @@ pub enum AudioDevice {
 }
 
 impl AudioDevice {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "sb16" => Self::Sb16,

@@ -93,6 +93,7 @@ impl HierarchyConfig {
     }
 
     /// Load hierarchy from a file path (for runtime overrides)
+    #[allow(dead_code)]
     pub fn load_from_file(path: &std::path::Path) -> Option<Self> {
         let content = std::fs::read_to_string(path).ok()?;
         Self::parse_toml(&content).ok()
@@ -169,6 +170,7 @@ impl HierarchyConfig {
     }
 
     /// Get a family by ID
+    #[allow(dead_code)]
     pub fn get_family(&self, id: &str) -> Option<&Family> {
         self.families.iter().find(|f| f.id == id)
     }

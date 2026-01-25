@@ -50,11 +50,13 @@ fn find_ovmf_code_path() -> Option<String> {
 /// Result of creating a new VM
 #[derive(Debug)]
 pub struct CreatedVm {
-    /// Path to the VM directory
+    /// Path to the VM directory - reserved for future use
+    #[allow(dead_code)]
     pub path: PathBuf,
     /// Path to the launch script
     pub launch_script: PathBuf,
-    /// Path to the disk image
+    /// Path to the disk image - reserved for future use
+    #[allow(dead_code)]
     pub disk_image: PathBuf,
 }
 
@@ -205,7 +207,7 @@ pub fn generate_launch_script(
 /// Build the QEMU command string
 fn build_qemu_command(
     config: &WizardQemuConfig,
-    disk_filename: &str,
+    _disk_filename: &str,
     with_cdrom: bool,
     custom_iso: Option<&str>,
 ) -> String {
@@ -359,40 +361,17 @@ pub fn write_launch_script(vm_dir: &Path, content: &str) -> Result<PathBuf> {
     Ok(script_path)
 }
 
-/// Check if a folder name already exists in the library
-pub fn folder_exists(library_path: &Path, folder_name: &str) -> bool {
-    library_path.join(folder_name).exists()
-}
-
-/// Generate folder name from display name
-pub fn generate_folder_name(display_name: &str) -> String {
-    display_name
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::CreateWizardState;
 
     #[test]
     fn test_generate_folder_name() {
-        assert_eq!(generate_folder_name("Windows 10"), "windows-10");
-        assert_eq!(generate_folder_name("Debian GNU/Linux"), "debian-gnu-linux");
-        assert_eq!(generate_folder_name("MS-DOS 6.22"), "ms-dos-6-22");
-        assert_eq!(generate_folder_name("  Spaced  Out  "), "spaced-out");
+        assert_eq!(CreateWizardState::generate_folder_name("Windows 10"), "windows-10");
+        assert_eq!(CreateWizardState::generate_folder_name("Debian GNU/Linux"), "debian-gnu-linux");
+        assert_eq!(CreateWizardState::generate_folder_name("MS-DOS 6.22"), "ms-dos-6-22");
+        assert_eq!(CreateWizardState::generate_folder_name("  Spaced  Out  "), "spaced-out");
     }
 
     #[test]

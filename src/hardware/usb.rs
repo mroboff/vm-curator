@@ -7,7 +7,11 @@ pub struct UsbDevice {
     pub product_id: u16,
     pub vendor_name: String,
     pub product_name: String,
+    /// Bus number - reserved for future bus-specific passthrough
+    #[allow(dead_code)]
     pub bus_num: u8,
+    /// Device number - reserved for future bus-specific passthrough
+    #[allow(dead_code)]
     pub dev_num: u8,
     pub device_class: u8,
 }
@@ -33,6 +37,7 @@ impl UsbDevice {
     }
 
     /// Generate QEMU passthrough arguments
+    #[allow(dead_code)]
     pub fn to_qemu_args(&self) -> Vec<String> {
         vec![
             "-device".to_string(),
@@ -343,28 +348,6 @@ fn reload_udev_rules() -> bool {
     }
 
     false
-}
-
-/// Check if udev rules are already installed for the given devices
-pub fn check_udev_rules_installed(devices: &[UsbDevice]) -> bool {
-    let rules_path = std::path::Path::new("/etc/udev/rules.d/99-vm-curator-usb.rules");
-
-    if !rules_path.exists() {
-        return false;
-    }
-
-    // Read existing rules and check if all device vendors are covered
-    if let Ok(content) = std::fs::read_to_string(rules_path) {
-        for device in devices {
-            let vendor_pattern = format!("{:04x}", device.vendor_id);
-            if !content.contains(&vendor_pattern) {
-                return false;
-            }
-        }
-        true
-    } else {
-        false
-    }
 }
 
 #[cfg(test)]

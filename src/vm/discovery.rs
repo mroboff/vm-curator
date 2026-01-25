@@ -15,10 +15,6 @@ pub struct DiscoveredVm {
     pub launch_script: PathBuf,
     /// Parsed QEMU configuration
     pub config: QemuConfig,
-    /// Whether the VM has been parsed successfully
-    pub parse_success: bool,
-    /// Parse error message if failed
-    pub parse_error: Option<String>,
 }
 
 impl DiscoveredVm {
@@ -343,12 +339,12 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
         let script_content = std::fs::read_to_string(&launch_script)
             .unwrap_or_default();
 
-        let (config, parse_success, parse_error) = match parse_launch_script(&launch_script, &script_content) {
-            Ok(cfg) => (cfg, true, None),
-            Err(e) => {
+        let config = match parse_launch_script(&launch_script, &script_content) {
+            Ok(cfg) => cfg,
+            Err(_) => {
                 let mut default_config = QemuConfig::default();
                 default_config.raw_script = script_content;
-                (default_config, false, Some(e.to_string()))
+                default_config
             }
         };
 
@@ -357,8 +353,6 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
             path,
             launch_script,
             config,
-            parse_success,
-            parse_error,
         });
     }
 
@@ -421,8 +415,6 @@ mod tests {
             path: PathBuf::from("/test"),
             launch_script: PathBuf::from("/test/launch.sh"),
             config: QemuConfig::default(),
-            parse_success: true,
-            parse_error: None,
         };
         assert_eq!(vm.display_name(), "Microsoft® Windows 95");
     }

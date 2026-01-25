@@ -6,10 +6,14 @@ use std::process::Command;
 /// A snapshot of a VM disk
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    /// Snapshot ID from qemu-img - reserved for future use
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
     pub size: String,
     pub date: String,
+    /// VM clock time - reserved for display in future UI
+    #[allow(dead_code)]
     pub vm_clock: String,
 }
 
@@ -152,7 +156,7 @@ fn format_size(bytes: u64) -> String {
 
 /// Format Unix timestamp to date string
 fn format_timestamp(secs: i64, _nsecs: i64) -> String {
-    use chrono::{DateTime, Local, TimeZone};
+    use chrono::{Local, TimeZone};
     if let Some(dt) = Local.timestamp_opt(secs, 0).single() {
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     } else {
@@ -221,6 +225,7 @@ pub fn delete_snapshot(disk_path: &Path, name: &str) -> Result<()> {
 }
 
 /// Get information about a disk image using JSON output
+#[allow(dead_code)]
 pub fn get_disk_info(disk_path: &Path) -> Result<DiskInfo> {
     let disk_str = path_to_str(disk_path)?;
     let output = Command::new("qemu-img")
@@ -246,8 +251,9 @@ pub fn get_disk_info(disk_path: &Path) -> Result<DiskInfo> {
     })
 }
 
-/// Disk image information
+/// Disk image information - reserved for future disk info display
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DiskInfo {
     pub format: String,
     pub virtual_size: String,

@@ -7,9 +7,7 @@ use crate::config::Config;
 use crate::hardware::UsbDevice;
 use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo, QemuProfileStore};
 use crate::ui::widgets::build_visual_order;
-use crate::vm::{
-    discover_vms, group_vms_by_category, BootMode, DiscoveredVm, LaunchOptions, Snapshot,
-};
+use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, Snapshot};
 
 /// Application screens/views
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,11 +16,13 @@ pub enum Screen {
     MainMenu,
     /// VM management options
     Management,
-    /// Configuration view
+    /// Configuration view (planned feature)
+    #[allow(dead_code)]
     Configuration,
     /// Raw launch script view
     RawScript,
-    /// Detailed info (history, blurbs)
+    /// Detailed info (history, blurbs) - planned feature
+    #[allow(dead_code)]
     DetailedInfo,
     /// Snapshot management
     Snapshots,
@@ -46,7 +46,8 @@ pub enum Screen {
     CreateWizard,
     /// Custom OS metadata entry (secondary form during wizard)
     CreateWizardCustomOs,
-    /// ISO download progress screen
+    /// ISO download progress screen (planned feature)
+    #[allow(dead_code)]
     CreateWizardDownload,
     /// Application settings
     Settings,
@@ -240,19 +241,24 @@ pub struct CustomOsEntry {
     pub name: String,
     /// Publisher/developer
     pub publisher: String,
-    /// Release date (YYYY-MM-DD)
+    /// Release date (YYYY-MM-DD) - planned for future save feature
+    #[allow(dead_code)]
     pub release_date: Option<String>,
     /// Architecture (x86_64, i386, etc.)
     pub architecture: String,
-    /// Short description (one line)
+    /// Short description (one line) - planned for future save feature
+    #[allow(dead_code)]
     pub short_blurb: String,
-    /// Long description (multi-paragraph)
+    /// Long description (multi-paragraph) - planned for future save feature
+    #[allow(dead_code)]
     pub long_blurb: String,
-    /// Fun facts
+    /// Fun facts - planned for future save feature
+    #[allow(dead_code)]
     pub fun_facts: Vec<String>,
     /// Base profile to use for QEMU defaults
     pub base_profile: String,
-    /// Save to user metadata for future use
+    /// Save to user metadata for future use - planned feature
+    #[allow(dead_code)]
     pub save_to_user: bool,
 }
 
@@ -283,11 +289,13 @@ pub struct CreateWizardState {
     pub auto_launch: bool,
     /// Currently focused field index (for navigation)
     pub field_focus: usize,
-    /// OS list scroll position
+    /// OS list scroll position - reserved for virtual scrolling
+    #[allow(dead_code)]
     pub os_list_scroll: usize,
     /// OS filter/search string
     pub os_filter: String,
-    /// Selected OS category index (for collapsible sections)
+    /// Selected OS category index - reserved for future use
+    #[allow(dead_code)]
     pub selected_category: usize,
     /// Expanded categories (by name)
     pub expanded_categories: Vec<String>,
@@ -301,6 +309,7 @@ pub struct CreateWizardState {
 
 /// Fields that can be edited in the wizard
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // Some variants reserved for future inline editing
 pub enum WizardField {
     VmName,
     OsFilter,
@@ -535,15 +544,12 @@ pub enum BackgroundResult {
     SnapshotCreated { name: String, success: bool, error: Option<String> },
     SnapshotRestored { name: String, success: bool, error: Option<String> },
     SnapshotDeleted { name: String, success: bool, error: Option<String> },
+    /// Reserved for async snapshot loading
+    #[allow(dead_code)]
     SnapshotsLoaded { snapshots: Vec<Snapshot>, error: Option<String> },
 }
 
 impl App {
-    /// Create a new application instance
-    pub fn new(config: Config) -> Result<Self> {
-        Self::new_with_progress(config, |_, _, _| {})
-    }
-
     /// Create a new application instance with progress callback
     pub fn new_with_progress<F>(config: Config, progress: F) -> Result<Self>
     where
@@ -878,11 +884,6 @@ impl App {
         }
     }
 
-    /// Get grouped VMs for display
-    pub fn grouped_vms(&self) -> Vec<(&'static str, Vec<&DiscoveredVm>)> {
-        group_vms_by_category(&self.vms)
-    }
-
     /// Load file browser entries for current directory
     pub fn load_file_browser(&mut self) {
         self.file_browser_entries.clear();
@@ -1005,11 +1006,6 @@ impl App {
         }
     }
 
-    /// Get the path to the launch script for the selected VM
-    pub fn selected_vm_script_path(&self) -> Option<std::path::PathBuf> {
-        self.selected_vm().map(|vm| vm.launch_script.clone())
-    }
-
     // =========================================================================
     // VM Creation Wizard Methods
     // =========================================================================
@@ -1099,19 +1095,6 @@ impl App {
                 ..Default::default()
             });
             self.push_screen(Screen::CreateWizardCustomOs);
-        }
-    }
-
-    /// Check if the wizard has a folder name conflict
-    pub fn wizard_folder_exists(&self) -> bool {
-        if let Some(ref state) = self.wizard_state {
-            if state.folder_name.is_empty() {
-                return false;
-            }
-            let vm_path = self.config.vm_library_path.join(&state.folder_name);
-            vm_path.exists()
-        } else {
-            false
         }
     }
 

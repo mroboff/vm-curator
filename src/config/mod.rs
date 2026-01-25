@@ -97,13 +97,4 @@ impl Config {
             .join("vm-curator")
             .join("config.toml")
     }
-
-    /// Ensure all required directories exist
-    pub fn ensure_directories(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.metadata_path)
-            .with_context(|| format!("Failed to create metadata directory {:?}", self.metadata_path))?;
-        std::fs::create_dir_all(&self.ascii_art_path)
-            .with_context(|| format!("Failed to create ASCII art directory {:?}", self.ascii_art_path))?;
-        Ok(())
-    }
 }

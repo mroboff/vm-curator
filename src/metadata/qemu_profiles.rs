@@ -123,16 +123,19 @@ impl Default for QemuProfile {
 
 impl QemuProfile {
     /// Check if this profile supports free ISO download
+    #[allow(dead_code)]
     pub fn has_free_iso(&self) -> bool {
         self.iso_url.is_some()
     }
 
     /// Check if this profile uses x86 architecture
+    #[allow(dead_code)]
     pub fn is_x86(&self) -> bool {
         self.emulator.contains("x86_64") || self.emulator.contains("i386")
     }
 
     /// Check if this profile uses 64-bit x86
+    #[allow(dead_code)]
     pub fn is_x86_64(&self) -> bool {
         self.emulator.contains("x86_64")
     }
@@ -223,6 +226,7 @@ impl QemuProfileStore {
     }
 
     /// Get a profile by OS ID, or return the default profile
+    #[allow(dead_code)]
     pub fn get_or_default(&self, os_id: &str) -> QemuProfile {
         self.profiles
             .get(os_id)
@@ -231,6 +235,7 @@ impl QemuProfileStore {
     }
 
     /// List all profiles
+    #[allow(dead_code)]
     pub fn list_all(&self) -> Vec<(&String, &QemuProfile)> {
         let mut profiles: Vec<_> = self.profiles.iter().collect();
         profiles.sort_by(|a, b| a.1.display_name.cmp(&b.1.display_name));
@@ -249,6 +254,7 @@ impl QemuProfileStore {
     }
 
     /// Get all unique categories
+    #[allow(dead_code)]
     pub fn categories(&self) -> Vec<String> {
         let mut categories: Vec<String> = self
             .profiles
@@ -279,6 +285,7 @@ impl QemuProfileStore {
     }
 
     /// Get profiles that support free ISO download
+    #[allow(dead_code)]
     pub fn list_with_free_iso(&self) -> Vec<(&String, &QemuProfile)> {
         let mut profiles: Vec<_> = self
             .profiles
@@ -290,6 +297,7 @@ impl QemuProfileStore {
     }
 
     /// Get profiles that are x86/x86_64 (supported in V1.0)
+    #[allow(dead_code)]
     pub fn list_x86_profiles(&self) -> Vec<(&String, &QemuProfile)> {
         let mut profiles: Vec<_> = self.profiles.iter().filter(|(_, p)| p.is_x86()).collect();
         profiles.sort_by(|a, b| a.1.display_name.cmp(&b.1.display_name));
@@ -297,6 +305,7 @@ impl QemuProfileStore {
     }
 
     /// Search profiles by name
+    #[allow(dead_code)]
     pub fn search(&self, query: &str) -> Vec<(&String, &QemuProfile)> {
         let query_lower = query.to_lowercase();
         let mut profiles: Vec<_> = self
@@ -312,16 +321,19 @@ impl QemuProfileStore {
     }
 
     /// Get the count of profiles
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.profiles.len()
     }
 
     /// Check if the store is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
 
     /// Get a generic profile based on category
+    #[allow(dead_code)]
     pub fn generic_profile_for_category(category: &str) -> &'static str {
         match category {
             "windows" => "generic-windows",

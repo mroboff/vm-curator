@@ -5,5 +5,5 @@ pub mod qemu_profiles;
 
 pub use ascii_art::AsciiArtStore;
 pub use hierarchy::{HierarchyConfig, SortBy};
-pub use os_info::{default_os_info, MetadataStore, OsBlurb, OsInfo};
+pub use os_info::{default_os_info, MetadataStore, OsInfo};
 pub use qemu_profiles::{QemuProfile, QemuProfileStore};
