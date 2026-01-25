@@ -1,9 +1,24 @@
 use anyhow::{bail, Context, Result};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use super::discovery::DiscoveredVm;
 use super::qemu_config::BootMode;
+
+/// Result of a VM launch attempt
+#[derive(Debug)]
+pub struct LaunchResult {
+    /// Whether the launch appeared successful (no immediate errors)
+    pub success: bool,
+    /// Error message if the launch failed
+    pub error: Option<String>,
+    /// VM display name for status messages
+    pub vm_name: String,
+}
 
 /// Convert a path to a string, returning an error if the path contains invalid UTF-8
 fn path_to_str(path: &Path) -> Result<&str> {
@@ -38,8 +53,14 @@ impl UsbPassthrough {
     }
 }
 
-/// Launch a VM synchronously
-pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
+/// Launch a VM and monitor for immediate errors
+///
+/// This function spawns the VM process and monitors stderr for a brief period
+/// to catch any immediate startup errors (like missing files, invalid arguments, etc.)
+/// If the process exits with an error within the monitoring window, we capture it.
+pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) -> LaunchResult {
+    let vm_name = vm.display_name();
+
     let mut cmd = Command::new("bash");
     cmd.current_dir(&vm.path);
 
@@ -53,10 +74,18 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
         BootMode::Cdrom(iso_path) => {
             // Validate ISO path exists before attempting to launch
             if !iso_path.exists() {
-                bail!("ISO file not found: {:?}", iso_path);
+                return LaunchResult {
+                    success: false,
+                    error: Some(format!("ISO file not found: {}", iso_path.display())),
+                    vm_name,
+                };
             }
             if !iso_path.is_file() {
-                bail!("ISO path is not a file: {:?}", iso_path);
+                return LaunchResult {
+                    success: false,
+                    error: Some(format!("ISO path is not a file: {}", iso_path.display())),
+                    vm_name,
+                };
             }
             args.push("--cdrom".to_string());
             args.push(iso_path.to_string_lossy().to_string());
@@ -69,9 +98,7 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
     args.extend(options.extra_args.clone());
 
     // Add USB passthrough arguments
-    // These are passed as extra args that the launch.sh script forwards to QEMU
     if !options.usb_devices.is_empty() {
-        // Add USB controller if passing through devices
         args.push("-usb".to_string());
         for usb in &options.usb_devices {
             args.extend(usb.to_qemu_args());
@@ -80,13 +107,132 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
 
     cmd.args(&args);
 
+    // Capture stderr to detect errors, but let stdout go to null
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
-    let _child = cmd.spawn().context("Failed to launch VM")?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return LaunchResult {
+                success: false,
+                error: Some(format!("Failed to start VM process: {}", e)),
+                vm_name,
+            };
+        }
+    };
 
-    Ok(())
+    // Take stderr handle for monitoring
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => {
+            return LaunchResult {
+                success: true,
+                error: None,
+                vm_name,
+            };
+        }
+    };
+
+    // Create a channel to receive error output
+    let (tx, rx) = mpsc::channel();
+
+    // Spawn a thread to read ALL stderr output
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut all_lines = Vec::new();
+
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                // Capture all stderr output - we'll filter later if needed
+                if !line.trim().is_empty() {
+                    all_lines.push(line);
+                }
+            }
+        }
+
+        let _ = tx.send(all_lines);
+    });
+
+    // Wait for QEMU to either start successfully or fail
+    // QEMU typically fails fast if there's a configuration error
+    thread::sleep(Duration::from_millis(800));
+
+    // Check if the process has already exited (indicating an error)
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            // Process exited - this usually means an error for QEMU
+            // (successful QEMU keeps running until the VM shuts down)
+
+            // Wait a bit more for stderr to be fully captured
+            thread::sleep(Duration::from_millis(300));
+
+            // Try to get error output
+            let stderr_lines = rx.recv_timeout(Duration::from_millis(500))
+                .unwrap_or_default();
+
+            // Filter for error-related lines for display
+            let error_lines: Vec<&String> = stderr_lines.iter()
+                .filter(|line| {
+                    let lower = line.to_lowercase();
+                    lower.contains("error")
+                        || lower.contains("failed")
+                        || lower.contains("cannot")
+                        || lower.contains("unable")
+                        || lower.contains("not found")
+                        || lower.contains("no such")
+                        || lower.contains("invalid")
+                        || lower.contains("is not a valid")
+                        || lower.contains("could not")
+                        || lower.contains("qemu-system")
+                        || lower.contains("permission denied")
+                })
+                .collect();
+
+            let error_msg = if !error_lines.is_empty() {
+                error_lines.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+            } else if !stderr_lines.is_empty() {
+                // Show all stderr if no specific errors found
+                stderr_lines.join("\n")
+            } else {
+                format!("VM process exited with code: {}", status)
+            };
+
+            return LaunchResult {
+                success: false,
+                error: Some(error_msg),
+                vm_name,
+            };
+        }
+        Ok(None) => {
+            // Process still running - this is the expected success case
+        }
+        Err(e) => {
+            return LaunchResult {
+                success: false,
+                error: Some(format!("Failed to check VM status: {}", e)),
+                vm_name,
+            };
+        }
+    }
+
+    LaunchResult {
+        success: true,
+        error: None,
+        vm_name,
+    }
+}
+
+/// Launch a VM synchronously (legacy function for compatibility)
+pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
+    let result = launch_vm_with_error_check(vm, options);
+
+    if result.success {
+        Ok(())
+    } else {
+        bail!("{}", result.error.unwrap_or_else(|| "Unknown error".to_string()))
+    }
 }
 
 /// Reset a VM by recreating its disk from a backing file or template

@@ -10,6 +10,43 @@ use std::path::{Path, PathBuf};
 use crate::app::{CreateWizardState, WizardQemuConfig};
 use crate::commands::qemu_img;
 
+/// Known OVMF firmware paths across different Linux distributions
+const OVMF_SEARCH_PATHS: &[&str] = &[
+    // Arch Linux (current naming with .4m suffix for 4MB variant)
+    "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+    "/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd",
+    "/usr/share/OVMF/x64/OVMF_CODE.4m.fd",
+    "/usr/share/ovmf/x64/OVMF_CODE.4m.fd",
+    // Arch Linux (legacy naming without .4m)
+    "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
+    "/usr/share/edk2/x64/OVMF_CODE.fd",
+    // Debian/Ubuntu
+    "/usr/share/OVMF/OVMF_CODE.fd",
+    "/usr/share/OVMF/OVMF_CODE_4M.fd",
+    // Fedora/RHEL/CentOS
+    "/usr/share/edk2/ovmf/OVMF_CODE.fd",
+    "/usr/share/edk2/ovmf/OVMF_CODE.cc.fd",
+    // openSUSE
+    "/usr/share/qemu/ovmf-x86_64.bin",
+    "/usr/share/qemu/ovmf-x86_64-code.bin",
+    // NixOS
+    "/run/libvirt/nix-ovmf/OVMF_CODE.fd",
+    // Generic/fallback paths
+    "/usr/share/ovmf/OVMF_CODE.fd",
+    "/usr/share/qemu/OVMF_CODE.fd",
+    "/usr/share/ovmf/x64/OVMF_CODE.fd",
+];
+
+/// Find the OVMF_CODE.fd firmware file by checking known paths
+fn find_ovmf_code_path() -> Option<String> {
+    for path in OVMF_SEARCH_PATHS {
+        if Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
 /// Result of creating a new VM
 #[derive(Debug)]
 pub struct CreatedVm {
@@ -237,28 +274,34 @@ fn build_qemu_command(
         args.push(format!("-display {}", config.display));
     }
 
+    // Audio backend (must be declared before devices that use it)
+    if !config.audio.is_empty() {
+        args.push("-audiodev pa,id=audio0".to_string());
+    }
+
     // Audio devices
     for audio in &config.audio {
         if audio == "intel-hda" {
             args.push("-device intel-hda".to_string());
         } else if audio == "hda-duplex" || audio == "hda-output" || audio == "hda-micro" {
-            args.push(format!("-device {}", audio));
+            // HDA codec devices must reference the audiodev
+            args.push(format!("-device {},audiodev=audio0", audio));
         } else if audio == "ac97" {
-            args.push("-device AC97".to_string());
+            args.push("-device AC97,audiodev=audio0".to_string());
         } else if audio == "sb16" {
-            args.push("-device sb16".to_string());
+            args.push("-device sb16,audiodev=audio0".to_string());
         }
-    }
-
-    // Audio backend
-    if !config.audio.is_empty() {
-        args.push("-audiodev pa,id=audio0".to_string());
     }
 
     // Network
     if config.network_model != "none" {
-        args.push(format!("-device {},netdev=net0", config.network_model));
+        // Map short network model names to QEMU device names
+        let net_device = match config.network_model.as_str() {
+            "virtio" => "virtio-net-pci",
+            other => other,
+        };
         args.push("-netdev user,id=net0".to_string());
+        args.push(format!("-device {},netdev=net0", net_device));
     }
 
     // USB tablet for mouse
@@ -274,8 +317,13 @@ fn build_qemu_command(
 
     // UEFI boot
     if config.uefi {
-        // Common OVMF paths on Linux
-        args.push("-drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.fd".to_string());
+        // Try to find OVMF firmware at common paths
+        let ovmf_path = find_ovmf_code_path()
+            .unwrap_or_else(|| "/usr/share/OVMF/OVMF_CODE.fd".to_string());
+        args.push(format!(
+            "-drive if=pflash,format=raw,readonly=on,file={}",
+            ovmf_path
+        ));
     }
 
     // TPM (if enabled, requires swtpm running)
@@ -383,6 +431,7 @@ mod tests {
             rtc_localtime: false,
             usb_tablet: true,
             display: "gtk".to_string(),
+            gl_acceleration: false,
             extra_args: vec![],
         };
 
@@ -417,8 +466,8 @@ mod tests {
 
         let cmd = build_qemu_command(&config, "disk.qcow2", false, None);
 
-        assert!(cmd.contains("-device intel-hda"));
-        assert!(cmd.contains("-device hda-duplex"));
         assert!(cmd.contains("-audiodev pa,id=audio0"));
+        assert!(cmd.contains("-device intel-hda"));
+        assert!(cmd.contains("-device hda-duplex,audiodev=audio0"));
     }
 }

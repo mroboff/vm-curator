@@ -9,7 +9,7 @@ use std::io::Stdout;
 use std::time::Duration;
 
 use crate::app::{App, BackgroundResult, ConfirmAction, InputMode, Screen, TextInputContext};
-use crate::vm::{launch_vm_sync, lifecycle::is_vm_running, BootMode};
+use crate::vm::{launch_vm_with_error_check, lifecycle::is_vm_running, BootMode};
 use std::thread;
 
 /// Run the TUI application
@@ -179,19 +179,28 @@ fn handle_confirm_click(app: &mut App, action: ConfirmAction, click_x: u16, clic
 fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
     match action {
         ConfirmAction::LaunchVm => {
+            // Pop the confirm dialog first
+            app.pop_screen();
+
             if let Some(vm) = app.selected_vm().cloned() {
                 if is_vm_running(&vm) {
                     app.set_status(format!("{} is already running", vm.display_name()));
                 } else {
                     let options = app.get_launch_options();
-                    if let Err(e) = launch_vm_sync(&vm, &options) {
-                        app.set_status(format!("Error: {}", e));
+                    let result = launch_vm_with_error_check(&vm, &options);
+
+                    if result.success {
+                        app.set_status(format!("Launched: {}", result.vm_name));
                     } else {
-                        app.set_status(format!("Launched: {}", vm.display_name()));
+                        // Show error in the error dialog for better visibility
+                        let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+                        app.show_error(format!(
+                            "Failed to launch {}\n\n{}",
+                            result.vm_name, error_msg
+                        ));
                     }
                 }
             }
-            app.pop_screen();
         }
         ConfirmAction::ResetVm => {
             if let Some(vm) = app.selected_vm() {
@@ -1284,23 +1293,29 @@ fn render_error_dialog(app: &App, frame: &mut Frame) {
     use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
     let area = frame.area();
-    let dialog_width = 70.min(area.width.saturating_sub(4));
-    let dialog_height = 15.min(area.height.saturating_sub(4));
+    // Make error dialog larger and more prominent
+    let dialog_width = 80.min(area.width.saturating_sub(4));
+    let dialog_height = 20.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
     let block = Block::default()
-        .title(" Error Details (j/k to scroll, Esc to close) ")
+        .title(" ⚠ Error ")
+        .title_bottom(" [↑/↓ or j/k] Scroll  [Enter/Esc] Close ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
+        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(Color::Black));
 
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
     let error_text = app.error_detail.as_deref().unwrap_or("No error details");
-    let paragraph = Paragraph::new(error_text)
+
+    // Add visual separator and formatting
+    let formatted_error = format!("{}\n\n─────────────────────────────────────────\nCheck the QEMU configuration or launch.sh script for issues.", error_text);
+
+    let paragraph = Paragraph::new(formatted_error)
         .style(Style::default().fg(Color::White))
         .wrap(Wrap { trim: false })
         .scroll((app.error_scroll, 0));

@@ -69,6 +69,21 @@ name = "Unix"
 icon = "🔷"
 order = 12
 
+[families.mobile]
+name = "Mobile"
+icon = "📱"
+order = 13
+
+[families.infrastructure]
+name = "Infrastructure"
+icon = "🏗️"
+order = 14
+
+[families.utilities]
+name = "Utilities"
+icon = "🛠️"
+order = 15
+
 [families.other]
 name = "Other"
 icon = "📦"
@@ -102,7 +117,7 @@ name = "Windows 9x"
 family = "microsoft"
 order = 3
 sort_by = "date"
-patterns = ["^windows-(95|98|me)"]
+patterns = ["^windows-(95|98se?|me)"]
 
 [subcategories.windows_nt]
 name = "Windows NT"
@@ -177,7 +192,7 @@ name = "Arch-based"
 family = "linux"
 order = 1
 sort_by = "name"
-patterns = ["^linux-(arch|manjaro|endeavour|garuda|artix|cachyos|bazzite)"]
+patterns = ["^linux-(arch|manjaro|endeavouros|garuda|artix|cachyos|bazzite)"]
 
 [subcategories.debian_based]
 name = "Debian-based"
@@ -399,6 +414,85 @@ family = "retro"
 order = 5
 sort_by = "name"
 patterns = ["^riscos", "^risc-os"]
+
+# -----------------------------------------------------------------------------
+# Mobile subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.android]
+name = "Android"
+family = "mobile"
+order = 1
+sort_by = "name"
+patterns = ["^android", "^lineageos", "^bliss-os"]
+
+# -----------------------------------------------------------------------------
+# Infrastructure subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.firewall_router]
+name = "Firewall / Router"
+family = "infrastructure"
+order = 1
+sort_by = "name"
+patterns = ["^pfsense", "^opnsense", "^openwrt"]
+
+[subcategories.nas_storage]
+name = "NAS / Storage"
+family = "infrastructure"
+order = 2
+sort_by = "name"
+patterns = ["^truenas", "^unraid", "^omv", "^openmediavault"]
+
+[subcategories.virtualization]
+name = "Virtualization"
+family = "infrastructure"
+order = 3
+sort_by = "name"
+patterns = ["^proxmox", "^esxi", "^xcp-ng", "^harvester"]
+
+# -----------------------------------------------------------------------------
+# Utilities subcategories
+# -----------------------------------------------------------------------------
+
+[subcategories.live_rescue]
+name = "Live / Rescue"
+family = "utilities"
+order = 1
+sort_by = "name"
+patterns = ["^rescue", "^gparted", "^clonezilla", "^memtest", "^generic-live"]
+
+# -----------------------------------------------------------------------------
+# Generic profiles (fallbacks within families)
+# -----------------------------------------------------------------------------
+
+[subcategories.generic_linux]
+name = "Generic"
+family = "linux"
+order = 99
+sort_by = "name"
+patterns = ["^generic-linux"]
+
+[subcategories.generic_windows]
+name = "Generic"
+family = "microsoft"
+order = 99
+sort_by = "name"
+patterns = ["^generic-windows"]
+
+[subcategories.generic_bsd]
+name = "Generic"
+family = "bsd"
+order = 99
+sort_by = "name"
+patterns = ["^generic-bsd"]
+
+[subcategories.generic_other]
+name = "Generic"
+family = "alternative"
+order = 99
+sort_by = "name"
+patterns = ["^generic-other"]
 
 # -----------------------------------------------------------------------------
 # Other/Uncategorized

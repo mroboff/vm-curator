@@ -529,21 +529,29 @@ fn render_step_select_os(app: &App, frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Layout: VM name field, OS list, help
+    // Layout: OS list first, then VM name field below
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),   // VM Name field
-            Constraint::Length(1),   // Spacer
             Constraint::Length(1),   // OS list header
             Constraint::Min(10),     // OS list
+            Constraint::Length(1),   // Spacer
+            Constraint::Length(3),   // VM Name field
             Constraint::Length(1),   // Error message
             Constraint::Length(2),   // Help text
         ])
         .split(inner);
 
-    // VM Name input
+    // OS list header
+    let header = Paragraph::new("Select Operating System:")
+        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    frame.render_widget(header, chunks[0]);
+
+    // OS list (grouped by category)
+    render_os_list(app, frame, chunks[1]);
+
+    // VM Name input (below OS list)
     let name_editing = matches!(state.editing_field, Some(WizardField::VmName));
     let name_style = if name_editing {
         Style::default().fg(Color::Yellow)
@@ -557,12 +565,12 @@ fn render_step_select_os(app: &App, frame: &mut Frame, area: Rect) {
     };
 
     let name_block = Block::default()
-        .title(" VM Name ")
+        .title(" VM Name (Tab to edit) ")
         .borders(Borders::ALL)
         .border_style(name_border);
 
     let name_text = if state.vm_name.is_empty() {
-        Paragraph::new("Enter a name for your VM...")
+        Paragraph::new("Select an OS above...")
             .style(Style::default().fg(Color::DarkGray))
             .block(name_block)
     } else {
@@ -570,22 +578,14 @@ fn render_step_select_os(app: &App, frame: &mut Frame, area: Rect) {
             .style(name_style)
             .block(name_block)
     };
-    frame.render_widget(name_text, chunks[0]);
+    frame.render_widget(name_text, chunks[3]);
 
     // Set cursor position when editing
     if name_editing {
-        let cursor_x = chunks[0].x + 1 + state.vm_name.len() as u16;
-        let cursor_y = chunks[0].y + 1;
+        let cursor_x = chunks[3].x + 1 + state.vm_name.len() as u16;
+        let cursor_y = chunks[3].y + 1;
         frame.set_cursor_position((cursor_x, cursor_y));
     }
-
-    // OS list header
-    let header = Paragraph::new("Select Operating System:")
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-    frame.render_widget(header, chunks[2]);
-
-    // OS list (grouped by category)
-    render_os_list(app, frame, chunks[3]);
 
     // Error message
     if let Some(ref error) = state.error_message {
@@ -598,7 +598,7 @@ fn render_step_select_os(app: &App, frame: &mut Frame, area: Rect) {
     let help_text = if name_editing {
         "[Enter] Done editing  [Esc] Cancel"
     } else {
-        "[Tab] Edit name  [j/k] Select OS  [Enter] Next  [Esc] Cancel"
+        "[j/k] Select OS  [Tab] Edit name  [Enter] Next  [Esc] Cancel"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))

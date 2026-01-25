@@ -363,9 +363,16 @@ impl CreateWizardState {
             .join("-")
     }
 
-    /// Update folder name when VM name changes
+    /// Update folder name based on selected OS profile ID
+    /// Uses the profile ID as base (e.g., "linux-endeavouros") for proper hierarchy matching
     pub fn update_folder_name(&mut self) {
-        self.folder_name = Self::generate_folder_name(&self.vm_name);
+        if let Some(ref os_id) = self.selected_os {
+            // Use the profile ID as the folder name for proper categorization
+            self.folder_name = os_id.clone();
+        } else {
+            // Fallback to generating from display name for custom OSes
+            self.folder_name = Self::generate_folder_name(&self.vm_name);
+        }
     }
 
     /// Apply profile settings to the wizard state
@@ -1055,11 +1062,9 @@ impl App {
             if let Some(profile) = self.qemu_profiles.get(os_id) {
                 state.apply_profile(profile);
 
-                // If VM name is empty, suggest the display name
-                if state.vm_name.is_empty() {
-                    state.vm_name = profile.display_name.clone();
-                    state.update_folder_name();
-                }
+                // Always update VM name to match selected OS display name
+                state.vm_name = profile.display_name.clone();
+                state.update_folder_name();
             }
         }
     }
