@@ -15,11 +15,18 @@ pub struct DiscoveredVm {
     pub launch_script: PathBuf,
     /// Parsed QEMU configuration
     pub config: QemuConfig,
+    /// Custom display name from vm-curator.toml (if set)
+    pub custom_name: Option<String>,
+    /// OS profile ID from vm-curator.toml (if set)
+    pub os_profile: Option<String>,
 }
 
 impl DiscoveredVm {
-    /// Get a display name from the directory name with proper OS naming conventions
+    /// Get a display name - uses custom name if set, otherwise generates from ID
     pub fn display_name(&self) -> String {
+        if let Some(ref name) = self.custom_name {
+            return name.clone();
+        }
         format_os_display_name(&self.id)
     }
 }
@@ -162,24 +169,35 @@ fn format_mac_name(id: &str) -> String {
 fn format_linux_name(id: &str) -> String {
     let distro = id.strip_prefix("linux-").unwrap_or(id);
 
-    // Rolling release distributions
+    // For rolling distros, try to match with and without numeric suffix
+    // This handles duplicate VMs like "linux-cachyos-2"
+    let base_distro = strip_numeric_suffix_local(distro).unwrap_or(distro);
+
+    // Rolling release distributions - check both full name and base (for duplicates)
     match distro {
-        "arch" => return "Arch Linux (rolling)".to_string(),
-        "artix" => return "Artix Linux (rolling)".to_string(),
-        "cachyos" => return "CachyOS (rolling)".to_string(),
-        "endeavouros" | "endeavour" => return "EndeavourOS (rolling)".to_string(),
-        "garuda" => return "Garuda Linux (rolling)".to_string(),
-        "gentoo" => return "Gentoo Linux (rolling)".to_string(),
-        "manjaro" => return "Manjaro Linux (rolling)".to_string(),
-        "nixos" => return "NixOS (rolling)".to_string(),
-        "opensuse-tumbleweed" | "suse-tumbleweed" | "tumbleweed" => {
-            return "openSUSE Tumbleweed (rolling)".to_string()
+        "arch" | "artix" | "cachyos" | "endeavouros" | "endeavour" | "garuda" |
+        "gentoo" | "manjaro" | "nixos" | "void" | "bazzite" |
+        "opensuse-tumbleweed" | "suse-tumbleweed" | "tumbleweed" |
+        "pclinuxos" | "solus" | "puppy" | "clear" => {
+            return format_rolling_distro(distro);
         }
-        "void" => return "Void Linux (rolling)".to_string(),
         _ => {}
     }
 
-    // Versioned distributions - check for version numbers
+    // Check if base_distro (without numeric suffix) matches a rolling distro
+    if distro != base_distro {
+        match base_distro {
+            "arch" | "artix" | "cachyos" | "endeavouros" | "endeavour" | "garuda" |
+            "gentoo" | "manjaro" | "nixos" | "void" | "bazzite" |
+            "opensuse-tumbleweed" | "suse-tumbleweed" | "tumbleweed" |
+            "pclinuxos" | "solus" | "puppy" | "clear" => {
+                return format_rolling_distro(base_distro);
+            }
+            _ => {}
+        }
+    }
+
+    // Versioned distributions - use full distro name to preserve version numbers
     if distro.starts_with("fedora") {
         return format_versioned_distro(distro, "fedora", "Fedora Linux");
     }
@@ -241,9 +259,45 @@ fn format_linux_name(id: &str) -> String {
         let prefix = if distro.starts_with("almalinux") { "almalinux" } else { "alma" };
         return format_versioned_distro(distro, prefix, "AlmaLinux");
     }
+    if distro.starts_with("mageia") {
+        return format_versioned_distro(distro, "mageia", "Mageia");
+    }
 
     // Fallback for unknown Linux distros
     format!("Linux {}", fallback_title_case(distro))
+}
+
+/// Format rolling distro display name
+fn format_rolling_distro(distro: &str) -> String {
+    match distro {
+        "arch" => "Arch Linux (rolling)".to_string(),
+        "artix" => "Artix Linux (rolling)".to_string(),
+        "cachyos" => "CachyOS (rolling)".to_string(),
+        "endeavouros" | "endeavour" => "EndeavourOS (rolling)".to_string(),
+        "garuda" => "Garuda Linux (rolling)".to_string(),
+        "gentoo" => "Gentoo Linux (rolling)".to_string(),
+        "manjaro" => "Manjaro Linux (rolling)".to_string(),
+        "nixos" => "NixOS (rolling)".to_string(),
+        "opensuse-tumbleweed" | "suse-tumbleweed" | "tumbleweed" => "openSUSE Tumbleweed (rolling)".to_string(),
+        "void" => "Void Linux (rolling)".to_string(),
+        "bazzite" => "Bazzite (rolling)".to_string(),
+        "pclinuxos" => "PCLinuxOS".to_string(),
+        "solus" => "Solus".to_string(),
+        "puppy" => "Puppy Linux".to_string(),
+        "clear" => "Clear Linux".to_string(),
+        _ => format!("Linux {}", fallback_title_case(distro)),
+    }
+}
+
+/// Strip numeric suffix from distro name (e.g., "cachyos-2" -> "cachyos")
+fn strip_numeric_suffix_local(s: &str) -> Option<&str> {
+    if let Some(last_dash) = s.rfind('-') {
+        let suffix = &s[last_dash + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return Some(&s[..last_dash]);
+        }
+    }
+    None
 }
 
 /// Format a versioned distribution name
@@ -305,6 +359,54 @@ fn fallback_title_case(s: &str) -> String {
         .join(" ")
 }
 
+/// Read VM metadata from vm-curator.toml
+fn read_vm_metadata(vm_path: &Path) -> (Option<String>, Option<String>) {
+    let metadata_path = vm_path.join("vm-curator.toml");
+
+    if !metadata_path.exists() {
+        return (None, None);
+    }
+
+    let content = match std::fs::read_to_string(&metadata_path) {
+        Ok(c) => c,
+        Err(_) => return (None, None),
+    };
+
+    // Simple TOML parsing for our specific keys
+    let mut display_name = None;
+    let mut os_profile = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("display_name") {
+            if let Some(value) = extract_toml_string_value(line) {
+                display_name = Some(value);
+            }
+        } else if line.starts_with("os_profile") {
+            if let Some(value) = extract_toml_string_value(line) {
+                os_profile = Some(value);
+            }
+        }
+    }
+
+    (display_name, os_profile)
+}
+
+/// Extract a string value from a TOML line like: key = "value"
+fn extract_toml_string_value(line: &str) -> Option<String> {
+    let parts: Vec<&str> = line.splitn(2, '=').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let value = parts[1].trim();
+    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+        Some(value[1..value.len()-1].replace("\\\"", "\""))
+    } else {
+        None
+    }
+}
+
 /// Scan the VM library directory for VMs
 pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
     let mut vms = Vec::new();
@@ -348,11 +450,16 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
             }
         };
 
+        // Read vm-curator.toml metadata if it exists
+        let (custom_name, os_profile) = read_vm_metadata(&path);
+
         vms.push(DiscoveredVm {
             id,
             path,
             launch_script,
             config,
+            custom_name,
+            os_profile,
         });
     }
 
@@ -415,8 +522,24 @@ mod tests {
             path: PathBuf::from("/test"),
             launch_script: PathBuf::from("/test/launch.sh"),
             config: QemuConfig::default(),
+            custom_name: None,
+            os_profile: None,
         };
         assert_eq!(vm.display_name(), "Microsoft® Windows 95");
+    }
+
+    #[test]
+    fn test_custom_display_name() {
+        let vm = DiscoveredVm {
+            id: "linux-cachyos-2".to_string(),
+            path: PathBuf::from("/test"),
+            launch_script: PathBuf::from("/test/launch.sh"),
+            config: QemuConfig::default(),
+            custom_name: Some("CachyOS Gaming Rig".to_string()),
+            os_profile: Some("linux-cachyos".to_string()),
+        };
+        // Custom name takes priority
+        assert_eq!(vm.display_name(), "CachyOS Gaming Rig");
     }
 
     #[test]
@@ -429,6 +552,19 @@ mod tests {
         assert_eq!(format_os_display_name("linux-suse"), "openSUSE Tumbleweed (rolling)");
         assert_eq!(format_os_display_name("linux-suse-7"), "SuSE Linux 7");
         assert_eq!(format_os_display_name("linux-opensuse-leap-15"), "openSUSE Leap 15");
+    }
+
+    #[test]
+    fn test_linux_display_names_with_suffix() {
+        // Rolling distros with numeric suffixes should display the same as originals
+        assert_eq!(format_os_display_name("linux-cachyos-2"), "CachyOS (rolling)");
+        assert_eq!(format_os_display_name("linux-cachyos-3"), "CachyOS (rolling)");
+        assert_eq!(format_os_display_name("linux-arch-2"), "Arch Linux (rolling)");
+        assert_eq!(format_os_display_name("linux-gentoo-2"), "Gentoo Linux (rolling)");
+        assert_eq!(format_os_display_name("linux-manjaro-3"), "Manjaro Linux (rolling)");
+        // Versioned distros keep version numbers (which may look like suffixes)
+        assert_eq!(format_os_display_name("linux-fedora-2"), "Fedora Linux 2");
+        assert_eq!(format_os_display_name("linux-ubuntu-2"), "Ubuntu 2");
     }
 
     #[test]

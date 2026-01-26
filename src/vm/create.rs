@@ -89,11 +89,32 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
     );
     let launch_script_path = write_launch_script(&vm_dir, &script_content)?;
 
+    // Write VM metadata file with custom display name
+    write_vm_metadata(&vm_dir, &state.vm_name, state.selected_os.as_deref())?;
+
     Ok(CreatedVm {
         path: vm_dir,
         launch_script: launch_script_path,
         disk_image: disk_path,
     })
+}
+
+/// Write VM metadata file (vm-curator.toml)
+fn write_vm_metadata(vm_dir: &Path, display_name: &str, os_profile: Option<&str>) -> Result<()> {
+    let metadata_path = vm_dir.join("vm-curator.toml");
+
+    let mut content = String::new();
+    content.push_str("# VM Curator metadata\n\n");
+    content.push_str(&format!("display_name = \"{}\"\n", display_name.replace('"', "\\\"")));
+
+    if let Some(profile) = os_profile {
+        content.push_str(&format!("os_profile = \"{}\"\n", profile));
+    }
+
+    fs::write(&metadata_path, content)
+        .with_context(|| format!("Failed to write VM metadata: {}", metadata_path.display()))?;
+
+    Ok(())
 }
 
 /// Create the VM directory

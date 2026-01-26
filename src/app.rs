@@ -28,6 +28,8 @@ pub enum Screen {
     Snapshots,
     /// Boot options
     BootOptions,
+    /// Display options
+    DisplayOptions,
     /// USB device selection
     UsbDevices,
     /// Confirmation dialog
@@ -57,6 +59,7 @@ pub enum Screen {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextInputContext {
     SnapshotName,
+    RenameVm,
 }
 
 /// Actions that need confirmation
@@ -376,13 +379,41 @@ impl CreateWizardState {
 
     /// Update folder name based on selected OS profile ID
     /// Uses the profile ID as base (e.g., "linux-endeavouros") for proper hierarchy matching
-    pub fn update_folder_name(&mut self) {
-        if let Some(ref os_id) = self.selected_os {
+    /// If a folder with that name already exists, appends -2, -3, etc.
+    pub fn update_folder_name(&mut self, library_path: &std::path::Path) {
+        let base_name = if let Some(ref os_id) = self.selected_os {
             // Use the profile ID as the folder name for proper categorization
-            self.folder_name = os_id.clone();
+            os_id.clone()
         } else {
             // Fallback to generating from display name for custom OSes
-            self.folder_name = Self::generate_folder_name(&self.vm_name);
+            Self::generate_folder_name(&self.vm_name)
+        };
+
+        // Check if folder already exists, and if so, find an available suffix
+        self.folder_name = Self::find_available_folder_name(library_path, &base_name);
+    }
+
+    /// Find an available folder name by appending numeric suffixes if needed
+    /// e.g., "windows-10" -> "windows-10-2" -> "windows-10-3"
+    fn find_available_folder_name(library_path: &std::path::Path, base_name: &str) -> String {
+        let first_candidate = library_path.join(base_name);
+        if !first_candidate.exists() {
+            return base_name.to_string();
+        }
+
+        // Folder exists, try with numeric suffixes
+        let mut suffix = 2;
+        loop {
+            let candidate_name = format!("{}-{}", base_name, suffix);
+            let candidate_path = library_path.join(&candidate_name);
+            if !candidate_path.exists() {
+                return candidate_name;
+            }
+            suffix += 1;
+            // Safety limit to prevent infinite loop
+            if suffix > 1000 {
+                return candidate_name;
+            }
         }
     }
 
@@ -1070,6 +1101,24 @@ impl App {
 
     /// Select an OS profile in the wizard
     pub fn wizard_select_os(&mut self, os_id: &str) {
+        let library_path = self.config.vm_library_path.clone();
+
+        // Get full display name from metadata (e.g., "CachyOS (rolling)")
+        // Fall back to profile's display_name if not in metadata
+        let new_display_name = self.metadata.get(os_id)
+            .and_then(|info| info.display_name.clone())
+            .or_else(|| self.qemu_profiles.get(os_id).map(|p| p.display_name.clone()))
+            .unwrap_or_else(|| os_id.to_string());
+
+        // Get the previous OS's display name (if any) to check if user customized the name
+        let previous_default_name = self.wizard_state.as_ref()
+            .and_then(|s| s.selected_os.as_ref())
+            .and_then(|prev_id| {
+                self.metadata.get(prev_id)
+                    .and_then(|info| info.display_name.clone())
+                    .or_else(|| self.qemu_profiles.get(prev_id).map(|p| p.display_name.clone()))
+            });
+
         if let Some(ref mut state) = self.wizard_state {
             state.selected_os = Some(os_id.to_string());
             state.custom_os = None;
@@ -1078,9 +1127,16 @@ impl App {
             if let Some(profile) = self.qemu_profiles.get(os_id) {
                 state.apply_profile(profile);
 
-                // Always update VM name to match selected OS display name
-                state.vm_name = profile.display_name.clone();
-                state.update_folder_name();
+                // Only update VM name if:
+                // 1. Name is empty, OR
+                // 2. Name matches the previous OS's default (user hasn't customized it)
+                let should_update_name = state.vm_name.is_empty()
+                    || previous_default_name.as_ref().map(|n| n == &state.vm_name).unwrap_or(false);
+
+                if should_update_name {
+                    state.vm_name = new_display_name;
+                }
+                state.update_folder_name(&library_path);
             }
         }
     }

@@ -8,6 +8,17 @@ Para-virtualized 3D acceleration **works with NVIDIA GPUs** in VMs created by `v
 
 This was extensively tested by the developer on an RTX-4090 in Arch Linux using NVIDIA driver 590.48.01. The guest OS still has to support QEMU 3D-accelleration. `(virtio-vga-gl with gl=on.)` Note this is not the same as full GPU Passthrough (the kind requiring multiple GPUs and/or jumping through many, many hoops.) Support for full GPU passthrough is being worked on.
 
+### Changelog
+
+**v0.1.1**
+- **Custom VM Names**: VMs can now have custom display names that persist across sessions
+- **Rename VMs**: New management menu option to rename VMs on the fly
+- **Change Display**: New management menu option to switch display types (GTK, SDL, SPICE, VNC)
+- **SDL Default for 3D**: VMs with 3D acceleration now default to SDL display for better performance
+- **Duplicate VM Support**: Creating multiple VMs of the same OS now auto-increments folder names (-2, -3, etc.)
+- **Improved Trash Handling**: Fixed conflicts when deleting VMs with duplicate names
+- **UI Polish**: Management screen now displays all options without scrolling
+
 ### Features
 
 **VM Discovery & Organization**
