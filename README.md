@@ -10,6 +10,9 @@ This was extensively tested by the developer on an RTX-4090 in Arch Linux using 
 
 ### Changelog
 
+**v0.1.5**
+- **BTRFS Performance Fix**: Automatically disables copy-on-write on BTRFS filesystems when creating VM directories, preventing performance degradation from double CoW (BTRFS + qcow2)
+
 **v0.1.4**
 - **First-Time Setup**: New users are now prompted to configure the VM library directory on first run
 

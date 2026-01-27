@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 use crate::app::App;
 use crate::config::Config;
+use crate::fs;
 
 /// Settings items that can be configured
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,6 +502,24 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
             } else {
                 path
             };
+
+            // Create directory if it doesn't exist, with BTRFS CoW optimization
+            if !path.exists() {
+                match fs::setup_vm_directory(&path) {
+                    Ok(cow_disabled) => {
+                        if cow_disabled {
+                            app.set_status("Created directory with BTRFS CoW disabled");
+                        } else {
+                            app.set_status("Created directory");
+                        }
+                    }
+                    Err(e) => {
+                        app.set_status(format!("Failed to create directory: {}", e));
+                        return Ok(());
+                    }
+                }
+            }
+
             app.config.vm_library_path = path;
         }
         SettingsItem::DefaultMemory => {

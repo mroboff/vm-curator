@@ -1,6 +1,7 @@
 mod app;
 mod commands;
 mod config;
+mod fs;
 mod hardware;
 mod metadata;
 mod ui;
@@ -169,10 +170,14 @@ fn prompt_vm_library_setup(mut config: Config) -> Result<Config> {
     print!("Creating directory {:?}... ", config.vm_library_path);
     io::stdout().flush()?;
 
-    std::fs::create_dir_all(&config.vm_library_path)
+    let cow_disabled = fs::setup_vm_directory(&config.vm_library_path)
         .with_context(|| format!("Failed to create VM library directory {:?}", config.vm_library_path))?;
 
     println!("\x1b[32m✓\x1b[0m");
+
+    if cow_disabled {
+        println!("Disabled BTRFS copy-on-write for better VM performance \x1b[32m✓\x1b[0m");
+    }
 
     // Save configuration
     print!("Saving configuration... ");
