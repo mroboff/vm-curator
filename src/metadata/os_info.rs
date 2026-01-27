@@ -104,8 +104,19 @@ impl MetadataStore {
     }
 
     /// Get info for a VM by ID
+    /// Falls back to base ID without numeric suffix (e.g., "linux-cachyos-2" -> "linux-cachyos")
     pub fn get(&self, id: &str) -> Option<&OsInfo> {
-        self.entries.get(id)
+        // Try exact match first
+        if let Some(info) = self.entries.get(id) {
+            return Some(info);
+        }
+
+        // Try without numeric suffix (e.g., "linux-cachyos-2" -> "linux-cachyos")
+        if let Some(base_id) = strip_numeric_suffix(id) {
+            return self.entries.get(base_id);
+        }
+
+        None
     }
 
     /// Merge user overrides with embedded defaults
@@ -143,6 +154,19 @@ pub fn default_os_info(vm_id: &str) -> OsInfo {
         fun_facts: Vec::new(),
         install_steps: Vec::new(),
     }
+}
+
+/// Strip numeric suffix from VM ID (e.g., "linux-cachyos-2" -> "linux-cachyos")
+/// Returns None if there's no numeric suffix
+pub fn strip_numeric_suffix(id: &str) -> Option<&str> {
+    // Look for pattern like "-2", "-3", "-10", etc. at the end
+    if let Some(last_dash) = id.rfind('-') {
+        let suffix = &id[last_dash + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return Some(&id[..last_dash]);
+        }
+    }
+    None
 }
 
 /// Guess OS details from VM ID

@@ -6,7 +6,7 @@ mod metadata;
 mod ui;
 mod vm;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -14,7 +14,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
-use std::io;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use app::App;
@@ -23,7 +23,7 @@ use config::Config;
 #[derive(Parser)]
 #[command(name = "vm-curator")]
 #[command(author = "Mark Roboff")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(about = "A TUI application to manage your QEMU VM library")]
 struct Cli {
     /// Path to VM library directory
@@ -102,6 +102,11 @@ fn main() -> Result<()> {
         config.vm_library_path = library.clone();
     }
 
+    // Check if VM library exists, prompt for setup if not
+    if !config.vm_library_path.exists() {
+        config = prompt_vm_library_setup(config)?;
+    }
+
     // Handle subcommands
     match cli.command {
         Some(Commands::List) => cmd_list(&config),
@@ -111,6 +116,74 @@ fn main() -> Result<()> {
         Some(Commands::Emulators) => cmd_emulators(),
         None => run_tui(config),
     }
+}
+
+/// Prompt user to set up VM library directory
+fn prompt_vm_library_setup(mut config: Config) -> Result<Config> {
+    println!();
+    println!("\x1b[1;36m╭─────────────────────────────────────╮\x1b[0m");
+    println!("\x1b[1;36m│\x1b[0m    \x1b[1;33mVM Curator\x1b[0m - First Time Setup    \x1b[1;36m│\x1b[0m");
+    println!("\x1b[1;36m╰─────────────────────────────────────╯\x1b[0m");
+    println!();
+    println!("VM library directory not found.");
+    println!();
+
+    // Show default path with ~ for home
+    let default_path = config.vm_library_path.display().to_string();
+    let display_path = if let Some(home) = dirs::home_dir() {
+        default_path.replace(&home.display().to_string(), "~")
+    } else {
+        default_path.clone()
+    };
+
+    println!("Where should VMs be stored?");
+    println!("\x1b[90mPress Enter to use default, or type a new path.\x1b[0m");
+    println!();
+    print!("\x1b[1;32m[\x1b[0m{}\x1b[1;32m]\x1b[0m: ", display_path);
+    io::stdout().flush()?;
+
+    // Read user input
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    // Use input if provided, otherwise keep default
+    if !input.is_empty() {
+        // Expand ~ to home directory
+        let expanded = if input.starts_with("~/") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(&input[2..])
+            } else {
+                PathBuf::from(input)
+            }
+        } else if input == "~" {
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from(input))
+        } else {
+            PathBuf::from(input)
+        };
+        config.vm_library_path = expanded;
+    }
+
+    // Create the directory
+    println!();
+    print!("Creating directory {:?}... ", config.vm_library_path);
+    io::stdout().flush()?;
+
+    std::fs::create_dir_all(&config.vm_library_path)
+        .with_context(|| format!("Failed to create VM library directory {:?}", config.vm_library_path))?;
+
+    println!("\x1b[32m✓\x1b[0m");
+
+    // Save configuration
+    print!("Saving configuration... ");
+    io::stdout().flush()?;
+
+    config.save()?;
+
+    println!("\x1b[32m✓\x1b[0m");
+    println!();
+
+    Ok(config)
 }
 
 /// Guard that ensures terminal is restored on drop (even on panic)

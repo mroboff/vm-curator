@@ -1,10 +1,22 @@
 [package]
 name = "vm-curator"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2021"
 description = "A TUI application to manage QEMU VM library"
 authors = ["Mark Roboff"]
 license = "MIT"
+repository = "https://github.com/mroboff/vm-curator"
+homepage = "https://github.com/mroboff/vm-curator"
+documentation = "https://github.com/mroboff/vm-curator#readme"
+readme = "README.md"
+keywords = ["qemu", "kvm", "virtual-machine", "tui", "virtualization"]
+categories = ["command-line-utilities", "virtualization"]
+exclude = [
+    ".github/",
+    ".gitignore",
+    ".claude/",
+    "target/",
+]
 
 [dependencies]
 ratatui = "0.30.0"
@@ -25,3 +37,34 @@ unicode-width = "0.2"
 [profile.release]
 lto = true
 strip = true
+
+[package.metadata.deb]
+maintainer = "Mark Roboff"
+copyright = "2026 Mark Roboff"
+license-file = ["LICENSE", "0"]
+extended-description = """
+vm-curator is a feature-rich TUI application for managing QEMU/KVM virtual machines.
+It provides automatic VM discovery, a 5-step creation wizard with 121 pre-configured
+OS profiles, snapshot management, USB passthrough, and 3D graphics acceleration."""
+depends = "$auto, qemu-system-x86, qemu-utils, bash"
+recommends = "ovmf, polkit, kmod"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/vm-curator", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/vm-curator/", "644"],
+    ["LICENSE", "usr/share/doc/vm-curator/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/vm-curator", dest = "/usr/bin/vm-curator", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/vm-curator/README.md", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/doc/vm-curator/LICENSE", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+qemu-system-x86-core = "*"
+qemu-img = "*"
+bash = "*"
+systemd-libs = "*"

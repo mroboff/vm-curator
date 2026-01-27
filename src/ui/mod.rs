@@ -5,6 +5,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::prelude::*;
 use ratatui::backend::CrosstermBackend;
+use regex::Regex;
 use std::io::Stdout;
 use std::time::Duration;
 
@@ -326,6 +327,11 @@ fn render(app: &App, frame: &mut Frame) {
             render_dim_overlay(frame);
             screens::management::render_boot_options(app, frame);
         }
+        Screen::DisplayOptions => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::management::render_display_options(app, frame);
+        }
         Screen::UsbDevices => {
             screens::main_menu::render(app, frame);
             render_dim_overlay(frame);
@@ -411,6 +417,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::DetailedInfo => handle_detailed_info(app, key)?,
         Screen::Snapshots => handle_snapshots(app, key)?,
         Screen::BootOptions => handle_boot_options(app, key)?,
+        Screen::DisplayOptions => handle_display_options(app, key)?,
         Screen::UsbDevices => handle_usb_devices(app, key)?,
         Screen::PciPassthrough => screens::pci_passthrough::handle_key(app, key)?,
         Screen::Confirm(action) => handle_confirm(app, action.clone(), key)?,
@@ -837,6 +844,72 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
+fn handle_display_options(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.selected_menu_item = 3; // Reset to Change Display position in management menu
+            app.pop_screen();
+        }
+        KeyCode::Char('j') | KeyCode::Down => app.menu_next(screens::management::DISPLAY_OPTIONS.len()),
+        KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
+            let item = match key.code {
+                KeyCode::Char('1') => 0,
+                KeyCode::Char('2') => 1,
+                KeyCode::Char('3') => 2,
+                KeyCode::Char('4') => 3,
+                _ => app.selected_menu_item,
+            };
+
+            if let Some((display_name, _)) = screens::management::DISPLAY_OPTIONS.get(item) {
+                // Update the display setting in launch.sh
+                if let Some(vm) = app.selected_vm() {
+                    match update_vm_display(&vm.launch_script, display_name) {
+                        Ok(()) => {
+                            app.set_status(format!("Display changed to {}", display_name));
+                            // Reload the script to reflect changes
+                            app.reload_selected_vm_script();
+                        }
+                        Err(e) => {
+                            app.set_status(format!("Failed to change display: {}", e));
+                        }
+                    }
+                }
+                app.selected_menu_item = 3;
+                app.pop_screen();
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Update the display setting in a VM's launch script
+fn update_vm_display(script_path: &std::path::Path, new_display: &str) -> Result<()> {
+    let content = std::fs::read_to_string(script_path)?;
+
+    // Regex to match -display with optional gl=on suffix
+    let display_re = Regex::new(r"-display\s+(\w+)(,gl=on)?")?;
+
+    let new_content = if display_re.is_match(&content) {
+        // Replace existing -display setting, preserving gl=on if present
+        display_re.replace_all(&content, |caps: &regex::Captures| {
+            if caps.get(2).is_some() {
+                format!("-display {},gl=on", new_display)
+            } else {
+                format!("-display {}", new_display)
+            }
+        }).to_string()
+    } else {
+        // No -display found, this shouldn't happen for wizard-generated scripts
+        // but handle gracefully
+        content
+    };
+
+    std::fs::write(script_path, new_content)?;
+    Ok(())
+}
+
 fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Esc => {
@@ -1253,6 +1326,7 @@ fn render_text_input(app: &App, context: &TextInputContext, frame: &mut Frame) {
 
     let title = match context {
         TextInputContext::SnapshotName => " Enter Snapshot Name ",
+        TextInputContext::RenameVm => " Enter New VM Name ",
     };
 
     let area = frame.area();
@@ -1311,14 +1385,40 @@ fn handle_text_input(app: &mut App, context: TextInputContext, key: KeyEvent) ->
                         }
                     }
                 }
+                TextInputContext::RenameVm => {
+                    if !input.is_empty() {
+                        if let Some(vm) = app.selected_vm().cloned() {
+                            match crate::vm::lifecycle::rename_vm(&vm, &input) {
+                                Ok(()) => {
+                                    app.set_status(format!("Renamed to: {}", input));
+                                    // Refresh to pick up the new name
+                                    let _ = app.refresh_vms();
+                                }
+                                Err(e) => {
+                                    app.set_status(format!("Error renaming: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         KeyCode::Backspace => {
             app.text_input_buffer.pop();
         }
         KeyCode::Char(c) => {
-            // Only allow safe characters for snapshot names
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+            // Allow different characters based on context
+            let allowed = match context {
+                TextInputContext::SnapshotName => {
+                    // Only safe characters for snapshot names
+                    c.is_alphanumeric() || c == '-' || c == '_' || c == '.'
+                }
+                TextInputContext::RenameVm => {
+                    // Allow more characters for VM display names
+                    c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ' || c == '(' || c == ')'
+                }
+            };
+            if allowed {
                 app.text_input_buffer.push(c);
             }
         }

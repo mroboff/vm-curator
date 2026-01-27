@@ -466,7 +466,7 @@ pub fn handle_custom_os_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         // Set VM name if empty
                         if vm_name_empty {
                             state.vm_name = custom_name.clone();
-                            state.update_folder_name();
+                            state.update_folder_name(&app.config.vm_library_path);
                         }
 
                         // Generate ID from name
@@ -734,7 +734,7 @@ fn handle_step_select_os(app: &mut App, key: KeyEvent) -> Result<()> {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Tab => {
                 if let Some(ref mut state) = app.wizard_state {
                     state.editing_field = None;
-                    state.update_folder_name();
+                    state.update_folder_name(&app.config.vm_library_path);
                 }
             }
             KeyCode::Char(c) => {
@@ -1680,9 +1680,15 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                     QemuField::Kvm => state.qemu_config.enable_kvm = !state.qemu_config.enable_kvm,
                     QemuField::GlAccel => {
                         state.qemu_config.gl_acceleration = !state.qemu_config.gl_acceleration;
-                        // Enabling GL acceleration requires virtio VGA
-                        if state.qemu_config.gl_acceleration && state.qemu_config.vga != "virtio" {
-                            state.qemu_config.vga = "virtio".to_string();
+                        // Enabling GL acceleration requires virtio VGA and works best with SDL
+                        if state.qemu_config.gl_acceleration {
+                            if state.qemu_config.vga != "virtio" {
+                                state.qemu_config.vga = "virtio".to_string();
+                            }
+                            // SDL has better performance for 3D acceleration than GTK
+                            if state.qemu_config.display == "gtk" {
+                                state.qemu_config.display = "sdl".to_string();
+                            }
                         }
                     }
                     QemuField::Uefi => state.qemu_config.uefi = !state.qemu_config.uefi,

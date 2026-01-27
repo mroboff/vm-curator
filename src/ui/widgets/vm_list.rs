@@ -157,7 +157,9 @@ fn build_vm_hierarchy<'a>(
 
     for (filtered_idx, &vm_idx) in filtered_indices.iter().enumerate() {
         let vm = &vms[vm_idx];
-        let (family_id, subcat_id) = hierarchy.categorize(&vm.id);
+        // Use os_profile for categorization if available (handles duplicate VMs correctly)
+        let categorize_id = vm.os_profile.as_deref().unwrap_or(&vm.id);
+        let (family_id, subcat_id) = hierarchy.categorize(categorize_id);
 
         result
             .entry(family_id)
@@ -178,8 +180,11 @@ fn build_vm_hierarchy<'a>(
             match sort_by {
                 SortBy::Date => {
                     // Sort by release date (oldest first), falling back to name
-                    let date_a = metadata.get(&a.vm.id).map(|i| i.release_date.as_str()).unwrap_or("");
-                    let date_b = metadata.get(&b.vm.id).map(|i| i.release_date.as_str()).unwrap_or("");
+                    // Use os_profile for metadata lookup if available
+                    let id_a = a.vm.os_profile.as_deref().unwrap_or(&a.vm.id);
+                    let id_b = b.vm.os_profile.as_deref().unwrap_or(&b.vm.id);
+                    let date_a = metadata.get(id_a).map(|i| i.release_date.as_str()).unwrap_or("");
+                    let date_b = metadata.get(id_b).map(|i| i.release_date.as_str()).unwrap_or("");
 
                     match (date_a.is_empty(), date_b.is_empty()) {
                         (true, true) => {
@@ -205,10 +210,16 @@ fn build_vm_hierarchy<'a>(
     result
 }
 
-/// Get display name for a VM, using metadata if available
+/// Get display name for a VM, using custom name if set, otherwise metadata or generated name
 fn get_display_name(vm: &DiscoveredVm, metadata: &crate::metadata::MetadataStore) -> String {
-    // First try to get display_name from metadata
-    if let Some(info) = metadata.get(&vm.id) {
+    // First priority: custom name from vm-curator.toml
+    if let Some(ref custom_name) = vm.custom_name {
+        return custom_name.clone();
+    }
+
+    // Second priority: metadata display_name (use base_id for lookup)
+    let lookup_id = vm.os_profile.as_deref().unwrap_or(&vm.id);
+    if let Some(info) = metadata.get(lookup_id) {
         if let Some(ref display_name) = info.display_name {
             return display_name.clone();
         }
@@ -217,7 +228,8 @@ fn get_display_name(vm: &DiscoveredVm, metadata: &crate::metadata::MetadataStore
             return info.name.clone();
         }
     }
-    // Fall back to VM's own display_name method
+
+    // Fall back to VM's own display_name method (generates from ID)
     vm.display_name()
 }
 

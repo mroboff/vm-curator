@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev rpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: cargo install cargo-deb cargo-generate-rpm
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Build DEB package
+        run: cargo deb
+
+      - name: Build RPM package
+        run: cargo generate-rpm
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/vm-curator dist/
+          cp README.md LICENSE dist/
+          cd dist
+          tar -czvf vm-curator-${{ github.ref_name }}-linux-x86_64.tar.gz vm-curator README.md LICENSE
+          mv ../target/debian/*.deb .
+          mv ../target/generate-rpm/*.rpm .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+
+  build-appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libfuse2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Download appimagetool
+        run: |
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+      - name: Create AppDir structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp target/release/vm-curator AppDir/usr/bin/
+
+          cat > AppDir/usr/share/applications/vm-curator.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=VM Curator
+          Comment=A TUI application to manage QEMU VM library
+          Exec=vm-curator
+          Icon=vm-curator
+          Terminal=true
+          Categories=System;Emulator;
+          EOF
+
+          # Placeholder icon (1x1 transparent PNG)
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82' > AppDir/usr/share/icons/hicolor/256x256/apps/vm-curator.png
+
+          cat > AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/vm-curator" "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
+
+          ln -sf usr/share/applications/vm-curator.desktop AppDir/vm-curator.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/vm-curator.png AppDir/vm-curator.png
+
+      - name: Build AppImage
+        run: |
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir vm-curator-${{ github.ref_name }}-x86_64.AppImage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: "*.AppImage"
+
+  release:
+    needs: [build-linux, build-appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
