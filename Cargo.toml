@@ -1,6 +1,6 @@
 [package]
 name = "vm-curator"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "A TUI application to manage QEMU VM library"
 authors = ["Mark Roboff"]

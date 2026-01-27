@@ -10,7 +10,7 @@ This was extensively tested by the developer on an RTX-4090 in Arch Linux using 
 
 ### Changelog
 
-**v0.1.3**
+**v0.1.4**
 - **First-Time Setup**: New users are now prompted to configure the VM library directory on first run
 
 **v0.1.2**
