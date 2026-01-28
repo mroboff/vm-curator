@@ -10,6 +10,16 @@ This was extensively tested by the developer on an RTX-4090 in Arch Linux using 
 
 ### Changelog
 
+**v0.2.0**
+- **GPU Passthrough Support**: Full VFIO-based GPU passthrough for gaming VMs
+  - Single-GPU passthrough: Pass your only GPU to a VM (requires TTY, stops display manager)
+  - Multi-GPU passthrough: Pass a secondary GPU while keeping primary for host
+  - Looking Glass integration for multi-GPU setups with near-zero latency display
+- **PCI Passthrough Screen**: Select PCI devices (GPUs, USB controllers, NVMe) for VM passthrough
+- **System Setup Wizard**: One-click VFIO/IOMMU configuration with initramfs regeneration
+- **Settings Help System**: Contextual help tooltips for all settings
+- **USB Device Classification**: Improved keyboard/mouse detection for passthrough validation
+
 **v0.1.5**
 - **BTRFS Performance Fix**: Automatically disables copy-on-write on BTRFS filesystems when creating VM directories, preventing performance degradation from double CoW (BTRFS + qcow2)
 
