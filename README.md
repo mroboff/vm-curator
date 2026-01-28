@@ -1,12 +1,13 @@
 # vm-curator
 
-A fast and friendly Rust TUI for managing QEMU/KVM virtual machines. Discover, create, organize, launch, and manage VMs with an intuitive interface. 
+A fast and friendly Rust TUI for managing QEMU/KVM virtual machines with 3D acceleration! 
+Discover, create, organize, launch, and manage VMs with an intuitive interface. 
 
-### Important Launch Note ##
+### Important Note ##
 
-Para-virtualized 3D acceleration **works with NVIDIA GPUs** in VMs created by `vm-curator`! Huzzah!
+Para-virtualized and full GPU pass-through (single and multi) are now operational. Testing and feedback wanted!
 
-This was extensively tested by the developer on an RTX-4090 in Arch Linux using NVIDIA driver 590.48.01. The guest OS still has to support QEMU 3D-accelleration. `(virtio-vga-gl with gl=on.)` Note this is not the same as full GPU Passthrough (the kind requiring multiple GPUs and/or jumping through many, many hoops.) Support for full GPU passthrough is being worked on.
+Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) for more information, and to post your results.
 
 ### Changelog
 
