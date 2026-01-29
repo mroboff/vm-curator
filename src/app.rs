@@ -1148,31 +1148,45 @@ impl App {
 
     /// Save the editor content back to the launch.sh file
     pub fn save_script_from_editor(&mut self) -> Result<()> {
-        if let Some(vm) = self.selected_vm() {
-            let content = self.script_editor_lines.join("\n");
-            // Ensure the file ends with a newline
-            let content = if content.ends_with('\n') {
-                content
-            } else {
-                format!("{}\n", content)
-            };
+        // Get the launch script path before we need mutable access
+        let launch_script_path = self.selected_vm()
+            .map(|vm| vm.launch_script.clone())
+            .ok_or_else(|| anyhow::anyhow!("No VM selected"))?;
 
-            std::fs::write(&vm.launch_script, &content)?;
-
-            // Update the cached raw_script in the VM
-            self.reload_selected_vm_script();
-            self.script_editor_modified = false;
-
-            // Re-parse the VM config since the script changed
-            if let Ok(vms) = discover_vms(&self.config.vm_library_path) {
-                self.vms = vms;
-                self.update_filter();
-            }
-
-            Ok(())
+        let content = self.script_editor_lines.join("\n");
+        // Ensure the file ends with a newline
+        let content = if content.ends_with('\n') {
+            content
         } else {
-            anyhow::bail!("No VM selected")
+            format!("{}\n", content)
+        };
+
+        std::fs::write(&launch_script_path, &content)?;
+
+        // Update the cached raw_script in the VM
+        self.reload_selected_vm_script();
+        self.script_editor_modified = false;
+
+        // Re-parse the VM config since the script changed
+        if let Ok(vms) = discover_vms(&self.config.vm_library_path) {
+            self.vms = vms;
+            self.update_filter();
         }
+
+        // Regenerate single-GPU scripts if they exist
+        if let Some(vm) = self.selected_vm() {
+            if crate::hardware::scripts_exist(&vm.path) {
+                // Try with in-memory config first, fall back to saved config
+                // Ignore errors - the main save succeeded
+                let _ = if let Some(config) = self.single_gpu_config.as_ref() {
+                    crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
+                } else {
+                    crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
+                };
+            }
+        }
+
+        Ok(())
     }
 
     // =========================================================================

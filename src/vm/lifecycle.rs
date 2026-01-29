@@ -547,12 +547,13 @@ fn insert_usb_section(content: &str, usb_section: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut result = String::new();
     let mut inserted_section = false;
-    let mut modified_qemu_cmd = false;
 
-    // First pass: find the qemu command start line index
-    let mut qemu_start_idx: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
+    // Find ALL QEMU commands in the script (there may be multiple in a case statement)
+    // Each entry is (start_idx, end_idx) for a QEMU command
+    let mut qemu_commands: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
         let is_qemu_line = (trimmed.starts_with("qemu-system-")
             || trimmed.starts_with("exec qemu-system-")
             || trimmed.starts_with("\"$QEMU\"")
@@ -560,37 +561,37 @@ fn insert_usb_section(content: &str, usb_section: &str) -> String {
             && !trimmed.starts_with('#');
 
         if is_qemu_line {
-            qemu_start_idx = Some(i);
-            break;
+            let start_idx = i;
+            // Find the end of this QEMU command (the line without trailing \)
+            while i < lines.len() {
+                let line_trimmed = lines[i].trim();
+                if !line_trimmed.ends_with('\\') {
+                    break;
+                }
+                i += 1;
+            }
+            let end_idx = i;
+            qemu_commands.push((start_idx, end_idx));
         }
+        i += 1;
     }
 
-    // Find the last line of the qemu command (the one without trailing \)
-    let mut qemu_end_idx: Option<usize> = None;
-    if let Some(start) = qemu_start_idx {
-        for i in start..lines.len() {
-            let trimmed = lines[i].trim();
-            if !trimmed.ends_with('\\') {
-                qemu_end_idx = Some(i);
-                break;
-            }
-        }
-        // If all lines end with \, use the last line
-        if qemu_end_idx.is_none() {
-            qemu_end_idx = Some(lines.len() - 1);
-        }
-    }
+    // Track which end lines we need to modify
+    let qemu_end_indices: std::collections::HashSet<usize> = qemu_commands.iter().map(|(_, end)| *end).collect();
+
+    // Get the first QEMU command start for inserting the section
+    let first_qemu_start = qemu_commands.first().map(|(start, _)| *start);
 
     for (i, line) in lines.iter().enumerate() {
-        // Insert USB section before the qemu command
-        if Some(i) == qemu_start_idx && !inserted_section {
+        // Insert USB section before the FIRST qemu command
+        if Some(i) == first_qemu_start && !inserted_section {
             result.push_str(usb_section);
             result.push('\n');
             inserted_section = true;
         }
 
-        // Modify the last line of the qemu command to include $USB_PASSTHROUGH_ARGS
-        if Some(i) == qemu_end_idx && !modified_qemu_cmd {
+        // Modify ALL QEMU command endings to include $USB_PASSTHROUGH_ARGS
+        if qemu_end_indices.contains(&i) {
             let trimmed = line.trim_end();
             // Add $USB_PASSTHROUGH_ARGS before any trailing comment
             if let Some(comment_pos) = trimmed.find(" #") {
@@ -603,7 +604,6 @@ fn insert_usb_section(content: &str, usb_section: &str) -> String {
                 result.push_str(" $USB_PASSTHROUGH_ARGS");
             }
             result.push('\n');
-            modified_qemu_cmd = true;
             continue;
         }
 
@@ -688,4 +688,59 @@ fn extract_hex_value(s: &str, prefix: &str) -> Option<u16> {
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
 
     u16::from_str_radix(hex_str, 16).ok()
+}
+
+// PCI Passthrough section markers
+const PCI_MARKER_START: &str = "# >>> PCI Passthrough (managed by vm-curator) >>>";
+const PCI_MARKER_END: &str = "# <<< PCI Passthrough <<<";
+
+/// Load PCI passthrough configuration from the VM's launch.sh
+/// Returns a vector of individual QEMU args (e.g., ["-device", "vfio-pci,host=..."])
+pub fn load_pci_passthrough(vm: &DiscoveredVm) -> Vec<String> {
+    let content = match std::fs::read_to_string(&vm.launch_script) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    parse_pci_section(&content)
+}
+
+fn parse_pci_section(content: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut in_pci_section = false;
+
+    for line in content.lines() {
+        if line.trim() == PCI_MARKER_START {
+            in_pci_section = true;
+            continue;
+        }
+        if line.trim() == PCI_MARKER_END {
+            in_pci_section = false;
+            continue;
+        }
+        if in_pci_section && line.contains("PCI_PASSTHROUGH_ARGS=") {
+            // Parse the PCI args line
+            // Format: PCI_PASSTHROUGH_ARGS="-device vfio-pci,host=0000:01:00.0 -device vfio-pci,host=0000:01:00.1"
+            // Extract each -device vfio-pci,host=... segment
+
+            // Find the value inside quotes
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line.rfind('"') {
+                    if end > start {
+                        let value = &line[start + 1..end];
+                        // Split by -device and reconstruct
+                        for part in value.split("-device ") {
+                            let part = part.trim();
+                            if part.starts_with("vfio-pci,host=") {
+                                // Extract the host address (ends at space or end of string)
+                                let arg = format!("-device {}", part.split_whitespace().next().unwrap_or(part));
+                                args.push(arg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    args
 }

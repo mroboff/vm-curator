@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::hardware::SingleGpuConfig;
-use crate::vm::lifecycle::load_usb_passthrough;
+use crate::vm::lifecycle::{load_pci_passthrough, load_usb_passthrough};
 use crate::vm::DiscoveredVm;
 
 /// Generated scripts for single GPU passthrough
@@ -147,6 +147,10 @@ pub fn generate_single_gpu_scripts(
 ) -> Result<GeneratedScripts> {
     let vm_dir = &vm.path;
 
+    // Save the config so it can be loaded later for regeneration
+    crate::hardware::save_config(vm_dir, config)
+        .with_context(|| "Failed to save single-GPU config")?;
+
     // Generate the start script
     let start_content = generate_start_script(vm, config)?;
     let start_path = vm_dir.join("single-gpu-start.sh");
@@ -208,8 +212,11 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
     let usb_devices = load_usb_passthrough(vm);
     let usb_passthrough_args = generate_usb_passthrough_args(&usb_devices);
 
+    // Load PCI passthrough from launch.sh (network cards, USB controllers, etc.)
+    let pci_passthrough_args = load_pci_passthrough(vm);
+
     // Build QEMU command from existing launch.sh
-    let qemu_command = extract_qemu_command_for_passthrough(vm, config, &components, &usb_passthrough_args)?;
+    let qemu_command = extract_qemu_command_for_passthrough(vm, config, &components, &usb_passthrough_args, &pci_passthrough_args)?;
 
     // Generate variable definitions
     let variable_defs = generate_variable_definitions(vm, &components);
@@ -546,11 +553,28 @@ fn generate_usb_passthrough_args(devices: &[crate::vm::UsbPassthrough]) -> Strin
     }
 
     let mut args = vec!["-usb".to_string()];
+
+    // Check if any USB 3.0 devices are present
+    let has_usb3 = devices.iter().any(|d| d.is_usb3());
+
+    // Add xHCI controller if USB 3.0 devices are present
+    if has_usb3 {
+        args.push("-device qemu-xhci,id=xhci".to_string());
+    }
+
+    // Add each USB device, attaching USB 3.0 devices to xHCI controller
     for dev in devices {
-        args.push(format!(
-            "-device usb-host,vendorid=0x{:04x},productid=0x{:04x}",
-            dev.vendor_id, dev.product_id
-        ));
+        if dev.is_usb3() {
+            args.push(format!(
+                "-device usb-host,bus=xhci.0,vendorid=0x{:04x},productid=0x{:04x}",
+                dev.vendor_id, dev.product_id
+            ));
+        } else {
+            args.push(format!(
+                "-device usb-host,vendorid=0x{:04x},productid=0x{:04x}",
+                dev.vendor_id, dev.product_id
+            ));
+        }
     }
     args.join(" \\\n    ")
 }
@@ -993,6 +1017,7 @@ fn extract_qemu_command_for_passthrough(
     config: &SingleGpuConfig,
     components: &LaunchScriptComponents,
     usb_passthrough_args: &str,
+    pci_passthrough_args: &[String],
 ) -> Result<String> {
     let launch_script = fs::read_to_string(&vm.launch_script)
         .with_context(|| format!("Failed to read launch script: {:?}", vm.launch_script))?;
@@ -1040,7 +1065,7 @@ fn extract_qemu_command_for_passthrough(
 
     if !found_qemu {
         // Fallback: generate a basic QEMU command
-        return Ok(generate_basic_qemu_command(vm, config, components, usb_passthrough_args));
+        return Ok(generate_basic_qemu_command(vm, config, components, usb_passthrough_args, pci_passthrough_args));
     }
 
     // Build the modified QEMU command
@@ -1097,6 +1122,11 @@ fn extract_qemu_command_for_passthrough(
     // USB passthrough (from launch.sh config)
     if !usb_passthrough_args.is_empty() {
         passthrough_args.push(usb_passthrough_args.to_string());
+    }
+
+    // PCI passthrough (from launch.sh config - network cards, USB controllers, etc.)
+    for pci_arg in pci_passthrough_args {
+        passthrough_args.push(pci_arg.clone());
     }
 
     // Add NVIDIA CPU flags if NVIDIA GPU
@@ -1160,6 +1190,7 @@ fn generate_basic_qemu_command(
     config: &SingleGpuConfig,
     components: &LaunchScriptComponents,
     usb_passthrough_args: &str,
+    pci_passthrough_args: &[String],
 ) -> String {
     let qemu_emulator = vm.config.emulator.command();
     let memory = vm.config.memory_mb;
@@ -1268,6 +1299,15 @@ fn generate_basic_qemu_command(
         );
     }
 
+    // Add PCI passthrough (network cards, USB controllers, etc.)
+    for pci_arg in pci_passthrough_args {
+        cmd.push_str(&format!(
+            r#" \
+    {}"#,
+            pci_arg
+        ));
+    }
+
     // Boot from disk
     cmd.push_str(
         r#" \
@@ -1306,5 +1346,24 @@ pub fn regenerate_if_exists(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Resu
 
     // Scripts exist, regenerate them
     generate_single_gpu_scripts(vm, config)?;
+    Ok(true)
+}
+
+/// Regenerate single-GPU scripts using saved config from file
+/// This is used when the app doesn't have single_gpu_config in memory (e.g., after restart)
+/// Returns Ok(true) if scripts were regenerated, Ok(false) if no scripts or config exist
+pub fn regenerate_from_saved_config(vm: &DiscoveredVm) -> Result<bool> {
+    use crate::hardware::{load_config, scripts_exist};
+
+    if !scripts_exist(&vm.path) {
+        return Ok(false);
+    }
+
+    // Try to load saved config
+    let config = load_config(&vm.path)
+        .ok_or_else(|| anyhow::anyhow!("No saved single-GPU config found"))?;
+
+    // Regenerate scripts
+    generate_single_gpu_scripts(vm, &config)?;
     Ok(true)
 }

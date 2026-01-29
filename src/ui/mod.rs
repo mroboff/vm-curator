@@ -1005,9 +1005,16 @@ fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
 
                         // Regenerate single-GPU scripts if they exist
                         // USB devices are important for single-GPU since there's no graphical session
-                        if let (Some(vm), Some(config)) = (app.selected_vm(), app.single_gpu_config.as_ref()) {
+                        if let Some(vm) = app.selected_vm() {
                             if crate::hardware::scripts_exist(&vm.path) {
-                                match crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config) {
+                                // Try with in-memory config first, fall back to saved config
+                                let regen_result = if let Some(config) = app.single_gpu_config.as_ref() {
+                                    crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
+                                } else {
+                                    crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
+                                };
+
+                                match regen_result {
                                     Ok(true) => {
                                         status_msg.push_str("; single-GPU scripts regenerated");
                                     }

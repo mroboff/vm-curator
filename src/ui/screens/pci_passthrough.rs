@@ -512,9 +512,16 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                     app.reload_selected_vm_script();
 
                     // Regenerate single-GPU scripts if they exist
-                    if let (Some(vm), Some(config)) = (app.selected_vm(), app.single_gpu_config.as_ref()) {
+                    if let Some(vm) = app.selected_vm() {
                         if crate::hardware::scripts_exist(&vm.path) {
-                            match crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config) {
+                            // Try with in-memory config first, fall back to saved config
+                            let regen_result = if let Some(config) = app.single_gpu_config.as_ref() {
+                                crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
+                            } else {
+                                crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
+                            };
+
+                            match regen_result {
                                 Ok(true) => {
                                     status_msg.push_str("; single-GPU scripts regenerated");
                                 }
@@ -646,10 +653,12 @@ fn insert_pci_section(content: &str, pci_section: &str) -> String {
     let mut result = String::new();
     let mut inserted = false;
 
-    // Find the qemu command start line
-    let mut qemu_start_idx: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
+    // Find ALL QEMU commands in the script (there may be multiple in a case statement)
+    // Each entry is (start_idx, end_idx) for a QEMU command
+    let mut qemu_commands: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
         let is_qemu_line = (trimmed.starts_with("qemu-system-")
             || trimmed.starts_with("exec qemu-system-")
             || trimmed.starts_with("\"$QEMU\"")
@@ -657,36 +666,37 @@ fn insert_pci_section(content: &str, pci_section: &str) -> String {
             && !trimmed.starts_with('#');
 
         if is_qemu_line {
-            qemu_start_idx = Some(i);
-            break;
+            let start_idx = i;
+            // Find the end of this QEMU command (the line without trailing \)
+            while i < lines.len() {
+                let line_trimmed = lines[i].trim();
+                if !line_trimmed.ends_with('\\') {
+                    break;
+                }
+                i += 1;
+            }
+            let end_idx = i;
+            qemu_commands.push((start_idx, end_idx));
         }
+        i += 1;
     }
 
-    // Find the last line of the qemu command
-    let mut qemu_end_idx: Option<usize> = None;
-    if let Some(start) = qemu_start_idx {
-        for i in start..lines.len() {
-            let trimmed = lines[i].trim();
-            if !trimmed.ends_with('\\') {
-                qemu_end_idx = Some(i);
-                break;
-            }
-        }
-        if qemu_end_idx.is_none() {
-            qemu_end_idx = Some(lines.len() - 1);
-        }
-    }
+    // Track which end lines we need to modify
+    let qemu_end_indices: std::collections::HashSet<usize> = qemu_commands.iter().map(|(_, end)| *end).collect();
+
+    // Get the first QEMU command start for inserting the section
+    let first_qemu_start = qemu_commands.first().map(|(start, _)| *start);
 
     for (i, line) in lines.iter().enumerate() {
-        // Insert PCI section before the qemu command
-        if Some(i) == qemu_start_idx && !inserted {
+        // Insert PCI section before the FIRST qemu command
+        if Some(i) == first_qemu_start && !inserted {
             result.push_str(pci_section);
             result.push('\n');
             inserted = true;
         }
 
-        // Modify the last line of the qemu command to include $PCI_PASSTHROUGH_ARGS
-        if Some(i) == qemu_end_idx {
+        // Modify ALL QEMU command endings to include $PCI_PASSTHROUGH_ARGS
+        if qemu_end_indices.contains(&i) {
             let trimmed = line.trim_end();
             if let Some(comment_pos) = trimmed.find(" #") {
                 let (cmd, comment) = trimmed.split_at(comment_pos);
