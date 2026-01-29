@@ -215,6 +215,21 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
     // Load PCI passthrough from launch.sh (network cards, USB controllers, etc.)
     let pci_passthrough_args = load_pci_passthrough(vm);
 
+    // Extract extra PCI addresses for binding (NICs, USB controllers, NVMe, etc.)
+    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
+        "EXTRA_PCI_ADDRS=()".to_string()
+    } else {
+        format!(
+            "EXTRA_PCI_ADDRS=({})",
+            extra_pci_addrs
+                .iter()
+                .map(|a| format!("\"{}\"", a))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+
     // Build QEMU command from existing launch.sh
     let qemu_command = extract_qemu_command_for_passthrough(vm, config, &components, &usb_passthrough_args, &pci_passthrough_args)?;
 
@@ -277,6 +292,7 @@ GPU_ADDR="{gpu_addr}"
 AUDIO_ADDR="{audio_addr}"
 ORIGINAL_DRIVER="{original_driver}"
 DISPLAY_MANAGER="{display_manager}"
+{extra_pci_addrs}
 {variable_defs}
 # ============================================================================
 # Safety Checks
@@ -326,6 +342,13 @@ cleanup() {{
     if [[ -n "$AUDIO_ADDR" ]] && [[ -e "/sys/bus/pci/devices/$AUDIO_ADDR" ]]; then
         echo 1 > /sys/bus/pci/devices/$AUDIO_ADDR/remove 2>/dev/null || true
     fi
+
+    # Remove extra PCI devices from bus (will be re-bound on rescan)
+    for addr in "${{EXTRA_PCI_ADDRS[@]}}"; do
+        if [[ -e "/sys/bus/pci/devices/$addr" ]]; then
+            echo 1 > /sys/bus/pci/devices/$addr/remove 2>/dev/null || true
+        fi
+    done
     sleep 2
 
     # Rescan PCI bus
@@ -417,6 +440,20 @@ if [[ -n "$AUDIO_ADDR" ]]; then
     echo "$AUDIO_ADDR" > /sys/bus/pci/drivers/vfio-pci/bind
 fi
 
+# Bind extra PCI devices (network cards, USB controllers, NVMe, etc.)
+for addr in "${{EXTRA_PCI_ADDRS[@]}}"; do
+    echo "Binding $addr to vfio-pci..."
+    # Unbind from current driver if bound
+    if [[ -e "/sys/bus/pci/devices/$addr/driver" ]]; then
+        current_driver=$(basename $(readlink /sys/bus/pci/devices/$addr/driver))
+        if [[ "$current_driver" != "vfio-pci" ]]; then
+            echo "$addr" > /sys/bus/pci/drivers/$current_driver/unbind 2>/dev/null || true
+        fi
+    fi
+    echo "vfio-pci" > /sys/bus/pci/devices/$addr/driver_override
+    echo "$addr" > /sys/bus/pci/drivers/vfio-pci/bind
+done
+
 # Verify binding
 if [[ ! -e "/sys/bus/pci/drivers/vfio-pci/$GPU_ADDR" ]]; then
     echo "ERROR: Failed to bind GPU to vfio-pci"
@@ -450,6 +487,7 @@ echo "VM has exited."
         audio_addr = audio_addr,
         original_driver = original_driver,
         display_manager = display_manager,
+        extra_pci_addrs = extra_pci_addrs_str,
         variable_defs = variable_defs,
         tpm_functions = tpm_functions,
         tpm_cleanup = if components.has_tpm {
@@ -544,6 +582,22 @@ start_tpm() {{
 "#, tpm_dir = tpm_dir)
 }
 
+/// Extract PCI addresses from passthrough args (e.g., "-device vfio-pci,host=0000:47:00.0")
+fn extract_pci_addresses(pci_args: &[String]) -> Vec<String> {
+    pci_args
+        .iter()
+        .filter_map(|arg| {
+            // Format: "-device vfio-pci,host=0000:XX:XX.X"
+            arg.split("host=").nth(1).map(|s| {
+                s.split(|c| c == ',' || c == ' ')
+                    .next()
+                    .unwrap_or(s)
+                    .to_string()
+            })
+        })
+        .collect()
+}
+
 /// Generate USB passthrough arguments
 fn generate_usb_passthrough_args(devices: &[crate::vm::UsbPassthrough]) -> String {
     if devices.is_empty() {
@@ -594,6 +648,22 @@ fn generate_restore_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Strin
     let launch_script = fs::read_to_string(&vm.launch_script).unwrap_or_default();
     let components = parse_launch_script(&launch_script);
 
+    // Load PCI passthrough for extra devices
+    let pci_passthrough_args = load_pci_passthrough(vm);
+    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
+        "EXTRA_PCI_ADDRS=()".to_string()
+    } else {
+        format!(
+            "EXTRA_PCI_ADDRS=({})",
+            extra_pci_addrs
+                .iter()
+                .map(|a| format!("\"{}\"", a))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+
     let tpm_cleanup = if components.has_tpm {
         let tpm_dir = components.tpm_dir.as_deref().unwrap_or("$VM_DIR/tpm");
         format!(r#"
@@ -639,6 +709,7 @@ GPU_ADDR="{gpu_addr}"
 AUDIO_ADDR="{audio_addr}"
 ORIGINAL_DRIVER="{original_driver}"
 DISPLAY_MANAGER="{display_manager}"
+{extra_pci_addrs}
 
 # Must run as root
 if [[ $EUID -ne 0 ]]; then
@@ -660,6 +731,14 @@ fi
 if [[ -n "$AUDIO_ADDR" ]] && [[ -e "/sys/bus/pci/devices/$AUDIO_ADDR" ]]; then
     echo 1 > /sys/bus/pci/devices/$AUDIO_ADDR/remove 2>/dev/null || true
 fi
+
+# Remove extra PCI devices from bus (will be re-bound on rescan)
+for addr in "${{EXTRA_PCI_ADDRS[@]}}"; do
+    if [[ -e "/sys/bus/pci/devices/$addr" ]]; then
+        echo "Removing $addr from PCI bus..."
+        echo 1 > /sys/bus/pci/devices/$addr/remove 2>/dev/null || true
+    fi
+done
 sleep 2
 
 # Rescan PCI bus
@@ -699,6 +778,7 @@ echo "If display still doesn't work, try rebooting."
         audio_addr = audio_addr,
         original_driver = original_driver,
         display_manager = display_manager,
+        extra_pci_addrs = extra_pci_addrs_str,
         tpm_cleanup = tpm_cleanup,
         nvidia_module_load = nvidia_module_load,
     )

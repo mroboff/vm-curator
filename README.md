@@ -10,6 +10,9 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 
 ### Changelog
 
+**v0.2.5**
+- Fix single-GPU passthrough scripts to bind extra PCI devices (NICs, USB controllers, NVMe) to vfio-pci
+
 **v0.2.4**
 - Remove CD-ROM/ISO from single-GPU passthrough scripts (installation should use standard launch.sh)
 - Fix sync issues between PCI/USB device selection and single-GPU passthrough script regeneration
