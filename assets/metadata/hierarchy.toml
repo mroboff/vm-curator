@@ -192,7 +192,7 @@ name = "Arch-based"
 family = "linux"
 order = 1
 sort_by = "name"
-patterns = ["^linux-(arch|manjaro|endeavouros|garuda|artix|cachyos|bazzite)"]
+patterns = ["^linux-(arch|manjaro|endeavouros|garuda|artix|cachyos)"]
 
 [subcategories.debian_based]
 name = "Debian-based"
@@ -213,7 +213,7 @@ name = "Red Hat-based"
 family = "linux"
 order = 4
 sort_by = "name"
-patterns = ["^linux-(fedora|rhel|redhat|centos|rocky|alma)"]
+patterns = ["^linux-(fedora|rhel|redhat|centos|rocky|alma|bazzite)"]
 
 [subcategories.slackware_based]
 name = "Slackware-based"
