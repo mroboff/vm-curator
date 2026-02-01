@@ -1687,7 +1687,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vm-curator"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1697,6 +1697,7 @@ dependencies = [
  "include_dir",
  "libudev",
  "nom 8.0.0",
+ "once_cell",
  "ratatui",
  "regex",
  "serde",

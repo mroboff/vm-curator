@@ -338,6 +338,8 @@ pub struct CreateWizardState {
     pub error_message: Option<String>,
     /// Currently editing field (for text input focus)
     pub editing_field: Option<WizardField>,
+    /// Text edit buffer for numeric fields (memory, cpu, disk)
+    pub wizard_edit_buffer: String,
 }
 
 /// Fields that can be edited in the wizard
@@ -384,6 +386,7 @@ impl Default for CreateWizardState {
             os_list_selected: 0,
             error_message: None,
             editing_field: None,
+            wizard_edit_buffer: String::new(),
         }
     }
 }
@@ -428,6 +431,8 @@ impl CreateWizardState {
 
     /// Find an available folder name by appending numeric suffixes if needed
     /// e.g., "windows-10" -> "windows-10-2" -> "windows-10-3"
+    /// Returns the base name with a numeric suffix if needed, or with "-error" suffix
+    /// if no available name was found within the limit (indicating a problem).
     fn find_available_folder_name(library_path: &std::path::Path, base_name: &str) -> String {
         let first_candidate = library_path.join(base_name);
         if !first_candidate.exists() {
@@ -435,19 +440,17 @@ impl CreateWizardState {
         }
 
         // Folder exists, try with numeric suffixes
-        let mut suffix = 2;
-        loop {
+        for suffix in 2..=1000 {
             let candidate_name = format!("{}-{}", base_name, suffix);
             let candidate_path = library_path.join(&candidate_name);
             if !candidate_path.exists() {
                 return candidate_name;
             }
-            suffix += 1;
-            // Safety limit to prevent infinite loop
-            if suffix > 1000 {
-                return candidate_name;
-            }
         }
+
+        // Exhausted all suffixes - this indicates a problem (1000+ VMs with same base name)
+        // Return a clearly invalid name that will fail at creation time with a clear error
+        format!("{}-error-too-many-vms", base_name)
     }
 
     /// Apply profile settings to the wizard state

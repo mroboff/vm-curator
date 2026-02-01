@@ -14,6 +14,49 @@ use crate::app::{App, WizardStep, WizardField, WizardQemuConfig};
 use crate::metadata::QemuProfileStore;
 use crate::vm::create_vm;
 
+/// Parse a size string with optional suffix (KB, MB, GB, case-insensitive)
+/// Returns value normalized to target unit.
+///
+/// For memory (target="MB"): "8GB" -> 8192, "8192" -> 8192
+/// For disk (target="GB"): "500GB" -> 500, "512000MB" -> 500
+fn parse_size_with_suffix(input: &str, target_unit: &str) -> Option<u32> {
+    let input = input.trim().to_uppercase();
+    if input.is_empty() {
+        return None;
+    }
+
+    let (num_str, suffix) = if input.ends_with("GB") {
+        (&input[..input.len()-2], "GB")
+    } else if input.ends_with("MB") {
+        (&input[..input.len()-2], "MB")
+    } else if input.ends_with("KB") {
+        (&input[..input.len()-2], "KB")
+    } else {
+        (input.as_str(), target_unit)
+    };
+
+    let value: f64 = num_str.trim().parse().ok()?;
+    if value < 0.0 {
+        return None;
+    }
+
+    let result = match (suffix, target_unit) {
+        ("GB", "MB") => value * 1024.0,
+        ("MB", "MB") => value,
+        ("KB", "MB") => value / 1024.0,
+        ("GB", "GB") => value,
+        ("MB", "GB") => value / 1024.0,
+        ("KB", "GB") => value / (1024.0 * 1024.0),
+        _ => value,
+    };
+
+    if result >= 0.0 && result <= u32::MAX as f64 {
+        Some(result.round() as u32)
+    } else {
+        None
+    }
+}
+
 /// Render the create wizard based on current step
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
@@ -1223,7 +1266,14 @@ fn render_new_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let size_text = Paragraph::new(format!("{} GB", state.disk_size_gb))
+    // Show edit buffer when editing, otherwise show current value
+    let size_display = if editing {
+        format!("{}|  (e.g., 500, 500GB, 512000MB)", state.wizard_edit_buffer)
+    } else {
+        format!("{} GB", state.disk_size_gb)
+    };
+
+    let size_text = Paragraph::new(size_display)
         .style(size_style)
         .block(size_block);
     frame.render_widget(size_text, sub_chunks[0]);
@@ -1364,24 +1414,45 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
     // Handle disk size editing mode (only in "Create New" mode)
     if editing && !use_existing {
         match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Tab => {
+            KeyCode::Esc => {
+                // Cancel edit, restore original value (clear buffer)
                 if let Some(ref mut state) = app.wizard_state {
                     state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
                 }
             }
-            KeyCode::Char(c) if c.is_ascii_digit() => {
+            KeyCode::Enter | KeyCode::Tab => {
+                // Apply the edit with suffix support
                 if let Some(ref mut state) = app.wizard_state {
-                    let new_size = state.disk_size_gb
-                        .saturating_mul(10)
-                        .saturating_add((c as u32) - ('0' as u32));
-                    if new_size <= 10000 {
-                        state.disk_size_gb = new_size;
+                    let buffer = state.wizard_edit_buffer.clone();
+                    if let Some(value) = parse_size_with_suffix(&buffer, "GB") {
+                        let clamped = value.max(1).min(10000);
+                        state.disk_size_gb = clamped;
                     }
+                    state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_alphanumeric() => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.wizard_edit_buffer.push(c);
                 }
             }
             KeyCode::Backspace => {
                 if let Some(ref mut state) = app.wizard_state {
-                    state.disk_size_gb /= 10;
+                    state.wizard_edit_buffer.pop();
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                // Allow arrow keys to still adjust while editing
+                if let Some(ref mut state) = app.wizard_state {
+                    if key.code == KeyCode::Left {
+                        state.disk_size_gb = state.disk_size_gb.saturating_sub(8).max(1);
+                    } else {
+                        state.disk_size_gb = (state.disk_size_gb + 8).min(10000);
+                    }
+                    // Update buffer to reflect new value
+                    state.wizard_edit_buffer = state.disk_size_gb.to_string();
                 }
             }
             _ => {}
@@ -1440,6 +1511,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
             if !use_existing && field_focus == 1 {
                 if let Some(ref mut state) = app.wizard_state {
                     state.editing_field = Some(WizardField::DiskSize);
+                    state.wizard_edit_buffer = state.disk_size_gb.to_string();
                 }
             }
         }
@@ -1571,23 +1643,47 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     // Memory (editable)
     let mem_selected = focus == 0;
     let mem_editing = matches!(state.editing_field, Some(WizardField::MemoryMb));
+    let mem_value = if mem_editing {
+        format!("{}|", state.wizard_edit_buffer)
+    } else {
+        format!("{} MB", config.memory_mb)
+    };
+    let mem_hint = if mem_editing {
+        "[Enter] Done  [Esc] Cancel"
+    } else if mem_selected {
+        "[Tab] Edit  [←/→] ±256MB"
+    } else {
+        ""
+    };
     lines.push(render_field_line(
         "Memory:",
-        &format!("{} MB", config.memory_mb),
+        &mem_value,
         mem_selected,
         mem_editing,
-        "[←/→] ±256MB",
+        mem_hint,
     ));
 
     // CPU Cores (editable)
     let cpu_selected = focus == 1;
     let cpu_editing = matches!(state.editing_field, Some(WizardField::CpuCores));
+    let cpu_value = if cpu_editing {
+        format!("{}|", state.wizard_edit_buffer)
+    } else {
+        format!("{}", config.cpu_cores)
+    };
+    let cpu_hint = if cpu_editing {
+        "[Enter] Done  [Esc] Cancel"
+    } else if cpu_selected {
+        "[Tab] Edit  [←/→] ±1"
+    } else {
+        ""
+    };
     lines.push(render_field_line(
         "CPU Cores:",
-        &format!("{}", config.cpu_cores),
+        &cpu_value,
         cpu_selected,
         cpu_editing,
-        "[←/→] ±1",
+        cpu_hint,
     ));
 
     // VGA (cycle)
@@ -1673,9 +1769,9 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
 
     // Help text
     let help_text = if editing {
-        "[Enter] Done  [←/→] Adjust"
+        "[Enter] Done  [Esc] Cancel  [←/→] Adjust"
     } else {
-        "[j/k] Navigate  [←/→] Change  [Space] Toggle  [Esc] Back  [Enter] Continue"
+        "[j/k] Navigate  [Tab] Edit  [←/→] Change  [Space] Toggle  [Enter] Next"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -1863,12 +1959,96 @@ fn get_field_notes(app: &App, focus: usize) -> String {
 fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
     let field_count = QemuField::count();
 
+    // Check if we're in edit mode for Memory or CPU
+    let editing_memory = app.wizard_state.as_ref()
+        .map(|s| matches!(s.editing_field, Some(WizardField::MemoryMb)))
+        .unwrap_or(false);
+    let editing_cpu = app.wizard_state.as_ref()
+        .map(|s| matches!(s.editing_field, Some(WizardField::CpuCores)))
+        .unwrap_or(false);
+
+    if editing_memory || editing_cpu {
+        // Text input mode for Memory or CPU
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel edit, restore original value
+                if let Some(ref mut state) = app.wizard_state {
+                    state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
+                }
+            }
+            KeyCode::Enter | KeyCode::Tab => {
+                // Apply the edit
+                if let Some(ref mut state) = app.wizard_state {
+                    let buffer = state.wizard_edit_buffer.clone();
+                    if editing_memory {
+                        // Parse with suffix support (target: MB)
+                        if let Some(value) = parse_size_with_suffix(&buffer, "MB") {
+                            let clamped = value.max(128).min(1048576);
+                            state.qemu_config.memory_mb = clamped;
+                        }
+                    } else if editing_cpu {
+                        // Parse as plain number
+                        if let Ok(value) = buffer.trim().parse::<u32>() {
+                            let clamped = value.max(1).min(256);
+                            state.qemu_config.cpu_cores = clamped;
+                        }
+                    }
+                    state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_alphanumeric() => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.wizard_edit_buffer.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.wizard_edit_buffer.pop();
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                // Allow arrow keys to still adjust while editing
+                let delta = if key.code == KeyCode::Right { 1i32 } else { -1i32 };
+                handle_qemu_field_change(app, delta);
+                // Update buffer to reflect new value
+                if let Some(ref mut state) = app.wizard_state {
+                    if editing_memory {
+                        state.wizard_edit_buffer = state.qemu_config.memory_mb.to_string();
+                    } else if editing_cpu {
+                        state.wizard_edit_buffer = state.qemu_config.cpu_cores.to_string();
+                    }
+                }
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.wizard_prev_step();
         }
         KeyCode::Enter => {
             let _ = app.wizard_next_step();
+        }
+        KeyCode::Tab => {
+            // Enter edit mode for Memory or CPU fields
+            if let Some(ref mut state) = app.wizard_state {
+                let field = QemuField::from_index(state.field_focus);
+                match field {
+                    QemuField::Memory => {
+                        state.editing_field = Some(WizardField::MemoryMb);
+                        state.wizard_edit_buffer = state.qemu_config.memory_mb.to_string();
+                    }
+                    QemuField::CpuCores => {
+                        state.editing_field = Some(WizardField::CpuCores);
+                        state.wizard_edit_buffer = state.qemu_config.cpu_cores.to_string();
+                    }
+                    _ => {}
+                }
+            }
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(ref mut state) = app.wizard_state {
@@ -1935,11 +2115,11 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
     match field {
         QemuField::Memory => {
             let change = 256 * delta;
-            let new_val = (state.qemu_config.memory_mb as i32 + change).max(128).min(65536);
+            let new_val = (state.qemu_config.memory_mb as i32 + change).max(128).min(1048576);
             state.qemu_config.memory_mb = new_val as u32;
         }
         QemuField::CpuCores => {
-            let new_val = (state.qemu_config.cpu_cores as i32 + delta).max(1).min(64);
+            let new_val = (state.qemu_config.cpu_cores as i32 + delta).max(1).min(256);
             state.qemu_config.cpu_cores = new_val as u32;
         }
         QemuField::Vga => {
@@ -2227,4 +2407,61 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     Rect::new(x, y, width, height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_size_with_suffix_memory() {
+        // Plain number assumes target unit (MB)
+        assert_eq!(parse_size_with_suffix("8192", "MB"), Some(8192));
+        assert_eq!(parse_size_with_suffix("2048", "MB"), Some(2048));
+
+        // GB to MB conversion
+        assert_eq!(parse_size_with_suffix("8GB", "MB"), Some(8192));
+        assert_eq!(parse_size_with_suffix("8gb", "MB"), Some(8192));  // case insensitive
+        assert_eq!(parse_size_with_suffix("32GB", "MB"), Some(32768));
+        assert_eq!(parse_size_with_suffix("96GB", "MB"), Some(98304));  // exceeds old 64GB limit
+        assert_eq!(parse_size_with_suffix("1024GB", "MB"), Some(1048576));  // 1TB
+
+        // MB to MB (no conversion)
+        assert_eq!(parse_size_with_suffix("8192MB", "MB"), Some(8192));
+
+        // KB to MB conversion
+        assert_eq!(parse_size_with_suffix("8388608KB", "MB"), Some(8192));
+
+        // Whitespace handling
+        assert_eq!(parse_size_with_suffix("  8192  ", "MB"), Some(8192));
+        assert_eq!(parse_size_with_suffix("8 GB", "MB"), Some(8192));
+    }
+
+    #[test]
+    fn test_parse_size_with_suffix_disk() {
+        // Plain number assumes target unit (GB)
+        assert_eq!(parse_size_with_suffix("500", "GB"), Some(500));
+        assert_eq!(parse_size_with_suffix("100", "GB"), Some(100));
+
+        // GB to GB (no conversion)
+        assert_eq!(parse_size_with_suffix("500GB", "GB"), Some(500));
+        assert_eq!(parse_size_with_suffix("500gb", "GB"), Some(500));
+
+        // MB to GB conversion
+        assert_eq!(parse_size_with_suffix("512000MB", "GB"), Some(500));
+        assert_eq!(parse_size_with_suffix("1024MB", "GB"), Some(1));
+    }
+
+    #[test]
+    fn test_parse_size_with_suffix_invalid() {
+        // Empty string
+        assert_eq!(parse_size_with_suffix("", "MB"), None);
+
+        // Non-numeric
+        assert_eq!(parse_size_with_suffix("abc", "MB"), None);
+        assert_eq!(parse_size_with_suffix("GB", "MB"), None);
+
+        // Negative values
+        assert_eq!(parse_size_with_suffix("-100", "MB"), None);
+    }
 }

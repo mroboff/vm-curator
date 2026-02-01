@@ -7,6 +7,20 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Shell-escape a string for safe interpolation in bash scripts.
+/// This handles special characters that could cause command injection.
+fn shell_escape(s: &str) -> String {
+    // If the string contains only safe characters, return as-is
+    if s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/') {
+        return s.to_string();
+    }
+
+    // Otherwise, wrap in single quotes and escape any existing single quotes
+    // In shell: replace ' with '\'' (end quote, escaped quote, start quote)
+    let escaped = s.replace('\'', "'\\''");
+    format!("'{}'", escaped)
+}
+
 use crate::app::{CreateWizardState, DiskAction, WizardQemuConfig};
 use crate::commands::qemu_img;
 
@@ -430,7 +444,8 @@ pub fn generate_launch_script_with_os(
     script.push_str(&format!("DISK=\"$VM_DIR/{}\"\n", disk_filename));
 
     if let Some(iso) = iso_path {
-        script.push_str(&format!("ISO=\"{}\"\n", iso.display()));
+        // Shell-escape the ISO path to prevent command injection
+        script.push_str(&format!("ISO={}\n", shell_escape(&iso.display().to_string())));
     } else {
         script.push_str("ISO=\"\"\n");
     }
@@ -542,18 +557,19 @@ fn build_qemu_command_with_os(
         args.push("-enable-kvm".to_string());
     }
 
-    // Machine type
+    // Machine type (escaped to prevent injection)
     if let Some(ref machine) = config.machine {
+        let safe_machine = shell_escape(machine);
         if config.enable_kvm {
-            args.push(format!("-machine {},accel=kvm", machine));
+            args.push(format!("-machine {},accel=kvm", safe_machine));
         } else {
-            args.push(format!("-machine {}", machine));
+            args.push(format!("-machine {}", safe_machine));
         }
     }
 
-    // CPU
+    // CPU (escaped to prevent injection)
     if let Some(ref cpu_model) = config.cpu_model {
-        args.push(format!("-cpu {}", cpu_model));
+        args.push(format!("-cpu {}", shell_escape(cpu_model)));
     }
 
     // SMP (CPU cores)
@@ -583,10 +599,10 @@ fn build_qemu_command_with_os(
         args.push("-drive if=pflash,format=raw,file=\"$OVMF_VARS\"".to_string());
     }
 
-    // Disk
+    // Disk (interface escaped to prevent injection)
     args.push(format!(
         "-drive file=\"$DISK\",format=qcow2,if={},index=0,media=disk",
-        config.disk_interface
+        shell_escape(&config.disk_interface)
     ));
 
     // CD-ROM (for install mode)
@@ -600,19 +616,19 @@ fn build_qemu_command_with_os(
         args.push("-boot d".to_string());
     }
 
-    // VGA / Graphics
+    // VGA / Graphics (escaped to prevent injection)
     if config.gl_acceleration && config.vga == "virtio" {
         // Use virtio-vga-gl for 3D acceleration
         args.push("-device virtio-vga-gl".to_string());
     } else {
-        args.push(format!("-vga {}", config.vga));
+        args.push(format!("-vga {}", shell_escape(&config.vga)));
     }
 
-    // Display (with GL if enabled)
+    // Display (with GL if enabled, escaped to prevent injection)
     if config.gl_acceleration {
-        args.push(format!("-display {},gl=on", config.display));
+        args.push(format!("-display {},gl=on", shell_escape(&config.display)));
     } else {
-        args.push(format!("-display {}", config.display));
+        args.push(format!("-display {}", shell_escape(&config.display)));
     }
 
     // Audio backend (must be declared before devices that use it)
@@ -620,26 +636,29 @@ fn build_qemu_command_with_os(
         args.push("-audiodev pa,id=audio0".to_string());
     }
 
-    // Audio devices
+    // Audio devices (known safe values from profiles, but escape for safety)
     for audio in &config.audio {
-        if audio == "intel-hda" {
-            args.push("-device intel-hda".to_string());
-        } else if audio == "hda-duplex" || audio == "hda-output" || audio == "hda-micro" {
-            // HDA codec devices must reference the audiodev
-            args.push(format!("-device {},audiodev=audio0", audio));
-        } else if audio == "ac97" {
-            args.push("-device AC97,audiodev=audio0".to_string());
-        } else if audio == "sb16" {
-            args.push("-device sb16,audiodev=audio0".to_string());
+        match audio.as_str() {
+            "intel-hda" => args.push("-device intel-hda".to_string()),
+            "hda-duplex" | "hda-output" | "hda-micro" => {
+                // HDA codec devices must reference the audiodev
+                args.push(format!("-device {},audiodev=audio0", shell_escape(audio)));
+            }
+            "ac97" => args.push("-device AC97,audiodev=audio0".to_string()),
+            "sb16" => args.push("-device sb16,audiodev=audio0".to_string()),
+            _ => {
+                // Unknown audio device - escape it
+                args.push(format!("-device {},audiodev=audio0", shell_escape(audio)));
+            }
         }
     }
 
-    // Network
+    // Network (escaped to prevent injection)
     if config.network_model != "none" {
         // Map short network model names to QEMU device names
         let net_device = match config.network_model.as_str() {
-            "virtio" => "virtio-net-pci",
-            other => other,
+            "virtio" => "virtio-net-pci".to_string(),
+            other => shell_escape(other),
         };
         args.push("-netdev user,id=net0".to_string());
         args.push(format!("-device {},netdev=net0", net_device));
@@ -663,7 +682,9 @@ fn build_qemu_command_with_os(
         args.push("-device tpm-tis,tpmdev=tpm0".to_string());
     }
 
-    // Extra args
+    // Extra args - these come from QEMU profiles and are considered trusted
+    // They may contain complex argument structures that shouldn't be escaped
+    // (e.g., "-device virtio-vga-gl" or "-display sdl,gl=on")
     for arg in &config.extra_args {
         args.push(arg.clone());
     }
@@ -693,6 +714,27 @@ pub fn write_launch_script(vm_dir: &Path, content: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use crate::app::CreateWizardState;
+
+    #[test]
+    fn test_shell_escape_safe_strings() {
+        // Safe strings should pass through unchanged
+        assert_eq!(shell_escape("hello"), "hello");
+        assert_eq!(shell_escape("path/to/file.iso"), "path/to/file.iso");
+        assert_eq!(shell_escape("my-vm_name.qcow2"), "my-vm_name.qcow2");
+    }
+
+    #[test]
+    fn test_shell_escape_unsafe_strings() {
+        // Strings with spaces
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+        // Strings with quotes
+        assert_eq!(shell_escape("it's a test"), "'it'\\''s a test'");
+        // Strings with shell metacharacters
+        assert_eq!(shell_escape("test; echo pwned"), "'test; echo pwned'");
+        assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
+        assert_eq!(shell_escape("`whoami`"), "'`whoami`'");
+        assert_eq!(shell_escape("test\"; echo pwned; echo \""), "'test\"; echo pwned; echo \"'");
+    }
 
     #[test]
     fn test_generate_folder_name() {

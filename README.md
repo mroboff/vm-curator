@@ -10,6 +10,16 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 
 ### Changelog
 
+**v0.2.7**
+- **Direct Text Editing in Create VM Wizard**: Memory, CPU cores, and disk size fields now support direct keyboard input
+  - Press Tab to enter edit mode, type values directly, press Enter to apply
+  - Supports size suffixes: "8GB", "8192MB", "512000MB" automatically convert to the appropriate unit
+  - Arrow keys still work for quick ±256MB (memory), ±1 (CPU), ±8GB (disk) adjustments
+- Raised resource limits: RAM from 64GB to 1TB, CPU cores from 64 to 256
+- Fix Bazzite categorization as Red Hat-based OS
+- Fix navigation bug in Create VM wizard when moving between steps
+- Refactor multi-GPU passthrough naming for consistency
+
 **v0.2.6**
 - Fix PCI Passthrough screen to pre-select previously saved devices
 

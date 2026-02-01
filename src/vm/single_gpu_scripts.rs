@@ -7,9 +7,75 @@
 //! goes directly to physical monitors connected to the passed-through GPU.
 
 use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
+// Lazy-compiled regexes for QEMU command extraction/modification
+// These are used in extract_qemu_command_for_passthrough() and compiled once
+
+/// Regex to match -name "..." arguments
+static RE_NAME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"-name\s+["'][^"']+["']"#).expect("Invalid regex: RE_NAME")
+});
+
+/// Regex to match -display arguments
+static RE_DISPLAY: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-display\s+\S+(,\S+)*").expect("Invalid regex: RE_DISPLAY")
+});
+
+/// Regex to match -vga arguments
+static RE_VGA: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-vga\s+\S+").expect("Invalid regex: RE_VGA")
+});
+
+/// Regex to match -audiodev arguments
+static RE_AUDIODEV: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-audiodev\s+\S+(,\S+)*").expect("Invalid regex: RE_AUDIODEV")
+});
+
+/// Regex to match sound/audio device arguments
+static RE_SOUNDHW: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-device\s+(intel-hda|ich9-intel-hda|hda-duplex|hda-micro|hda-output|AC97|sb16)[,\s]?[^\s\\]*")
+        .expect("Invalid regex: RE_SOUNDHW")
+});
+
+/// Regex to match -cdrom arguments
+static RE_CDROM: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"-cdrom\s+("[^"]+"|'[^']+'|\$\w+|\S+)"#).expect("Invalid regex: RE_CDROM")
+});
+
+/// Regex to match -drive with media=cdrom
+static RE_DRIVE_CDROM: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-drive\s+[^\s\\]*media=cdrom[^\s\\]*").expect("Invalid regex: RE_DRIVE_CDROM")
+});
+
+/// Regex to match -drive with $ISO variable
+static RE_DRIVE_ISO: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"-drive\s+[^\s\\]*file="\$ISO"[^\s\\]*"#).expect("Invalid regex: RE_DRIVE_ISO")
+});
+
+/// Regex to match empty continuation lines
+static RE_EMPTY_CONT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\\\n\s*\\\n").expect("Invalid regex: RE_EMPTY_CONT")
+});
+
+/// Regex to match -cpu host
+static RE_CPU_HOST: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-cpu\s+host\b").expect("Invalid regex: RE_CPU_HOST")
+});
+
+/// Regex to match -machine arguments
+static RE_MACHINE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-machine\s+(\S+)").expect("Invalid regex: RE_MACHINE")
+});
+
+/// Regex to match -boot order=d
+static RE_BOOT_D: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"-boot\s+order=d\b").expect("Invalid regex: RE_BOOT_D")
+});
 
 use crate::hardware::SingleGpuConfig;
 use crate::vm::lifecycle::{load_pci_passthrough, load_usb_passthrough};
@@ -1033,39 +1099,27 @@ fn extract_qemu_command_for_passthrough(
     let mut qemu_cmd = qemu_lines.join("\n");
 
     // Replace any hardcoded -name with $VM_NAME variable (for cleanup to work correctly)
-    let name_re = regex::Regex::new(r#"-name\s+["'][^"']+["']"#).unwrap();
-    qemu_cmd = name_re.replace_all(&qemu_cmd, r#"-name "$VM_NAME""#).to_string();
+    qemu_cmd = RE_NAME.replace_all(&qemu_cmd, r#"-name "$VM_NAME""#).to_string();
 
     // Remove existing -display if present (we'll use the GPU's display)
-    let display_re = regex::Regex::new(r"-display\s+\S+(,\S+)*").unwrap();
-    qemu_cmd = display_re.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_DISPLAY.replace_all(&qemu_cmd, "").to_string();
 
     // Remove existing -vga if present
-    let vga_re = regex::Regex::new(r"-vga\s+\S+").unwrap();
-    qemu_cmd = vga_re.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_VGA.replace_all(&qemu_cmd, "").to_string();
 
     // Remove existing audio devices (no user session available for audio)
-    let audio_re = regex::Regex::new(r"-audiodev\s+\S+(,\S+)*").unwrap();
-    qemu_cmd = audio_re.replace_all(&qemu_cmd, "").to_string();
-    let soundhw_re = regex::Regex::new(r"-device\s+(intel-hda|ich9-intel-hda|hda-duplex|hda-micro|hda-output|AC97|sb16)[,\s]?[^\s\\]*").unwrap();
-    qemu_cmd = soundhw_re.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_AUDIODEV.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_SOUNDHW.replace_all(&qemu_cmd, "").to_string();
 
     // Remove CD-ROM/ISO arguments - single-GPU passthrough is for running installed VMs,
     // not installation. Use standard launch.sh for installation.
-    // Remove -cdrom <path> arguments
-    let cdrom_re = regex::Regex::new(r#"-cdrom\s+("[^"]+"|'[^']+'|\$\w+|\S+)"#).unwrap();
-    qemu_cmd = cdrom_re.replace_all(&qemu_cmd, "").to_string();
-    // Remove -drive arguments with media=cdrom
-    let drive_cdrom_re = regex::Regex::new(r"-drive\s+[^\s\\]*media=cdrom[^\s\\]*").unwrap();
-    qemu_cmd = drive_cdrom_re.replace_all(&qemu_cmd, "").to_string();
-    // Remove -drive arguments referencing $ISO variable
-    let drive_iso_re = regex::Regex::new(r#"-drive\s+[^\s\\]*file="\$ISO"[^\s\\]*"#).unwrap();
-    qemu_cmd = drive_iso_re.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_CDROM.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_DRIVE_CDROM.replace_all(&qemu_cmd, "").to_string();
+    qemu_cmd = RE_DRIVE_ISO.replace_all(&qemu_cmd, "").to_string();
 
     // Clean up empty continuation lines
-    let empty_cont_re = regex::Regex::new(r"\\\n\s*\\\n").unwrap();
-    while empty_cont_re.is_match(&qemu_cmd) {
-        qemu_cmd = empty_cont_re.replace_all(&qemu_cmd, "\\\n").to_string();
+    while RE_EMPTY_CONT.is_match(&qemu_cmd) {
+        qemu_cmd = RE_EMPTY_CONT.replace_all(&qemu_cmd, "\\\n").to_string();
     }
 
     // Build passthrough arguments
@@ -1128,16 +1182,14 @@ fn extract_qemu_command_for_passthrough(
 
     // Replace -cpu host with NVIDIA flags if needed
     if let Some(flags) = nvidia_cpu_flags {
-        let cpu_re = regex::Regex::new(r"-cpu\s+host\b").unwrap();
-        if cpu_re.is_match(&qemu_cmd) {
-            qemu_cmd = cpu_re.replace(&qemu_cmd, flags.as_str()).to_string();
+        if RE_CPU_HOST.is_match(&qemu_cmd) {
+            qemu_cmd = RE_CPU_HOST.replace(&qemu_cmd, flags.as_str()).to_string();
         }
     }
 
     // Add kernel_irqchip=on to machine options if not present
     if !qemu_cmd.contains("kernel_irqchip") {
-        let machine_re = regex::Regex::new(r"-machine\s+(\S+)").unwrap();
-        if let Some(caps) = machine_re.captures(&qemu_cmd) {
+        if let Some(caps) = RE_MACHINE.captures(&qemu_cmd) {
             let machine_opts = caps.get(1).unwrap().as_str();
             if !machine_opts.contains("kernel_irqchip") {
                 let new_opts = if machine_opts.contains(',') {
@@ -1145,14 +1197,13 @@ fn extract_qemu_command_for_passthrough(
                 } else {
                     format!("{},kernel_irqchip=on", machine_opts)
                 };
-                qemu_cmd = machine_re.replace(&qemu_cmd, format!("-machine {}", new_opts).as_str()).to_string();
+                qemu_cmd = RE_MACHINE.replace(&qemu_cmd, format!("-machine {}", new_opts).as_str()).to_string();
             }
         }
     }
 
     // Fix boot order if it's set to 'd' (CD-ROM first) - use 'c' (disk first) for normal boot
-    let boot_re = regex::Regex::new(r"-boot\s+order=d\b").unwrap();
-    qemu_cmd = boot_re.replace(&qemu_cmd, "-boot order=c").to_string();
+    qemu_cmd = RE_BOOT_D.replace(&qemu_cmd, "-boot order=c").to_string();
 
     Ok(qemu_cmd)
 }

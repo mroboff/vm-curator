@@ -94,8 +94,14 @@ impl UsbDevice {
 /// Enumerate USB devices using libudev
 pub fn enumerate_usb_devices() -> Result<Vec<UsbDevice>> {
     // Try using libudev, fall back to sysfs
-    let mut devices = enumerate_via_udev()
-        .unwrap_or_else(|_| enumerate_via_sysfs().unwrap_or_default());
+    let mut devices = match enumerate_via_udev() {
+        Ok(devs) => devs,
+        Err(e) => {
+            // Log the fallback for debugging purposes
+            eprintln!("vm-curator: libudev enumeration failed ({}), falling back to sysfs", e);
+            enumerate_via_sysfs().unwrap_or_default()
+        }
+    };
 
     // Filter out hubs and root hubs
     devices.retain(|d| !d.is_hub());
@@ -172,9 +178,9 @@ fn enumerate_via_udev() -> Result<Vec<UsbDevice>> {
                 .and_then(|v| v.to_str())
                 .map(UsbVersion::from_speed)
                 .unwrap_or_else(|| {
-                    // Fall back to bcdUSB attribute
+                    // Fall back to bcdUSB attribute (USB protocol version, not bcdDevice which is firmware version)
                     device
-                        .attribute_value("bcdDevice")
+                        .attribute_value("bcdUSB")
                         .and_then(|v| v.to_str())
                         .and_then(|s| u16::from_str_radix(s, 16).ok())
                         .map(UsbVersion::from_bcd_usb)
@@ -241,7 +247,8 @@ fn enumerate_via_sysfs() -> Result<Vec<UsbDevice>> {
         let usb_version = read_sysfs_string(&path, "speed")
             .map(|s| UsbVersion::from_speed(&s))
             .unwrap_or_else(|| {
-                read_sysfs_hex(&path, "bcdDevice")
+                // Fall back to bcdUSB (USB protocol version, not bcdDevice which is firmware version)
+                read_sysfs_hex(&path, "bcdUSB")
                     .map(UsbVersion::from_bcd_usb)
                     .unwrap_or_default()
             });
@@ -318,6 +325,8 @@ pub fn generate_udev_rules(devices: &[UsbDevice]) -> String {
 /// Install udev rules for USB passthrough
 /// Uses pkexec (graphical sudo) if available, falls back to sudo
 pub fn install_udev_rules(devices: &[UsbDevice]) -> UdevInstallResult {
+    use std::os::unix::fs::PermissionsExt;
+
     if devices.is_empty() {
         return UdevInstallResult::Error("No devices selected".to_string());
     }
@@ -325,18 +334,37 @@ pub fn install_udev_rules(devices: &[UsbDevice]) -> UdevInstallResult {
     let rules_content = generate_udev_rules(devices);
     let rules_path = "/etc/udev/rules.d/99-vm-curator-usb.rules";
 
-    // Write rules to a temporary file
-    let temp_path = "/tmp/vm-curator-usb-rules.tmp";
-    if let Err(e) = std::fs::write(temp_path, &rules_content) {
+    // Write rules to a temporary file with unique name (pid + timestamp)
+    let temp_path = format!(
+        "/tmp/vm-curator-usb-rules-{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+
+    // Create file with restrictive permissions (0600) before writing content
+    let file_result = std::fs::File::create(&temp_path)
+        .and_then(|file| {
+            let mut perms = file.metadata()?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&temp_path, perms)?;
+            Ok(())
+        })
+        .and_then(|_| std::fs::write(&temp_path, &rules_content));
+
+    if let Err(e) = file_result {
+        let _ = std::fs::remove_file(&temp_path);
         return UdevInstallResult::Error(format!("Failed to write temp file: {}", e));
     }
 
     // Try pkexec first (graphical sudo prompt), then fall back to sudo
-    let install_result = try_pkexec_install(temp_path, rules_path)
-        .or_else(|| try_sudo_install(temp_path, rules_path));
+    let install_result = try_pkexec_install(&temp_path, rules_path)
+        .or_else(|| try_sudo_install(&temp_path, rules_path));
 
     // Clean up temp file
-    let _ = std::fs::remove_file(temp_path);
+    let _ = std::fs::remove_file(&temp_path);
 
     match install_result {
         Some(true) => {
