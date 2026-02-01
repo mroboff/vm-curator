@@ -31,9 +31,9 @@ pub struct Config {
     /// Show confirmation dialog before launching VMs
     pub confirm_before_launch: bool,
 
-    // === GPU Passthrough ===
-    /// Enable GPU passthrough features in the UI
-    pub enable_gpu_passthrough: bool,
+    // === Multi-GPU Passthrough ===
+    /// Enable multi-GPU passthrough features in the UI
+    pub enable_multi_gpu_passthrough: bool,
     /// Default IVSHMEM size in MB for Looking Glass
     pub default_ivshmem_size_mb: u32,
     /// Show GPU passthrough warnings
@@ -75,8 +75,8 @@ impl Default for Config {
             // Behavior
             confirm_before_launch: true,
 
-            // GPU Passthrough
-            enable_gpu_passthrough: false,
+            // Multi-GPU Passthrough
+            enable_multi_gpu_passthrough: false,
             default_ivshmem_size_mb: 64,
             show_gpu_warnings: true,
 

@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
 use crate::config::Config;
-use crate::hardware::{GpuPassthroughStatus, PciDevice, SingleGpuConfig, UsbDevice};
+use crate::hardware::{MultiGpuPassthroughStatus, PciDevice, SingleGpuConfig, UsbDevice};
 use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo, QemuProfileStore, SettingsHelpStore};
 use crate::ui::widgets::build_visual_order;
 use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, Snapshot};
@@ -552,8 +552,8 @@ pub struct App {
     pub pci_devices: Vec<PciDevice>,
     /// Selected PCI devices for passthrough
     pub selected_pci_devices: Vec<usize>,
-    /// GPU passthrough status (prerequisites)
-    pub gpu_status: Option<GpuPassthroughStatus>,
+    /// Multi-GPU passthrough status (prerequisites)
+    pub multi_gpu_status: Option<MultiGpuPassthroughStatus>,
     /// Selected management menu item
     pub selected_menu_item: usize,
     /// Current boot mode
@@ -712,7 +712,7 @@ impl App {
             selected_usb_devices: Vec::new(),
             pci_devices: Vec::new(),
             selected_pci_devices: Vec::new(),
-            gpu_status: None,
+            multi_gpu_status: None,
             selected_menu_item: 0,
             boot_mode: BootMode::Normal,
             search_query: String::new(),
@@ -896,7 +896,7 @@ impl App {
     pub fn load_pci_devices(&mut self) -> Result<()> {
         self.pci_devices = crate::hardware::enumerate_pci_devices()?;
         self.selected_pci_devices.clear();
-        self.gpu_status = Some(crate::hardware::check_gpu_passthrough_status());
+        self.multi_gpu_status = Some(crate::hardware::check_multi_gpu_passthrough_status());
         Ok(())
     }
 

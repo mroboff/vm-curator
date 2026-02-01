@@ -57,7 +57,7 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     ];
 
     // Add Multi-GPU Passthrough option if enabled in settings
-    if config.enable_gpu_passthrough {
+    if config.enable_multi_gpu_passthrough {
         items.push(MenuItem {
             name: "Multi-GPU Passthrough",
             description: "Pass a secondary GPU to the VM with Looking Glass",

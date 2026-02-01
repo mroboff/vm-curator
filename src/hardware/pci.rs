@@ -256,9 +256,9 @@ impl PciDevice {
     }
 }
 
-/// Status of GPU passthrough prerequisites
+/// Status of multi-GPU passthrough prerequisites
 #[derive(Debug, Clone)]
-pub struct GpuPassthroughStatus {
+pub struct MultiGpuPassthroughStatus {
     /// IOMMU is enabled in kernel
     pub iommu_enabled: bool,
     /// VFIO modules are loaded
@@ -275,7 +275,7 @@ pub struct GpuPassthroughStatus {
     pub warnings: Vec<String>,
 }
 
-impl GpuPassthroughStatus {
+impl MultiGpuPassthroughStatus {
     /// Check if all prerequisites are met for GPU passthrough
     pub fn is_ready(&self) -> bool {
         self.iommu_enabled && self.vfio_loaded && !self.passthrough_gpus.is_empty()
@@ -449,6 +449,13 @@ fn get_known_device_name(vendor_id: u16, device_id: u16) -> Option<String> {
     // Common NVIDIA GPUs
     if vendor_id == 0x10de {
         let name = match device_id {
+            // RTX 50 series (Blackwell)
+            0x2B84 => "GeForce RTX 5090",
+            0x2B85 => "GeForce RTX 5080",
+            0x2B86 => "GeForce RTX 5070 Ti",
+            0x2B87 => "GeForce RTX 5070",
+            0x2B88 => "GeForce RTX 5060 Ti",
+            0x2B89 => "GeForce RTX 5060",
             // RTX 40 series
             0x2684 => "GeForce RTX 4090",
             0x2702 => "GeForce RTX 4080 SUPER",
@@ -467,6 +474,13 @@ fn get_known_device_name(vendor_id: u16, device_id: u16) -> Option<String> {
             0x2488 => "GeForce RTX 3070 Ti",
             0x2504 => "GeForce RTX 3060 Ti",
             0x2544 => "GeForce RTX 3060",
+            // RTX 20 series (Turing)
+            0x1E04 => "GeForce RTX 2080 Ti",
+            0x1E82 => "GeForce RTX 2080",
+            0x1E84 => "GeForce RTX 2070 SUPER",
+            0x1F02 => "GeForce RTX 2070",
+            0x1F07 => "GeForce RTX 2060 SUPER",
+            0x1F08 => "GeForce RTX 2060",
             // Audio devices
             0x10f9 | 0x10f8 | 0x10f7 | 0x228b | 0x22bd => "HD Audio Controller",
             _ => return None,
@@ -488,6 +502,11 @@ fn get_known_device_name(vendor_id: u16, device_id: u16) -> Option<String> {
             0x73a5 => "Radeon RX 6800 XT",
             0x73a3 => "Radeon RX 6800",
             0x73df => "Radeon RX 6700 XT",
+            // RX 9000 series (RDNA 4)
+            0x7500 => "Radeon RX 9070 XT",
+            0x7501 => "Radeon RX 9070",
+            0x7502 => "Radeon RX 9600 XT",
+            0x7503 => "Radeon RX 9600",
             // Audio devices
             0xab38 | 0xab28 => "HD Audio Controller",
             _ => return None,
@@ -535,9 +554,9 @@ fn get_class_description(class_code: u32) -> &'static str {
     }
 }
 
-/// Check GPU passthrough prerequisites
-pub fn check_gpu_passthrough_status() -> GpuPassthroughStatus {
-    let mut status = GpuPassthroughStatus {
+/// Check multi-GPU passthrough prerequisites
+pub fn check_multi_gpu_passthrough_status() -> MultiGpuPassthroughStatus {
+    let mut status = MultiGpuPassthroughStatus {
         iommu_enabled: false,
         vfio_loaded: false,
         available_gpus: 0,

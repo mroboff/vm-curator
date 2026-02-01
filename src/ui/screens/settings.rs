@@ -11,13 +11,13 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use crate::app::App;
 use crate::config::Config;
 use crate::fs;
-use crate::hardware::{check_gpu_passthrough_status, check_single_gpu_support, GpuPassthroughStatus, LookingGlassConfig, SingleGpuSupport};
+use crate::hardware::{check_multi_gpu_passthrough_status, check_single_gpu_support, MultiGpuPassthroughStatus, LookingGlassConfig, SingleGpuSupport};
 use crate::vm::single_gpu_scripts::{run_system_setup, SystemSetupResult};
 
 /// GPU passthrough validation result
 #[derive(Debug)]
 pub enum GpuValidationResult {
-    MultiGpu(GpuPassthroughStatus),
+    MultiGpu(MultiGpuPassthroughStatus),
     SingleGpu(SingleGpuSupport),
 }
 
@@ -216,7 +216,7 @@ fn build_visible_items(config: &Config) -> Vec<VisibleItem> {
     items.push(make_visible(SettingsItem::EnableMultiGpuPassthrough, 1));
 
     // Multi-GPU sub-settings (only visible when multi-GPU is enabled)
-    if config.enable_gpu_passthrough {
+    if config.enable_multi_gpu_passthrough {
         items.push(make_visible(SettingsItem::MultiGpuIvshmemSize, 2));
         items.push(make_visible(SettingsItem::MultiGpuShowWarnings, 2));
         items.push(make_visible(SettingsItem::MultiGpuAutoLaunchLookingGlass, 2));
@@ -338,9 +338,9 @@ fn render_settings_list(app: &App, frame: &mut Frame, area: Rect, visible_items:
                 // Radio button style - only one can be selected
                 let is_enabled = match vi.item {
                     SettingsItem::GpuPassthroughDisabled => {
-                        !app.config.enable_gpu_passthrough && !app.config.single_gpu_enabled
+                        !app.config.enable_multi_gpu_passthrough && !app.config.single_gpu_enabled
                     }
-                    SettingsItem::EnableMultiGpuPassthrough => app.config.enable_gpu_passthrough,
+                    SettingsItem::EnableMultiGpuPassthrough => app.config.enable_multi_gpu_passthrough,
                     SettingsItem::EnableSingleGpuPassthrough => app.config.single_gpu_enabled,
                     _ => false,
                 };
@@ -422,7 +422,7 @@ fn render_validation_panel(frame: &mut Frame, area: Rect, validation: &Option<Gp
 }
 
 /// Render multi-GPU validation status
-fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &GpuPassthroughStatus) {
+fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuPassthroughStatus) {
     let is_ready = status.is_ready();
     let border_color = if is_ready { Color::Green } else { Color::Yellow };
 
@@ -736,23 +736,23 @@ fn toggle_radio(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
     match item {
         SettingsItem::GpuPassthroughDisabled => {
             // Disable all GPU passthrough
-            app.config.enable_gpu_passthrough = false;
+            app.config.enable_multi_gpu_passthrough = false;
             app.config.single_gpu_enabled = false;
             app.settings_gpu_validation = None;
         }
         SettingsItem::EnableMultiGpuPassthrough => {
             // Enable multi-GPU, disable single-GPU
-            app.config.enable_gpu_passthrough = true;
+            app.config.enable_multi_gpu_passthrough = true;
             app.config.single_gpu_enabled = false;
             // Run validation
             app.settings_gpu_validation = Some(
-                GpuValidationResult::MultiGpu(check_gpu_passthrough_status())
+                GpuValidationResult::MultiGpu(check_multi_gpu_passthrough_status())
             );
         }
         SettingsItem::EnableSingleGpuPassthrough => {
             // Enable single-GPU, disable multi-GPU
             app.config.single_gpu_enabled = true;
-            app.config.enable_gpu_passthrough = false;
+            app.config.enable_multi_gpu_passthrough = false;
             // Run validation
             app.settings_gpu_validation = Some(
                 GpuValidationResult::SingleGpu(check_single_gpu_support())

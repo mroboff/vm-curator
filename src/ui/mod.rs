@@ -833,7 +833,10 @@ fn handle_detailed_info(app: &mut App, key: KeyEvent) -> Result<()> {
 
 fn handle_snapshots(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Esc => app.pop_screen(),
+        KeyCode::Esc => {
+            app.selected_menu_item = 0; // Reset for management menu
+            app.pop_screen();
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             if app.selected_snapshot < app.snapshots.len().saturating_sub(1) {
                 app.selected_snapshot += 1;

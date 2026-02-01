@@ -30,7 +30,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     let title = if app.config.single_gpu_enabled {
         // Single GPU mode - don't show GPU count (boot VGA is passed through differently)
         format!(" PCI Passthrough ({} selected) ", selected_count)
-    } else if app.config.enable_gpu_passthrough {
+    } else if app.config.enable_multi_gpu_passthrough {
         let gpu_count = app.pci_devices.iter().filter(|d| d.is_gpu() && !d.is_boot_vga).count();
         format!(
             " PCI Passthrough ({} selected, {} GPU{} available) ",
@@ -78,7 +78,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     render_device_list(app, frame, h_chunks[1]);
 
     // Help text - show GPU options only when multi-GPU passthrough is enabled (not single GPU)
-    let help_text = if app.config.enable_gpu_passthrough && !app.config.single_gpu_enabled {
+    let help_text = if app.config.enable_multi_gpu_passthrough && !app.config.single_gpu_enabled {
         "[Space/Enter] Toggle  [g] Auto-select GPU  [s] Save  [p] Prerequisites  [Esc] Back"
     } else {
         "[Space/Enter] Toggle  [s] Save  [Esc] Back"
@@ -99,9 +99,9 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled("Single GPU Passthrough", Style::default().fg(Color::Cyan)),
             Span::styled("  (GPU selection managed via Single GPU Setup)", Style::default().fg(Color::DarkGray)),
         ]
-    } else if app.config.enable_gpu_passthrough {
+    } else if app.config.enable_multi_gpu_passthrough {
         // Multi-GPU passthrough mode - show full status
-        let status = app.gpu_status.as_ref();
+        let status = app.multi_gpu_status.as_ref();
         let (status_text, status_color) = if let Some(status) = status {
             if status.is_ready() {
                 (status.summary(), Color::Green)
@@ -165,7 +165,7 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
                 return true;
             }
             // When GPU passthrough is enabled, also show GPUs and GPU-related devices
-            if app.config.enable_gpu_passthrough {
+            if app.config.enable_multi_gpu_passthrough {
                 d.is_gpu()
                     || d.is_audio()
                     || d.iommu_group.is_some() && is_device_in_gpu_group(d, &app.pci_devices)
@@ -303,7 +303,7 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    let status = app.gpu_status.as_ref();
+    let status = app.multi_gpu_status.as_ref();
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -440,7 +440,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
     use crossterm::event::KeyCode;
 
-    let gpu_enabled = app.config.enable_gpu_passthrough;
+    let gpu_enabled = app.config.enable_multi_gpu_passthrough;
 
     // Get relevant devices for navigation (must match render filter)
     let relevant_indices: Vec<usize> = app
@@ -466,6 +466,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
 
     match key.code {
         KeyCode::Esc => {
+            app.selected_menu_item = 0; // Reset for management menu
             app.pop_screen();
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -542,7 +543,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         }
         KeyCode::Char('p') | KeyCode::Char('P') if gpu_enabled => {
             // Refresh and show GPU prerequisites
-            app.gpu_status = Some(crate::hardware::check_gpu_passthrough_status());
+            app.multi_gpu_status = Some(crate::hardware::check_multi_gpu_passthrough_status());
             // We'll need a separate screen state for prerequisites
             // For now, just refresh the status
             app.set_status("GPU prerequisites refreshed");

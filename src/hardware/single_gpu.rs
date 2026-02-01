@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::multi_gpu::LookingGlassConfig;
 use super::pci::PciDevice;
 
 /// Supported display managers (systemd-based only)
@@ -87,76 +88,6 @@ impl GpuDriver {
 impl std::fmt::Display for GpuDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.module_name())
-    }
-}
-
-/// Looking Glass configuration
-#[derive(Debug, Clone)]
-pub struct LookingGlassConfig {
-    /// Enable Looking Glass integration
-    pub enabled: bool,
-    /// IVSHMEM size in megabytes (for frame buffer)
-    pub ivshmem_size_mb: u32,
-    /// Auto-launch Looking Glass client after VM starts
-    pub auto_launch_client: bool,
-    /// Path to Looking Glass client executable
-    pub client_path: Option<PathBuf>,
-}
-
-impl Default for LookingGlassConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ivshmem_size_mb: 64,
-            auto_launch_client: true,
-            client_path: None,
-        }
-    }
-}
-
-impl LookingGlassConfig {
-    /// Calculate recommended IVSHMEM size based on resolution
-    /// Formula: width * height * 4 * 2 (double buffer) + 10MB overhead
-    pub fn recommended_size_for_resolution(width: u32, height: u32) -> u32 {
-        let frame_size = width * height * 4; // RGBA
-        let double_buffered = frame_size * 2;
-        let with_overhead = double_buffered + (10 * 1024 * 1024);
-        // Round up to next power of 2 in MB
-        let size_mb = (with_overhead + (1024 * 1024 - 1)) / (1024 * 1024);
-        size_mb.next_power_of_two()
-    }
-
-    /// Get IVSHMEM size string for QEMU (e.g., "64M")
-    pub fn ivshmem_size_str(&self) -> String {
-        format!("{}M", self.ivshmem_size_mb)
-    }
-
-    /// Find Looking Glass client in common locations
-    pub fn find_client() -> Option<PathBuf> {
-        let candidates = [
-            "/usr/bin/looking-glass-client",
-            "/usr/local/bin/looking-glass-client",
-            "/opt/looking-glass/bin/looking-glass-client",
-        ];
-
-        for path in candidates {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                return Some(p);
-            }
-        }
-
-        // Try to find via which
-        if let Ok(output) = Command::new("which").arg("looking-glass-client").output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Some(PathBuf::from(path));
-                }
-            }
-        }
-
-        None
     }
 }
 
@@ -601,17 +532,6 @@ fn parse_hex_u32(s: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_looking_glass_recommended_size() {
-        // 1080p
-        let size = LookingGlassConfig::recommended_size_for_resolution(1920, 1080);
-        assert!(size >= 32);
-
-        // 4K
-        let size = LookingGlassConfig::recommended_size_for_resolution(3840, 2160);
-        assert!(size >= 64);
-    }
 
     #[test]
     fn test_display_manager_service_names() {

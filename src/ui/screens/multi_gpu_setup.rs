@@ -10,11 +10,11 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::*,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::app::{App, Screen};
-use crate::hardware::{check_gpu_passthrough_status, LookingGlassConfig};
+use crate::hardware::{check_multi_gpu_passthrough_status, LookingGlassConfig};
 
 /// Render the multi-GPU setup screen
 pub fn render(app: &App, frame: &mut Frame) {
@@ -76,7 +76,7 @@ pub fn render(app: &App, frame: &mut Frame) {
 
 /// Render system status panel
 fn render_system_status(frame: &mut Frame, area: Rect) {
-    let status = check_gpu_passthrough_status();
+    let status = check_multi_gpu_passthrough_status();
 
     let mut lines = Vec::new();
 
@@ -233,6 +233,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
 pub fn handle_input(app: &mut App, key: KeyEvent) -> anyhow::Result<()> {
     match key.code {
         KeyCode::Esc => {
+            app.selected_menu_item = 0; // Reset for management menu
             app.pop_screen();
         }
         KeyCode::Char('p') | KeyCode::Char('P') => {
