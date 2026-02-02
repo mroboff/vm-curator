@@ -8,8 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build-linux:
@@ -39,12 +38,14 @@ jobs:
         run: cargo generate-rpm
 
       - name: Prepare artifacts
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           mkdir -p dist
           cp target/release/vm-curator dist/
           cp README.md LICENSE dist/
           cd dist
-          tar -czvf vm-curator-${{ github.ref_name }}-linux-x86_64.tar.gz vm-curator README.md LICENSE
+          tar -czvf vm-curator-${TAG_NAME}-linux-x86_64.tar.gz vm-curator README.md LICENSE
           mv ../target/debian/*.deb .
           mv ../target/generate-rpm/*.rpm .
 
@@ -114,8 +115,10 @@ jobs:
           ln -sf usr/share/icons/hicolor/256x256/apps/vm-curator.png AppDir/vm-curator.png
 
       - name: Build AppImage
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir vm-curator-${{ github.ref_name }}-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir vm-curator-${TAG_NAME}-x86_64.AppImage
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
@@ -126,6 +129,8 @@ jobs:
   release:
     needs: [build-linux, build-appimage]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
