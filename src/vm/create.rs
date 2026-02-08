@@ -23,6 +23,7 @@ fn shell_escape(s: &str) -> String {
 
 use crate::app::{CreateWizardState, DiskAction, WizardQemuConfig};
 use crate::commands::qemu_img;
+use crate::vm::qemu_config::{PortForward, PortProtocol};
 
 /// Generate a random UUID for SMBIOS
 fn generate_uuid() -> String {
@@ -732,8 +733,34 @@ fn build_qemu_command_with_os(
             "virtio" => "virtio-net-pci".to_string(),
             other => shell_escape(other),
         };
-        args.push("-netdev user,id=net0".to_string());
-        args.push(format!("-device {},netdev=net0", net_device));
+
+        match config.network_backend.as_str() {
+            "none" => {
+                // No networking backend (different from network_model "none")
+            }
+            "passt" => {
+                args.push("-netdev passt,id=net0".to_string());
+                args.push(format!("-device {},netdev=net0", net_device));
+            }
+            "bridge" => {
+                let br = config.bridge_name.as_deref().unwrap_or("qemubr0");
+                args.push(format!("-netdev bridge,id=net0,br={}", shell_escape(br)));
+                args.push(format!("-device {},netdev=net0", net_device));
+            }
+            _ => {
+                // User/SLIRP (default)
+                let mut netdev = "-netdev user,id=net0".to_string();
+                for pf in &config.port_forwards {
+                    let proto = match pf.protocol {
+                        PortProtocol::Tcp => "tcp",
+                        PortProtocol::Udp => "udp",
+                    };
+                    netdev.push_str(&format!(",hostfwd={}::{}-:{}", proto, pf.host_port, pf.guest_port));
+                }
+                args.push(netdev);
+                args.push(format!("-device {},netdev=net0", net_device));
+            }
+        }
     }
 
     // USB tablet for mouse
@@ -780,6 +807,136 @@ pub fn write_launch_script(vm_dir: &Path, content: &str) -> Result<PathBuf> {
         .with_context(|| format!("Failed to set permissions on: {}", script_path.display()))?;
 
     Ok(script_path)
+}
+
+/// Update network arguments in an existing launch.sh script
+pub fn update_network_in_script(
+    vm_path: &Path,
+    model: &str,
+    backend: &str,
+    bridge_name: Option<&str>,
+    port_forwards: &[PortForward],
+) -> Result<()> {
+    let script_path = vm_path.join("launch.sh");
+    let content = std::fs::read_to_string(&script_path)
+        .with_context(|| format!("Failed to read launch script: {}", script_path.display()))?;
+
+    // Build new network arguments
+    let new_net_args = generate_network_args(model, backend, bridge_name, port_forwards);
+
+    // Remove existing network lines and replace
+    let mut new_lines = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    let mut replaced = false;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Skip comment lines
+        if trimmed.starts_with('#') {
+            new_lines.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Check if this line contains network args
+        let is_netdev = trimmed.contains("-netdev ") || trimmed.contains("-net user") || trimmed.contains("-net bridge");
+        let is_net_device = (trimmed.contains("-device ") && trimmed.contains("netdev=net0"))
+            || (trimmed.contains("-device ") && (trimmed.contains("e1000") || trimmed.contains("virtio-net") || trimmed.contains("rtl8139") || trimmed.contains("ne2k_pci") || trimmed.contains("pcnet")) && !trimmed.contains("vga") && !trimmed.contains("audio"));
+
+        if is_netdev || is_net_device {
+            // Skip this line (and continuation lines with backslash)
+            while i < lines.len() && lines[i].trim_end().ends_with('\\') {
+                i += 1;
+            }
+            i += 1; // skip the last line of this group
+
+            // Insert replacement on first network line removal
+            if !replaced {
+                for arg in &new_net_args {
+                    new_lines.push(arg.clone());
+                }
+                replaced = true;
+            }
+        } else {
+            new_lines.push(line.to_string());
+            i += 1;
+        }
+    }
+
+    // If no network lines were found but we have new args, insert before the last non-empty line
+    if !replaced && !new_net_args.is_empty() {
+        // Find the last continuation line sequence and insert before it
+        let insert_pos = new_lines.len().saturating_sub(2);
+        for (j, arg) in new_net_args.iter().enumerate() {
+            new_lines.insert(insert_pos + j, arg.clone());
+        }
+    }
+
+    let new_content = new_lines.join("\n");
+    // Ensure trailing newline
+    let new_content = if new_content.ends_with('\n') {
+        new_content
+    } else {
+        format!("{}\n", new_content)
+    };
+
+    std::fs::write(&script_path, new_content)
+        .with_context(|| format!("Failed to write launch script: {}", script_path.display()))?;
+
+    Ok(())
+}
+
+/// Generate network argument lines for a launch script
+fn generate_network_args(
+    model: &str,
+    backend: &str,
+    bridge_name: Option<&str>,
+    port_forwards: &[PortForward],
+) -> Vec<String> {
+    if model == "none" {
+        return Vec::new();
+    }
+
+    let net_device = match model {
+        "virtio" => "virtio-net-pci".to_string(),
+        other => shell_escape(other),
+    };
+
+    let mut args = Vec::new();
+
+    match backend {
+        "none" => {
+            // No networking backend
+        }
+        "passt" => {
+            args.push(format!("        -netdev passt,id=net0 \\"));
+            args.push(format!("        -device {},netdev=net0 \\", net_device));
+        }
+        "bridge" => {
+            let br = bridge_name.unwrap_or("qemubr0");
+            args.push(format!("        -netdev bridge,id=net0,br={} \\", shell_escape(br)));
+            args.push(format!("        -device {},netdev=net0 \\", net_device));
+        }
+        _ => {
+            // User/SLIRP
+            let mut netdev = "        -netdev user,id=net0".to_string();
+            for pf in port_forwards {
+                let proto = match pf.protocol {
+                    PortProtocol::Tcp => "tcp",
+                    PortProtocol::Udp => "udp",
+                };
+                netdev.push_str(&format!(",hostfwd={}::{}-:{}", proto, pf.host_port, pf.guest_port));
+            }
+            netdev.push_str(" \\");
+            args.push(netdev);
+            args.push(format!("        -device {},netdev=net0 \\", net_device));
+        }
+    }
+
+    args
 }
 
 #[cfg(test)]
@@ -854,6 +1011,9 @@ mod tests {
             usb_tablet: true,
             display: "gtk".to_string(),
             gl_acceleration: false,
+            network_backend: "user".to_string(),
+            port_forwards: vec![],
+            bridge_name: None,
             extra_args: vec![],
         };
 
@@ -877,6 +1037,40 @@ mod tests {
 
         assert!(cmd.contains("-drive file=\"$ISO\",media=cdrom"));
         assert!(cmd.contains("-boot d"));
+    }
+
+    #[test]
+    fn test_generate_network_args_user_with_portfwd() {
+        let forwards = vec![
+            PortForward { protocol: PortProtocol::Tcp, host_port: 2222, guest_port: 22 },
+            PortForward { protocol: PortProtocol::Tcp, host_port: 8080, guest_port: 80 },
+        ];
+        let args = generate_network_args("e1000", "user", None, &forwards);
+        assert_eq!(args.len(), 2);
+        assert!(args[0].contains("hostfwd=tcp::2222-:22"));
+        assert!(args[0].contains("hostfwd=tcp::8080-:80"));
+        assert!(args[1].contains("e1000,netdev=net0"));
+    }
+
+    #[test]
+    fn test_generate_network_args_passt() {
+        let args = generate_network_args("virtio", "passt", None, &[]);
+        assert_eq!(args.len(), 2);
+        assert!(args[0].contains("-netdev passt,id=net0"));
+        assert!(args[1].contains("virtio-net-pci,netdev=net0"));
+    }
+
+    #[test]
+    fn test_generate_network_args_bridge() {
+        let args = generate_network_args("e1000", "bridge", Some("virbr0"), &[]);
+        assert_eq!(args.len(), 2);
+        assert!(args[0].contains("-netdev bridge,id=net0,br=virbr0"));
+    }
+
+    #[test]
+    fn test_generate_network_args_none() {
+        let args = generate_network_args("none", "user", None, &[]);
+        assert!(args.is_empty());
     }
 
     #[test]

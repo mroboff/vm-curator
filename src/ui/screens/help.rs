@@ -7,7 +7,7 @@ use ratatui::{
 pub fn render(frame: &mut Frame) {
     let area = frame.area();
     let dialog_width = 55.min(area.width.saturating_sub(4));
-    let dialog_height = 22.min(area.height.saturating_sub(4));
+    let dialog_height = 28.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -41,6 +41,13 @@ pub fn render(frame: &mut Frame) {
         key_line("x", "Stop selected VM (graceful shutdown)"),
         key_line("c", "Create new VM"),
         key_line("/", "Search/filter VMs"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Management Menu",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        key_line("Network", "Backend, port forwarding"),
         Line::from(""),
         Line::from(Span::styled(
             "General",

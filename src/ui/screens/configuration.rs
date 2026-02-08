@@ -131,10 +131,25 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
 
     // Network
     if let Some(ref net) = config.network {
+        let backend_str = match &net.backend {
+            crate::vm::qemu_config::NetworkBackend::User => "user/SLIRP (NAT)".to_string(),
+            crate::vm::qemu_config::NetworkBackend::Passt => "passt".to_string(),
+            crate::vm::qemu_config::NetworkBackend::Bridge(name) => format!("bridge: {}", name),
+            crate::vm::qemu_config::NetworkBackend::None => "none".to_string(),
+        };
         lines.push(Line::from(vec![
             Span::styled("Network: ", Style::default().fg(Color::Yellow)),
-            Span::raw(format!("{} ({})", net.model, if net.user_net { "user" } else { "bridge" })),
+            Span::raw(format!("{} ({})", net.model, backend_str)),
         ]));
+        if !net.port_forwards.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  Forwarded ports:",
+                Style::default().fg(Color::DarkGray),
+            )));
+            for pf in &net.port_forwards {
+                lines.push(Line::from(format!("    {} {} -> {}", pf.protocol, pf.host_port, pf.guest_port)));
+            }
+        }
     }
 
     lines.push(Line::from(""));

@@ -444,6 +444,11 @@ fn render(app: &App, frame: &mut Frame) {
             render_dim_overlay(frame);
             screens::create_wizard::render_download(app, frame);
         }
+        Screen::NetworkSettings => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::network_settings::render(app, frame);
+        }
         Screen::Settings => {
             screens::main_menu::render(app, frame);
             render_dim_overlay(frame);
@@ -462,7 +467,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
     // Global quit with q/Q (except in text input modes where q might be typed)
     if (key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q'))
-        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::CreateWizard | Screen::CreateWizardCustomOs)
+        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::CreateWizard | Screen::CreateWizardCustomOs | Screen::NetworkSettings)
     {
         app.should_quit = true;
         return Ok(());
@@ -492,6 +497,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::CreateWizard => screens::create_wizard::handle_key(app, key)?,
         Screen::CreateWizardCustomOs => screens::create_wizard::handle_custom_os_key(app, key)?,
         Screen::CreateWizardDownload => screens::create_wizard::handle_download_key(app, key)?,
+        Screen::NetworkSettings => screens::network_settings::handle_key(app, key)?,
         Screen::Settings => { screens::settings::handle_input(app, key)?; }
     }
 
@@ -668,6 +674,34 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.load_shared_folders();
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::SharedFolders);
+                        }
+                        MenuAction::NetworkSettings => {
+                            // Initialize network settings state from current VM config
+                            if let Some(vm) = app.selected_vm() {
+                                let net = vm.config.network.as_ref();
+                                let model = net.map(|n| n.model.clone()).unwrap_or_else(|| "e1000".to_string());
+                                let (backend, bridge_name) = net.map(|n| {
+                                    match &n.backend {
+                                        crate::vm::qemu_config::NetworkBackend::User => ("user".to_string(), None),
+                                        crate::vm::qemu_config::NetworkBackend::Passt => ("passt".to_string(), None),
+                                        crate::vm::qemu_config::NetworkBackend::Bridge(name) => ("bridge".to_string(), Some(name.clone())),
+                                        crate::vm::qemu_config::NetworkBackend::None => ("none".to_string(), None),
+                                    }
+                                }).unwrap_or_else(|| ("user".to_string(), None));
+                                let port_forwards = net.map(|n| n.port_forwards.clone()).unwrap_or_default();
+
+                                app.network_settings_state = Some(crate::app::NetworkSettingsState {
+                                    model,
+                                    backend,
+                                    bridge_name,
+                                    port_forwards,
+                                    selected_field: 0,
+                                    editing_port_forwards: false,
+                                    pf_selected: 0,
+                                    adding_pf: None,
+                                });
+                                app.push_screen(Screen::NetworkSettings);
+                            }
                         }
                         MenuAction::MultiGpuPassthrough => {
                             // Load PCI devices for multi-GPU setup

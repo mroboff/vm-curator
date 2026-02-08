@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 
 /// QEMU emulator type
@@ -103,18 +104,88 @@ impl AudioDevice {
     }
 }
 
+/// Network backend type
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkBackend {
+    /// SLIRP - default, no root needed
+    User,
+    /// passt - modern, fast, no root needed
+    Passt,
+    /// Bridge networking via qemu-bridge-helper
+    Bridge(String),
+    /// No networking
+    None,
+}
+
+impl Default for NetworkBackend {
+    fn default() -> Self {
+        Self::User
+    }
+}
+
+impl fmt::Display for NetworkBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::User => write!(f, "user"),
+            Self::Passt => write!(f, "passt"),
+            Self::Bridge(name) => write!(f, "bridge:{}", name),
+            Self::None => write!(f, "none"),
+        }
+    }
+}
+
+/// A single port forwarding rule
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortForward {
+    pub protocol: PortProtocol,
+    pub host_port: u16,
+    pub guest_port: u16,
+}
+
+impl fmt::Display for PortForward {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} -> {}", self.protocol, self.host_port, self.guest_port)
+    }
+}
+
+/// Port forwarding protocol
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PortProtocol {
+    Tcp,
+    Udp,
+}
+
+impl fmt::Display for PortProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tcp => write!(f, "TCP"),
+            Self::Udp => write!(f, "UDP"),
+        }
+    }
+}
+
 /// Network configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub model: String,
+    pub backend: NetworkBackend,
+    pub port_forwards: Vec<PortForward>,
+    /// Legacy field kept for parsing existing launch.sh
+    #[serde(default = "default_true")]
     pub user_net: bool,
     pub bridge: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             model: "e1000".to_string(),
+            backend: NetworkBackend::User,
+            port_forwards: Vec::new(),
             user_net: true,
             bridge: None,
         }

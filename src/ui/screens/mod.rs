@@ -4,6 +4,7 @@ pub mod help;
 pub mod main_menu;
 pub mod management;
 pub mod multi_gpu_setup;
+pub mod network_settings;
 pub mod pci_passthrough;
 pub mod settings;
 pub mod shared_folders;

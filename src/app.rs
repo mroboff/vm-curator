@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
+use crate::commands::qemu_system::NetworkCapabilities;
 use crate::config::Config;
 use crate::hardware::{MultiGpuPassthroughStatus, PciDevice, SingleGpuConfig, UsbDevice};
 use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo, QemuProfileStore, SettingsHelpStore, SharedFoldersHelpStore};
 use crate::ui::widgets::build_visual_order;
 use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, QemuProcess, SharedFolder, Snapshot};
+use crate::vm::qemu_config::{PortForward, PortProtocol};
 
 /// Application screens/views
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +64,8 @@ pub enum Screen {
     /// ISO download progress screen (planned feature)
     #[allow(dead_code)]
     CreateWizardDownload,
+    /// Network settings (backend + port forwarding)
+    NetworkSettings,
     /// Application settings
     Settings,
 }
@@ -207,6 +211,12 @@ pub struct WizardQemuConfig {
     pub usb_tablet: bool,
     /// Display output
     pub display: String,
+    /// Network backend
+    pub network_backend: String,
+    /// Port forwarding rules (user & passt backends)
+    pub port_forwards: Vec<PortForward>,
+    /// Bridge name when backend is "bridge"
+    pub bridge_name: Option<String>,
     /// Additional QEMU arguments
     pub extra_args: Vec<String>,
 }
@@ -230,6 +240,9 @@ impl Default for WizardQemuConfig {
             rtc_localtime: false,
             usb_tablet: true,
             display: "gtk".to_string(),
+            network_backend: "user".to_string(),
+            port_forwards: Vec::new(),
+            bridge_name: None,
             extra_args: Vec::new(),
         }
     }
@@ -260,6 +273,9 @@ impl WizardQemuConfig {
             rtc_localtime: profile.rtc_localtime,
             usb_tablet: profile.usb_tablet,
             display: profile.display.clone(),
+            network_backend: "user".to_string(),
+            port_forwards: Vec::new(),
+            bridge_name: None,
             extra_args: profile.extra_args.clone(),
         }
     }
@@ -531,6 +547,36 @@ impl CreateWizardState {
     }
 }
 
+/// State for network settings editing screen
+#[derive(Debug, Clone)]
+pub struct NetworkSettingsState {
+    pub model: String,
+    pub backend: String,
+    pub bridge_name: Option<String>,
+    pub port_forwards: Vec<PortForward>,
+    pub selected_field: usize,
+    pub editing_port_forwards: bool,
+    pub pf_selected: usize,
+    pub adding_pf: Option<AddingPortForward>,
+}
+
+/// State when adding a new port forward rule
+#[derive(Debug, Clone)]
+pub struct AddingPortForward {
+    pub step: AddPfStep,
+    pub protocol: PortProtocol,
+    pub host_port_input: String,
+    pub guest_port_input: String,
+}
+
+/// Steps when adding a port forward
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddPfStep {
+    Protocol,
+    HostPort,
+    GuestPort,
+}
+
 /// Application state
 pub struct App {
     /// Current screen
@@ -651,6 +697,18 @@ pub struct App {
     pub single_gpu_selected_field: usize,
     /// Whether to show the instructions dialog
     pub single_gpu_show_instructions: bool,
+
+    // === Networking ===
+    /// Detected network capabilities (passt, bridge helper, etc.)
+    pub network_caps: NetworkCapabilities,
+    /// Network settings editing state
+    pub network_settings_state: Option<NetworkSettingsState>,
+    /// Whether the wizard port forward editor is active
+    pub wizard_editing_port_forwards: bool,
+    /// Wizard port forward editor selection index
+    pub wizard_pf_selected: usize,
+    /// Wizard port forward adding state
+    pub wizard_adding_pf: Option<AddingPortForward>,
 }
 
 /// Entry in file browser
@@ -725,6 +783,9 @@ impl App {
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
         let visual_order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata);
         let (background_tx, background_rx) = mpsc::channel();
+
+        // Detect network capabilities
+        let network_caps = crate::commands::qemu_system::detect_network_capabilities();
 
         // Detect display capabilities for each available emulator
         let mut display_capabilities = HashMap::new();
@@ -809,6 +870,13 @@ impl App {
             single_gpu_config: None,
             single_gpu_selected_field: 0,
             single_gpu_show_instructions: false,
+
+            // Networking
+            network_caps,
+            network_settings_state: None,
+            wizard_editing_port_forwards: false,
+            wizard_pf_selected: 0,
+            wizard_adding_pf: None,
         })
     }
 
@@ -841,6 +909,25 @@ impl App {
 
         // Fallback: default list
         preferred_order.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Get available network backend options based on detected capabilities
+    pub fn get_network_backend_options(&self) -> Vec<(&str, &str)> {
+        let mut options = vec![
+            ("user", "User/SLIRP (NAT) - Default, works everywhere"),
+        ];
+        if self.network_caps.passt_available {
+            options.push(("passt", "passt - Fast NAT, ping works"));
+        }
+        if self.network_caps.bridge_helper_path.is_some() {
+            if !self.network_caps.system_bridges.is_empty() && self.network_caps.bridge_helper_configured {
+                options.push(("bridge", "Bridge - Full network, own IP"));
+            } else {
+                options.push(("bridge", "Bridge - Requires one-time setup"));
+            }
+        }
+        options.push(("none", "None - No networking"));
+        options
     }
 
     /// Get the currently selected VM

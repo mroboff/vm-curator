@@ -507,8 +507,23 @@ fn extract_network(content: &str) -> Option<NetworkConfig> {
             continue;
         }
 
-        // Check for network model
-        if line.contains("-net nic") || line.contains("-netdev") || line.contains("-nic") {
+        // Check for network model via -device
+        if line.contains("-device") {
+            // Extract network device model from -device lines
+            if line.contains("virtio-net") {
+                config.model = "virtio-net".to_string();
+                has_network = true;
+            } else if line.contains("e1000") && line.contains("netdev=") {
+                config.model = "e1000".to_string();
+                has_network = true;
+            } else if line.contains("rtl8139") && line.contains("netdev=") {
+                config.model = "rtl8139".to_string();
+                has_network = true;
+            }
+        }
+
+        // Check for network model via -net nic
+        if line.contains("-net nic") || line.contains("-nic") {
             has_network = true;
 
             if line.contains("model=virtio") {
@@ -520,21 +535,55 @@ fn extract_network(content: &str) -> Option<NetworkConfig> {
             }
         }
 
-        // Check for user networking
-        if line.contains("-net user") || line.contains("user,") {
-            config.user_net = true;
+        // Check for netdev backends
+        if line.contains("-netdev") {
+            has_network = true;
+
+            if line.contains("passt") {
+                config.backend = NetworkBackend::Passt;
+                config.user_net = false;
+            } else if line.contains("bridge") {
+                config.user_net = false;
+                // Extract bridge name
+                if let Some(idx) = line.find("br=") {
+                    let rest = &line[idx + 3..];
+                    let bridge: String = rest
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                        .collect();
+                    config.backend = NetworkBackend::Bridge(bridge.clone());
+                    config.bridge = Some(bridge);
+                } else {
+                    config.backend = NetworkBackend::Bridge("qemubr0".to_string());
+                    config.bridge = Some("qemubr0".to_string());
+                }
+            } else if line.contains("user") {
+                config.user_net = true;
+                config.backend = NetworkBackend::User;
+
+                // Extract port forwards from hostfwd
+                config.port_forwards = extract_port_forwards(line);
+            }
         }
 
-        // Check for bridge
-        if line.contains("-net bridge") || line.contains("bridge,") {
+        // Check for -net user/bridge (legacy format)
+        if line.contains("-net user") {
+            has_network = true;
+            config.user_net = true;
+            config.backend = NetworkBackend::User;
+            config.port_forwards.extend(extract_port_forwards(line));
+        }
+
+        if line.contains("-net bridge") {
+            has_network = true;
             config.user_net = false;
-            // Extract bridge name if present
             if let Some(idx) = line.find("br=") {
                 let rest = &line[idx + 3..];
                 let bridge: String = rest
                     .chars()
                     .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
                     .collect();
+                config.backend = NetworkBackend::Bridge(bridge.clone());
                 config.bridge = Some(bridge);
             }
         }
@@ -545,6 +594,72 @@ fn extract_network(content: &str) -> Option<NetworkConfig> {
     } else {
         None
     }
+}
+
+/// Extract port forwarding rules from a hostfwd string
+fn extract_port_forwards(line: &str) -> Vec<PortForward> {
+    let mut forwards = Vec::new();
+
+    // Find each hostfwd= segment
+    let mut search_from = 0;
+    while let Some(idx) = line[search_from..].find("hostfwd=") {
+        let start = search_from + idx + 8; // skip "hostfwd="
+        let rest = &line[start..];
+
+        // Format: protocol::hostport-:guestport
+        // Or: protocol:addr:hostport-:guestport
+        let segment: String = rest
+            .chars()
+            .take_while(|c| *c != ',' && !c.is_whitespace() && *c != '\\')
+            .collect();
+
+        if let Some(pf) = parse_hostfwd_segment(&segment) {
+            forwards.push(pf);
+        }
+
+        search_from = start + segment.len();
+    }
+
+    forwards
+}
+
+/// Parse a single hostfwd segment like "tcp::2222-:22"
+fn parse_hostfwd_segment(segment: &str) -> Option<PortForward> {
+    // Split on the dash separator between host and guest
+    let parts: Vec<&str> = segment.splitn(2, '-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let host_part = parts[0]; // "tcp::2222" or "tcp:addr:2222"
+    let guest_part = parts[1]; // ":22" or ":addr:22"
+
+    // Parse protocol from the beginning
+    let protocol = if host_part.starts_with("udp") {
+        PortProtocol::Udp
+    } else {
+        PortProtocol::Tcp
+    };
+
+    // Extract host port (last number in host_part after protocol)
+    let host_port: u16 = host_part
+        .rsplit(':')
+        .next()?
+        .parse()
+        .ok()?;
+
+    // Extract guest port (last number in guest_part)
+    let guest_port: u16 = guest_part
+        .rsplit(':')
+        .next()?
+        .parse()
+        .ok()?;
+
+    Some(PortForward {
+        protocol,
+        host_port,
+        guest_port,
+    })
 }
 
 /// Extract extra arguments we don't specifically handle
@@ -616,5 +731,60 @@ mod tests {
             extract_vga("-vga virtio"),
             Some(VgaType::Virtio)
         );
+    }
+
+    #[test]
+    fn test_parse_hostfwd_segment() {
+        let pf = parse_hostfwd_segment("tcp::2222-:22").unwrap();
+        assert_eq!(pf.protocol, PortProtocol::Tcp);
+        assert_eq!(pf.host_port, 2222);
+        assert_eq!(pf.guest_port, 22);
+
+        let pf = parse_hostfwd_segment("udp::5353-:5353").unwrap();
+        assert_eq!(pf.protocol, PortProtocol::Udp);
+        assert_eq!(pf.host_port, 5353);
+        assert_eq!(pf.guest_port, 5353);
+
+        // With address
+        let pf = parse_hostfwd_segment("tcp:127.0.0.1:8080-:80").unwrap();
+        assert_eq!(pf.protocol, PortProtocol::Tcp);
+        assert_eq!(pf.host_port, 8080);
+        assert_eq!(pf.guest_port, 80);
+    }
+
+    #[test]
+    fn test_extract_port_forwards() {
+        let line = "-netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80";
+        let forwards = extract_port_forwards(line);
+        assert_eq!(forwards.len(), 2);
+        assert_eq!(forwards[0].host_port, 2222);
+        assert_eq!(forwards[0].guest_port, 22);
+        assert_eq!(forwards[1].host_port, 8080);
+        assert_eq!(forwards[1].guest_port, 80);
+    }
+
+    #[test]
+    fn test_extract_network_passt() {
+        let content = "qemu-system-x86_64 \\\n  -netdev passt,id=net0 \\\n  -device virtio-net-pci,netdev=net0";
+        let config = extract_network(content).unwrap();
+        assert_eq!(config.backend, NetworkBackend::Passt);
+    }
+
+    #[test]
+    fn test_extract_network_bridge() {
+        let content = "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device e1000,netdev=net0";
+        let config = extract_network(content).unwrap();
+        assert_eq!(config.backend, NetworkBackend::Bridge("virbr0".to_string()));
+        assert_eq!(config.bridge, Some("virbr0".to_string()));
+    }
+
+    #[test]
+    fn test_extract_network_user_with_portfwd() {
+        let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0";
+        let config = extract_network(content).unwrap();
+        assert_eq!(config.backend, NetworkBackend::User);
+        assert_eq!(config.port_forwards.len(), 1);
+        assert_eq!(config.port_forwards[0].host_port, 2222);
+        assert_eq!(config.port_forwards[0].guest_port, 22);
     }
 }

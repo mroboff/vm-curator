@@ -24,6 +24,7 @@ pub enum MenuAction {
     UsbPassthrough,
     PciPassthrough,
     SharedFolders,
+    NetworkSettings,
     MultiGpuPassthrough,
     SingleGpuPassthrough,
     ChangeDisplay,
@@ -36,11 +37,6 @@ pub enum MenuAction {
 /// Get menu items based on config and VM state
 pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     let mut items = vec![
-        MenuItem {
-            name: "Stop VM",
-            description: "Shut down the running VM (ACPI poweroff)",
-            action: MenuAction::StopVm,
-        },
         MenuItem {
             name: "Boot Options",
             description: "Normal, install, or custom ISO boot",
@@ -65,6 +61,11 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "Shared Folders",
             description: "Share host directories with the VM (9p)",
             action: MenuAction::SharedFolders,
+        },
+        MenuItem {
+            name: "Network Settings",
+            description: "Configure networking backend and port forwarding",
+            action: MenuAction::NetworkSettings,
         },
     ];
 
@@ -98,6 +99,12 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             action: MenuAction::RenameVm,
         },
     ]);
+
+    items.push(MenuItem {
+        name: "Stop VM",
+        description: "Shut down the running VM (ACPI poweroff)",
+        action: MenuAction::StopVm,
+    });
 
     // Add dangerous operations at the end
     items.extend([
