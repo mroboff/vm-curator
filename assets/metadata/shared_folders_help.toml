@@ -1,0 +1,76 @@
+# Shared Folders Mount Instructions
+#
+# Tier-based instructions for mounting shared folders in guest VMs.
+# Users can override at: ~/.config/vm-curator/metadata/shared_folders_help.toml
+# Use {TAG} as placeholder for the mount tag name.
+
+[empty_state]
+title = "No Shared Folders"
+description = """
+No shared folders configured.\n\
+Press [a] to share a host directory with this VM.\n\
+Shared folders use virtio-9p for host-to-guest file sharing."""
+
+[linux]
+title = "Mounting in Guest (Linux)"
+description = """
+sudo mkdir -p /mnt/{TAG}\n\
+sudo mount -t 9p -o trans=virtio,version=9p2000.L {TAG} /mnt/{TAG}\n\
+\n\
+For automatic mount, add to /etc/fstab:\n\
+{TAG}  /mnt/{TAG}  9p  trans=virtio,version=9p2000.L,nofail  0  0"""
+
+[bsd]
+title = "Mounting in Guest (BSD)"
+description = """
+FreeBSD:\n\
+  mkdir -p /mnt/{TAG}\n\
+  mount -t 9p -o trans=virtio {TAG} /mnt/{TAG}\n\
+\n\
+OpenBSD / NetBSD:\n\
+  mkdir -p /mnt/{TAG}\n\
+  mount_9p {TAG} /mnt/{TAG}"""
+
+[windows]
+title = "Mounting in Guest (Windows)"
+description = """
+1. Install WinFSP: https://winfsp.dev/\n\
+2. Install virtio-win guest tools:\n\
+   https://github.com/virtio-win/virtio-win-pkg-scripts\n\
+3. Shared folders appear as network drives automatically.\n\
+   Or mount manually: net use Z: \\\\{TAG}\\shared"""
+
+[macos]
+title = "Mounting in Guest (macOS)"
+description = """
+Shared folder support in macOS VMs is experimental.\n\
+If your macOS version supports 9p:\n\
+  sudo mkdir -p /mnt/{TAG}\n\
+  sudo mount -t 9p -o trans=virtio {TAG} /mnt/{TAG}\n\
+Note: Older macOS versions may not have 9p support."""
+
+[unix]
+title = "Mounting in Guest (Solaris/Unix)"
+description = """
+mkdir -p /mnt/{TAG}\n\
+mount -F 9p {TAG} /mnt/{TAG}"""
+
+[alternative]
+title = "Mounting in Guest"
+description = """
+This OS may support virtio-9p shared folders.\n\
+Check your OS documentation for 9p/virtio filesystem support.\n\
+General mount command: mount -t 9p {TAG} /mnt/{TAG}"""
+
+[not_supported]
+title = "Not Supported"
+description = """
+Shared folders (virtio-9p) are not supported for this OS.\n\
+This OS does not have virtio-9p filesystem drivers.\n\
+You may still configure folders, but they will not be accessible in the guest."""
+
+[unknown]
+title = "Mount Instructions"
+description = """
+Mount command varies by OS. General syntax:\n\
+  mount -t 9p -o trans=virtio {TAG} /mnt/{TAG}"""

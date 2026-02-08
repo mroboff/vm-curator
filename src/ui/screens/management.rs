@@ -22,6 +22,7 @@ pub enum MenuAction {
     Snapshots,
     UsbPassthrough,
     PciPassthrough,
+    SharedFolders,
     MultiGpuPassthrough,
     SingleGpuPassthrough,
     ChangeDisplay,
@@ -53,6 +54,11 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "PCI Passthrough",
             description: "Pass PCI devices to the VM",
             action: MenuAction::PciPassthrough,
+        },
+        MenuItem {
+            name: "Shared Folders",
+            description: "Share host directories with the VM (9p)",
+            action: MenuAction::SharedFolders,
         },
     ];
 

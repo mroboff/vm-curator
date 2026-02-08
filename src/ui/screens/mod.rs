@@ -6,4 +6,5 @@ pub mod management;
 pub mod multi_gpu_setup;
 pub mod pci_passthrough;
 pub mod settings;
+pub mod shared_folders;
 pub mod single_gpu_setup;

@@ -342,6 +342,11 @@ fn render(app: &App, frame: &mut Frame) {
             render_dim_overlay(frame);
             screens::pci_passthrough::render(app, frame);
         }
+        Screen::SharedFolders => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::shared_folders::render(app, frame);
+        }
         Screen::SingleGpuSetup => {
             screens::main_menu::render(app, frame);
             render_dim_overlay(frame);
@@ -437,6 +442,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::DisplayOptions => handle_display_options(app, key)?,
         Screen::UsbDevices => handle_usb_devices(app, key)?,
         Screen::PciPassthrough => screens::pci_passthrough::handle_key(app, key)?,
+        Screen::SharedFolders => screens::shared_folders::handle_key(app, key)?,
         Screen::SingleGpuSetup => screens::single_gpu_setup::handle_key(app, key)?,
         Screen::SingleGpuInstructions => handle_single_gpu_instructions(app, key)?,
         Screen::MultiGpuSetup => screens::multi_gpu_setup::handle_input(app, key)?,
@@ -505,7 +511,7 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => app.pop_screen(),
         KeyCode::Char('j') | KeyCode::Down => app.menu_next(item_count),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
-        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') | KeyCode::Char('6') | KeyCode::Char('7') => {
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') | KeyCode::Char('6') | KeyCode::Char('7') | KeyCode::Char('8') | KeyCode::Char('9') => {
             // Map number keys to menu index
             let selected_idx = match key.code {
                 KeyCode::Char('1') => 0,
@@ -515,6 +521,8 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                 KeyCode::Char('5') => 4,
                 KeyCode::Char('6') => 5,
                 KeyCode::Char('7') => 6,
+                KeyCode::Char('8') => 7,
+                KeyCode::Char('9') => 8,
                 _ => app.selected_menu_item,
             };
 
@@ -578,6 +586,11 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                             }
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::PciPassthrough);
+                        }
+                        MenuAction::SharedFolders => {
+                            app.load_shared_folders();
+                            app.selected_menu_item = 0;
+                            app.push_screen(Screen::SharedFolders);
                         }
                         MenuAction::MultiGpuPassthrough => {
                             // Load PCI devices for multi-GPU setup
@@ -1338,6 +1351,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
     let title_prefix = match app.file_browser_mode {
         FileBrowserMode::Iso => "Select ISO",
         FileBrowserMode::Disk => "Select Disk Image",
+        FileBrowserMode::Directory => "Select Directory",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -1374,6 +1388,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         let msg_text = match app.file_browser_mode {
             FileBrowserMode::Iso => "No ISO files found in this directory.",
             FileBrowserMode::Disk => "No disk images found in this directory.",
+            FileBrowserMode::Directory => "No subdirectories in this directory.",
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
             .style(Style::default().fg(Color::DarkGray))
@@ -1385,7 +1400,13 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
     let items: Vec<ListItem> = app.file_browser_entries
         .iter()
         .map(|entry| {
-            let prefix = if entry.is_dir { "📁 " } else { "💿 " };
+            let prefix = if entry.name == "[Select This Directory]" {
+                ">> "
+            } else if entry.is_dir {
+                "📁 "
+            } else {
+                "💿 "
+            };
             ListItem::new(format!("{}{}", prefix, entry.name))
         })
         .collect();
@@ -1439,6 +1460,11 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                             state.existing_disk_path = Some(selected_path);
                         }
                         app.pop_screen(); // Close file browser, return to disk config step
+                    }
+                    FileBrowserMode::Directory => {
+                        // Directory selected (from [Select This Directory] entry)
+                        app.add_shared_folder(selected_path.to_string_lossy().to_string());
+                        app.pop_screen(); // Return to SharedFolders screen
                     }
                 }
             }

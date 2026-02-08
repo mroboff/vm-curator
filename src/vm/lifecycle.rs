@@ -540,7 +540,17 @@ fn generate_usb_section(devices: &[UsbPassthrough]) -> String {
 }
 
 fn insert_usb_section(content: &str, usb_section: &str) -> String {
-    if usb_section.is_empty() {
+    insert_args_section(content, usb_section, "$USB_PASSTHROUGH_ARGS")
+}
+
+/// Generic function to insert a variable-definition section into a launch script
+/// and append `$VAR_NAME` to all QEMU command endings.
+///
+/// The section is inserted at the top-level scope: before a `case` statement if
+/// one exists, otherwise before the first QEMU command. This ensures the variable
+/// is visible to all branches.
+pub fn insert_args_section(content: &str, section: &str, var_ref: &str) -> String {
+    if section.is_empty() {
         return content.to_string();
     }
 
@@ -579,29 +589,36 @@ fn insert_usb_section(content: &str, usb_section: &str) -> String {
     // Track which end lines we need to modify
     let qemu_end_indices: std::collections::HashSet<usize> = qemu_commands.iter().map(|(_, end)| *end).collect();
 
-    // Get the first QEMU command start for inserting the section
+    // Determine where to insert the section: before a `case` statement if present
+    // (so the variable is in top-level scope), otherwise before the first QEMU command.
+    let case_line = lines.iter().position(|l| {
+        let trimmed = l.trim();
+        trimmed.starts_with("case ") && !trimmed.starts_with('#')
+    });
     let first_qemu_start = qemu_commands.first().map(|(start, _)| *start);
+    let insert_before = case_line.or(first_qemu_start);
 
     for (i, line) in lines.iter().enumerate() {
-        // Insert USB section before the FIRST qemu command
-        if Some(i) == first_qemu_start && !inserted_section {
-            result.push_str(usb_section);
+        // Insert section at the chosen insertion point
+        if Some(i) == insert_before && !inserted_section {
+            result.push_str(section);
             result.push('\n');
             inserted_section = true;
         }
 
-        // Modify ALL QEMU command endings to include $USB_PASSTHROUGH_ARGS
+        // Modify ALL QEMU command endings to include the variable reference
         if qemu_end_indices.contains(&i) {
             let trimmed = line.trim_end();
-            // Add $USB_PASSTHROUGH_ARGS before any trailing comment
             if let Some(comment_pos) = trimmed.find(" #") {
                 let (cmd, comment) = trimmed.split_at(comment_pos);
                 result.push_str(cmd);
-                result.push_str(" $USB_PASSTHROUGH_ARGS");
+                result.push(' ');
+                result.push_str(var_ref);
                 result.push_str(comment);
             } else {
                 result.push_str(trimmed);
-                result.push_str(" $USB_PASSTHROUGH_ARGS");
+                result.push(' ');
+                result.push_str(var_ref);
             }
             result.push('\n');
             continue;
@@ -613,13 +630,13 @@ fn insert_usb_section(content: &str, usb_section: &str) -> String {
         }
     }
 
-    // If we didn't find a qemu line, append at the end
+    // If we didn't find a suitable insertion point, append at the end
     if !inserted_section {
         if !result.ends_with('\n') {
             result.push('\n');
         }
         result.push('\n');
-        result.push_str(usb_section);
+        result.push_str(section);
     }
 
     // Ensure file ends with newline
@@ -690,6 +707,220 @@ fn extract_hex_value(s: &str, prefix: &str) -> Option<u16> {
     u16::from_str_radix(hex_str, 16).ok()
 }
 
+// Shared Folders section markers
+const SHARED_FOLDERS_MARKER_START: &str = "# >>> Shared Folders (managed by vm-curator) >>>";
+const SHARED_FOLDERS_MARKER_END: &str = "# <<< Shared Folders <<<";
+
+/// A shared folder configuration for virtio-9p host-to-guest file sharing
+#[derive(Debug, Clone)]
+pub struct SharedFolder {
+    pub host_path: String,
+    pub mount_tag: String,
+}
+
+/// Escape a string for safe use in shell scripts
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/')
+    {
+        return s.to_string();
+    }
+    let escaped = s.replace('\'', "'\\''");
+    format!("'{}'", escaped)
+}
+
+/// Save shared folders configuration to the VM's launch.sh
+pub fn save_shared_folders(vm: &DiscoveredVm, folders: &[SharedFolder]) -> Result<()> {
+    let script_path = &vm.launch_script;
+    let content =
+        std::fs::read_to_string(script_path).context("Failed to read launch.sh")?;
+
+    // Remove existing shared folders section if present
+    let content = remove_shared_folders_section(&content);
+
+    // Determine device name based on architecture
+    let device_name = if vm
+        .config
+        .emulator
+        .command()
+        .contains("aarch64")
+        || vm.config.emulator.command().contains("arm")
+    {
+        "virtio-9p-device"
+    } else {
+        "virtio-9p-pci"
+    };
+
+    // Generate new shared folders section
+    let section = generate_shared_folders_section(folders, device_name);
+
+    // Insert into script
+    let new_content = insert_shared_folders_section(&content, &section);
+
+    std::fs::write(script_path, new_content).context("Failed to write launch.sh")?;
+
+    Ok(())
+}
+
+/// Load shared folders configuration from the VM's launch.sh
+pub fn load_shared_folders(vm: &DiscoveredVm) -> Vec<SharedFolder> {
+    let content = match std::fs::read_to_string(&vm.launch_script) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    parse_shared_folders_section(&content)
+}
+
+fn remove_shared_folders_section(content: &str) -> String {
+    let mut result = String::new();
+    let mut in_section = false;
+
+    for line in content.lines() {
+        if line.trim() == SHARED_FOLDERS_MARKER_START {
+            in_section = true;
+            continue;
+        }
+        if line.trim() == SHARED_FOLDERS_MARKER_END {
+            in_section = false;
+            continue;
+        }
+        if !in_section {
+            let cleaned_line = line
+                .replace(" $SHARED_FOLDERS_ARGS", "")
+                .replace("$SHARED_FOLDERS_ARGS ", "")
+                .replace("$SHARED_FOLDERS_ARGS", "");
+            result.push_str(&cleaned_line);
+            result.push('\n');
+        }
+    }
+
+    // Remove trailing empty lines that may have accumulated
+    while result.ends_with("\n\n") {
+        result.pop();
+    }
+
+    result
+}
+
+fn generate_shared_folders_section(folders: &[SharedFolder], device_name: &str) -> String {
+    if folders.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::new();
+    section.push_str(SHARED_FOLDERS_MARKER_START);
+    section.push('\n');
+    section.push_str("SHARED_FOLDERS_ARGS=\"");
+
+    for (i, folder) in folders.iter().enumerate() {
+        let id = format!("fsdev{}", i);
+        let escaped_path = shell_escape(&folder.host_path);
+
+        if i > 0 {
+            section.push(' ');
+        }
+        section.push_str(&format!(
+            "-fsdev local,id={},path={},security_model=mapped-xattr -device {},fsdev={},mount_tag={}",
+            id, escaped_path, device_name, id, folder.mount_tag
+        ));
+    }
+
+    section.push_str("\"\n");
+    section.push_str(SHARED_FOLDERS_MARKER_END);
+    section.push('\n');
+
+    section
+}
+
+fn insert_shared_folders_section(content: &str, section: &str) -> String {
+    insert_args_section(content, section, "$SHARED_FOLDERS_ARGS")
+}
+
+fn parse_shared_folders_section(content: &str) -> Vec<SharedFolder> {
+    let mut folders = Vec::new();
+    let mut in_section = false;
+
+    for line in content.lines() {
+        if line.trim() == SHARED_FOLDERS_MARKER_START {
+            in_section = true;
+            continue;
+        }
+        if line.trim() == SHARED_FOLDERS_MARKER_END {
+            in_section = false;
+            continue;
+        }
+        if in_section && line.contains("SHARED_FOLDERS_ARGS=") {
+            // Parse -fsdev local,id=...,path=...,security_model=... -device ...,mount_tag=...
+            // Split on "-fsdev " to get each folder pair
+            for part in line.split("-fsdev ") {
+                if !part.contains("path=") {
+                    continue;
+                }
+                let host_path = extract_path_value(part);
+                let mount_tag = extract_simple_value(part, "mount_tag=");
+
+                if let (Some(path), Some(tag)) = (host_path, mount_tag) {
+                    folders.push(SharedFolder {
+                        host_path: path,
+                        mount_tag: tag,
+                    });
+                }
+            }
+        }
+    }
+
+    folders
+}
+
+/// Extract a path value from a -fsdev argument, handling shell quoting
+fn extract_path_value(s: &str) -> Option<String> {
+    let start = s.find("path=")? + 5;
+    let rest = &s[start..];
+
+    if rest.starts_with('\'') {
+        // Single-quoted path: find matching closing quote (handle escaped quotes)
+        let inner = &rest[1..];
+        let mut result = String::new();
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c == '\'' {
+                // Check for escaped quote pattern: '\''
+                if chars.as_str().starts_with("\\''") {
+                    result.push('\'');
+                    chars.next(); // skip backslash
+                    chars.next(); // skip first quote
+                } else {
+                    break;
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        Some(result)
+    } else {
+        // Unquoted path: ends at comma or space
+        let end = rest
+            .find(|c: char| c == ',' || c == ' ' || c == '"')
+            .unwrap_or(rest.len());
+        Some(rest[..end].to_string())
+    }
+}
+
+/// Extract a simple key=value from a string
+fn extract_simple_value(s: &str, prefix: &str) -> Option<String> {
+    let start = s.find(prefix)? + prefix.len();
+    let rest = &s[start..];
+    let end = rest
+        .find(|c: char| c == ',' || c == ' ' || c == '"' || c == '\'')
+        .unwrap_or(rest.len());
+    let value = rest[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 // PCI Passthrough section markers
 const PCI_MARKER_START: &str = "# >>> PCI Passthrough (managed by vm-curator) >>>";
 const PCI_MARKER_END: &str = "# <<< PCI Passthrough <<<";
@@ -743,4 +974,181 @@ fn parse_pci_section(content: &str) -> Vec<String> {
     }
 
     args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_shared_folders_section_empty() {
+        let section = generate_shared_folders_section(&[], "virtio-9p-pci");
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn test_generate_shared_folders_section_single() {
+        let folders = vec![SharedFolder {
+            host_path: "/home/user/Documents".to_string(),
+            mount_tag: "host_documents".to_string(),
+        }];
+        let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+        assert!(section.contains(SHARED_FOLDERS_MARKER_START));
+        assert!(section.contains(SHARED_FOLDERS_MARKER_END));
+        assert!(section.contains("path=/home/user/Documents"));
+        assert!(section.contains("mount_tag=host_documents"));
+        assert!(section.contains("virtio-9p-pci"));
+        assert!(section.contains("fsdev0"));
+    }
+
+    #[test]
+    fn test_generate_shared_folders_section_multiple() {
+        let folders = vec![
+            SharedFolder {
+                host_path: "/home/user/Documents".to_string(),
+                mount_tag: "host_documents".to_string(),
+            },
+            SharedFolder {
+                host_path: "/home/user/Downloads".to_string(),
+                mount_tag: "host_downloads".to_string(),
+            },
+        ];
+        let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+        assert!(section.contains("fsdev0"));
+        assert!(section.contains("fsdev1"));
+        assert!(section.contains("mount_tag=host_documents"));
+        assert!(section.contains("mount_tag=host_downloads"));
+    }
+
+    #[test]
+    fn test_generate_shared_folders_section_arm() {
+        let folders = vec![SharedFolder {
+            host_path: "/tmp/share".to_string(),
+            mount_tag: "host_share".to_string(),
+        }];
+        let section = generate_shared_folders_section(&folders, "virtio-9p-device");
+        assert!(section.contains("virtio-9p-device"));
+        assert!(!section.contains("virtio-9p-pci"));
+    }
+
+    #[test]
+    fn test_generate_shared_folders_section_path_with_spaces() {
+        let folders = vec![SharedFolder {
+            host_path: "/home/user/My Documents".to_string(),
+            mount_tag: "host_my_documents".to_string(),
+        }];
+        let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+        assert!(section.contains("'/home/user/My Documents'"));
+    }
+
+    #[test]
+    fn test_parse_shared_folders_section() {
+        let content = format!(
+            "{}\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path=/home/user/docs,security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_docs\"\n{}\n",
+            SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
+        );
+        let folders = parse_shared_folders_section(&content);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].host_path, "/home/user/docs");
+        assert_eq!(folders[0].mount_tag, "host_docs");
+    }
+
+    #[test]
+    fn test_parse_shared_folders_section_quoted_path() {
+        let content = format!(
+            "{}\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path='/home/user/My Documents',security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents\"\n{}\n",
+            SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
+        );
+        let folders = parse_shared_folders_section(&content);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].host_path, "/home/user/My Documents");
+        assert_eq!(folders[0].mount_tag, "host_my_documents");
+    }
+
+    #[test]
+    fn test_parse_shared_folders_section_multiple() {
+        let content = format!(
+            "{}\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path=/home/a,security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=tag_a -fsdev local,id=fsdev1,path=/home/b,security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev1,mount_tag=tag_b\"\n{}\n",
+            SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
+        );
+        let folders = parse_shared_folders_section(&content);
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].host_path, "/home/a");
+        assert_eq!(folders[0].mount_tag, "tag_a");
+        assert_eq!(folders[1].host_path, "/home/b");
+        assert_eq!(folders[1].mount_tag, "tag_b");
+    }
+
+    #[test]
+    fn test_remove_shared_folders_section() {
+        let content = "#!/bin/bash\n# >>> Shared Folders (managed by vm-curator) >>>\nSHARED_FOLDERS_ARGS=\"...\"\n# <<< Shared Folders <<<\nqemu-system-x86_64 $SHARED_FOLDERS_ARGS\n";
+        let result = remove_shared_folders_section(content);
+        assert!(!result.contains("SHARED_FOLDERS"));
+        assert!(!result.contains(">>> Shared Folders"));
+        assert!(result.contains("qemu-system-x86_64"));
+    }
+
+    #[test]
+    fn test_insert_shared_folders_section_simple() {
+        let content = "#!/bin/bash\nqemu-system-x86_64 -m 2048\n";
+        let section = "# >>> Shared Folders (managed by vm-curator) >>>\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path=/tmp,security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_tmp\"\n# <<< Shared Folders <<<\n";
+        let result = insert_shared_folders_section(content, section);
+        assert!(result.contains(SHARED_FOLDERS_MARKER_START));
+        assert!(result.contains("$SHARED_FOLDERS_ARGS"));
+        // Section should appear before QEMU command
+        let marker_pos = result.find(SHARED_FOLDERS_MARKER_START).unwrap();
+        let qemu_pos = result.find("qemu-system-x86_64").unwrap();
+        assert!(marker_pos < qemu_pos);
+    }
+
+    #[test]
+    fn test_insert_section_before_case_statement() {
+        // Scripts with case statements need the variable defined BEFORE the case,
+        // not inside a branch (otherwise other branches can't see it).
+        let content = "#!/bin/bash\nVM_DIR=\".\"\ncase \"$1\" in\n    --install)\n        qemu-system-x86_64 -m 2048\n        ;;\n    \"\")\n        qemu-system-x86_64 -m 2048\n        ;;\nesac\n";
+        let section = "# >>> Shared Folders (managed by vm-curator) >>>\nSHARED_FOLDERS_ARGS=\"test\"\n# <<< Shared Folders <<<\n";
+        let result = insert_shared_folders_section(content, section);
+
+        // Section must appear before the case statement
+        let marker_pos = result.find(SHARED_FOLDERS_MARKER_START).unwrap();
+        let case_pos = result.find("case \"$1\"").unwrap();
+        assert!(marker_pos < case_pos, "Section must be before case statement, got marker at {} and case at {}", marker_pos, case_pos);
+
+        // Both QEMU commands should have $SHARED_FOLDERS_ARGS appended
+        let count = result.matches("$SHARED_FOLDERS_ARGS").count();
+        assert_eq!(count, 2, "Expected 2 appended refs (one per QEMU command), got {}", count);
+    }
+
+    #[test]
+    fn test_roundtrip_shared_folders() {
+        let folders = vec![
+            SharedFolder {
+                host_path: "/home/user/Documents".to_string(),
+                mount_tag: "host_documents".to_string(),
+            },
+            SharedFolder {
+                host_path: "/home/user/My Pictures".to_string(),
+                mount_tag: "host_my_pictures".to_string(),
+            },
+        ];
+        let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+        let parsed = parse_shared_folders_section(&section);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].host_path, "/home/user/Documents");
+        assert_eq!(parsed[0].mount_tag, "host_documents");
+        assert_eq!(parsed[1].host_path, "/home/user/My Pictures");
+        assert_eq!(parsed[1].mount_tag, "host_my_pictures");
+    }
+
+    #[test]
+    fn test_shell_escape_safe() {
+        assert_eq!(shell_escape("/home/user/docs"), "/home/user/docs");
+        assert_eq!(shell_escape("my-file_name.txt"), "my-file_name.txt");
+    }
+
+    #[test]
+    fn test_shell_escape_special() {
+        assert_eq!(shell_escape("/home/user/My Documents"), "'/home/user/My Documents'");
+        assert_eq!(shell_escape("path with spaces"), "'path with spaces'");
+    }
 }
