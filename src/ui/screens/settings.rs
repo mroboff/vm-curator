@@ -150,7 +150,7 @@ impl SettingsItem {
     /// Get cycle options for this setting
     pub fn cycle_options(&self) -> Option<&'static [&'static str]> {
         match self {
-            SettingsItem::DefaultDisplay => Some(&["gtk", "sdl", "spice"]),
+            SettingsItem::DefaultDisplay => Some(&["gtk", "sdl", "spice-app"]),
             _ => None,
         }
     }

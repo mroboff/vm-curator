@@ -1542,7 +1542,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
 const VGA_OPTIONS: &[&str] = &["std", "virtio", "qxl", "cirrus", "vmware", "none"];
 const NETWORK_OPTIONS: &[&str] = &["virtio", "e1000", "rtl8139", "ne2k_pci", "pcnet", "none"];
 const DISK_INTERFACE_OPTIONS: &[&str] = &["virtio", "ide", "sata", "scsi"];
-const DISPLAY_OPTIONS: &[&str] = &["gtk", "sdl", "spice", "vnc"];
+const DISPLAY_OPTIONS: &[&str] = &["gtk", "sdl", "spice-app", "vnc"];
 const AUDIO_OPTIONS: &[(&str, &[&str])] = &[
     ("Intel HDA", &["intel-hda", "hda-duplex"]),
     ("AC97", &["ac97"]),
@@ -1913,7 +1913,7 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             "Display output for {}.\n\n\
             gtk: Native Linux window\n\
             sdl: Cross-platform\n\
-            spice: Remote + features\n\
+            spice-app: SPICE protocol (needs virt-viewer)\n\
             vnc: Remote access only",
             os_name
         ),
@@ -2067,6 +2067,14 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Left | KeyCode::Right => {
             let delta = if key.code == KeyCode::Right { 1i32 } else { -1i32 };
             handle_qemu_field_change(app, delta);
+            // Show warning if spice-app selected without viewer
+            if let Some(ref state) = app.wizard_state {
+                if state.qemu_config.display.contains("spice")
+                    && !crate::commands::qemu_system::is_spice_viewer_available()
+                {
+                    app.set_status("Warning: spice-app requires virt-viewer/remote-viewer to be installed");
+                }
+            }
         }
         KeyCode::Char(' ') => {
             // Toggle for boolean fields
@@ -2109,6 +2117,12 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
 }
 
 fn handle_qemu_field_change(app: &mut App, delta: i32) {
+    // Get dynamic display options based on the current emulator
+    let emulator = app.wizard_state.as_ref()
+        .map(|s| s.qemu_config.emulator.clone())
+        .unwrap_or_else(|| "qemu-system-x86_64".to_string());
+    let dynamic_display_options = app.get_display_options_for_emulator(&emulator);
+
     let Some(ref mut state) = app.wizard_state else { return };
     let field = QemuField::from_index(state.field_focus);
 
@@ -2135,7 +2149,13 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
             cycle_option(&mut state.qemu_config.disk_interface, DISK_INTERFACE_OPTIONS, delta);
         }
         QemuField::Display => {
-            cycle_option(&mut state.qemu_config.display, DISPLAY_OPTIONS, delta);
+            // Use dynamic options from detected capabilities
+            let display_strs: Vec<&str> = dynamic_display_options.iter().map(|s| s.as_str()).collect();
+            if !display_strs.is_empty() {
+                cycle_option(&mut state.qemu_config.display, &display_strs, delta);
+            } else {
+                cycle_option(&mut state.qemu_config.display, DISPLAY_OPTIONS, delta);
+            }
         }
         // Toggles use space, not left/right
         _ => {}

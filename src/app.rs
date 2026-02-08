@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
@@ -621,6 +622,8 @@ pub struct App {
     pub settings_edit_buffer: String,
     /// GPU passthrough validation result for settings screen
     pub settings_gpu_validation: Option<crate::ui::screens::settings::GpuValidationResult>,
+    /// Cached display capabilities per emulator (populated at startup)
+    pub display_capabilities: HashMap<String, Vec<String>>,
 
     // === Single GPU Passthrough ===
     /// Single GPU passthrough configuration
@@ -694,11 +697,20 @@ impl App {
         let user_help_path = config_dir.join("settings_help.toml");
         settings_help.load_user_overrides(&user_help_path);
 
-        // Step 6: Build visual order
+        // Step 6: Build visual order and detect display capabilities
         progress(6, TOTAL_STEPS, "Building VM list...");
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
         let visual_order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata);
         let (background_tx, background_rx) = mpsc::channel();
+
+        // Detect display capabilities for each available emulator
+        let mut display_capabilities = HashMap::new();
+        for emulator in crate::commands::qemu_system::list_available_emulators() {
+            let displays = crate::commands::qemu_system::get_supported_displays(&emulator);
+            if !displays.is_empty() {
+                display_capabilities.insert(emulator, displays);
+            }
+        }
 
         Ok(Self {
             screen: Screen::MainMenu,
@@ -748,12 +760,44 @@ impl App {
             settings_editing: false,
             settings_edit_buffer: String::new(),
             settings_gpu_validation: None,
+            display_capabilities,
 
             // Single GPU Passthrough
             single_gpu_config: None,
             single_gpu_selected_field: 0,
             single_gpu_show_instructions: false,
         })
+    }
+
+    /// Get display options for an emulator, filtered and ordered.
+    ///
+    /// Returns detected display backends for the emulator, preferring `spice-app`
+    /// over `spice`. Falls back to a default list if detection returned nothing.
+    pub fn get_display_options_for_emulator(&self, emulator: &str) -> Vec<String> {
+        // Preferred order of display backends
+        let preferred_order = ["gtk", "sdl", "spice-app", "vnc"];
+
+        if let Some(detected) = self.display_capabilities.get(emulator) {
+            let mut result = Vec::new();
+            // Add backends in preferred order if they were detected
+            for &pref in &preferred_order {
+                if detected.iter().any(|d| d == pref) {
+                    result.push(pref.to_string());
+                }
+            }
+            // Add any remaining detected backends not in preferred order
+            for d in detected {
+                if !result.iter().any(|r| r == d) && d != "spice" && d != "none" {
+                    result.push(d.clone());
+                }
+            }
+            if !result.is_empty() {
+                return result;
+            }
+        }
+
+        // Fallback: default list
+        preferred_order.iter().map(|s| s.to_string()).collect()
     }
 
     /// Get the currently selected VM

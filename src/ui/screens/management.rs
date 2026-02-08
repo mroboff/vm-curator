@@ -77,7 +77,7 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     items.extend([
         MenuItem {
             name: "Change Display",
-            description: "GTK, SDL, SPICE, or VNC output",
+            description: "GTK, SDL, SPICE-app, or VNC output",
             action: MenuAction::ChangeDisplay,
         },
         MenuItem {
@@ -122,13 +122,33 @@ pub fn menu_item_count(app: &App) -> usize {
     }
 }
 
-/// Display options available for VMs
-pub const DISPLAY_OPTIONS: &[(&str, &str)] = &[
+/// Default display options for VMs (used as fallback descriptions)
+const DISPLAY_OPTIONS: &[(&str, &str)] = &[
     ("gtk", "GTK - Default windowed display"),
     ("sdl", "SDL - Better for 3D acceleration"),
-    ("spice", "SPICE - Remote desktop protocol"),
+    ("spice-app", "SPICE - Remote desktop (needs virt-viewer)"),
     ("vnc", "VNC - Network accessible display"),
 ];
+
+/// Get dynamic display options based on detected emulator capabilities.
+/// Falls back to DISPLAY_OPTIONS if detection is not available.
+pub fn get_display_options(app: &App) -> Vec<(String, String)> {
+    // Get the emulator for the currently selected VM
+    let emulator = app.selected_vm()
+        .map(|vm| vm.config.emulator.command())
+        .unwrap_or("qemu-system-x86_64");
+
+    let detected = app.get_display_options_for_emulator(emulator);
+
+    // Map detected backends to (name, description) pairs using DISPLAY_OPTIONS for descriptions
+    detected.iter().map(|backend| {
+        let desc = DISPLAY_OPTIONS.iter()
+            .find(|(name, _)| *name == backend.as_str())
+            .map(|(_, desc)| desc.to_string())
+            .unwrap_or_else(|| format!("{} display", backend));
+        (backend.clone(), desc)
+    }).collect()
+}
 
 /// Render the management menu
 pub fn render(app: &App, frame: &mut Frame) {
@@ -332,7 +352,9 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
         ])
         .split(h_chunks[1]);
 
-    let items: Vec<ListItem> = DISPLAY_OPTIONS
+    let display_options = get_display_options(app);
+
+    let items: Vec<ListItem> = display_options
         .iter()
         .enumerate()
         .map(|(i, (name, desc))| {

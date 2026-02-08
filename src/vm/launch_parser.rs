@@ -551,13 +551,23 @@ fn extract_network(content: &str) -> Option<NetworkConfig> {
 fn extract_extra_args(content: &str) -> Vec<String> {
     let mut args = Vec::new();
 
-    // Look for display settings
-    if content.contains("-display gtk") {
-        args.push("-display gtk".to_string());
-    } else if content.contains("-display sdl") {
-        args.push("-display sdl".to_string());
-    } else if content.contains("-display vnc") {
-        args.push("-display vnc".to_string());
+    // Look for display settings generically (handles gtk, sdl, vnc, spice-app, etc.)
+    for line in content.lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        if let Some(idx) = line.find("-display ") {
+            let rest = &line[idx + 9..];
+            // Extract the display backend (supports hyphenated names like spice-app)
+            let backend: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '-')
+                .collect();
+            if !backend.is_empty() {
+                args.push(format!("-display {}", backend));
+                break;
+            }
+        }
     }
 
     // Look for USB

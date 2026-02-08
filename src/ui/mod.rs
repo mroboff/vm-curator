@@ -914,12 +914,15 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
 }
 
 fn handle_display_options(app: &mut App, key: KeyEvent) -> Result<()> {
+    let display_options = screens::management::get_display_options(app);
+    let option_count = display_options.len();
+
     match key.code {
         KeyCode::Esc => {
             app.selected_menu_item = 3; // Reset to Change Display position in management menu
             app.pop_screen();
         }
-        KeyCode::Char('j') | KeyCode::Down => app.menu_next(screens::management::DISPLAY_OPTIONS.len()),
+        KeyCode::Char('j') | KeyCode::Down => app.menu_next(option_count),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
         KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
             let item = match key.code {
@@ -930,12 +933,18 @@ fn handle_display_options(app: &mut App, key: KeyEvent) -> Result<()> {
                 _ => app.selected_menu_item,
             };
 
-            if let Some((display_name, _)) = screens::management::DISPLAY_OPTIONS.get(item) {
+            if let Some((display_name, _)) = display_options.get(item) {
+                let display_name = display_name.clone();
                 // Update the display setting in launch.sh
                 if let Some(vm) = app.selected_vm() {
-                    match update_vm_display(&vm.launch_script, display_name) {
+                    match update_vm_display(&vm.launch_script, &display_name) {
                         Ok(()) => {
-                            app.set_status(format!("Display changed to {}", display_name));
+                            // Show spice-app warning if viewer not installed
+                            if display_name.contains("spice") && !crate::commands::qemu_system::is_spice_viewer_available() {
+                                app.set_status(format!("Display changed to {}. Warning: virt-viewer/remote-viewer not found!", display_name));
+                            } else {
+                                app.set_status(format!("Display changed to {}", display_name));
+                            }
                             // Reload the script to reflect changes
                             app.reload_selected_vm_script();
                         }
@@ -958,7 +967,8 @@ fn update_vm_display(script_path: &std::path::Path, new_display: &str) -> Result
     let content = std::fs::read_to_string(script_path)?;
 
     // Regex to match -display with optional gl=on suffix
-    let display_re = Regex::new(r"-display\s+(\w+)(,gl=on)?")?;
+    // Uses [\w-]+ to match hyphenated backends like spice-app
+    let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
 
     let new_content = if display_re.is_match(&content) {
         // Replace existing -display setting, preserving gl=on if present
