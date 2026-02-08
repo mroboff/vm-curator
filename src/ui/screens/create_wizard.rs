@@ -1542,7 +1542,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
 const VGA_OPTIONS: &[&str] = &["std", "virtio", "qxl", "cirrus", "vmware", "none"];
 const NETWORK_OPTIONS: &[&str] = &["virtio", "e1000", "rtl8139", "ne2k_pci", "pcnet", "none"];
 const DISK_INTERFACE_OPTIONS: &[&str] = &["virtio", "ide", "sata", "scsi"];
-const DISPLAY_OPTIONS: &[&str] = &["gtk", "sdl", "spice-app", "vnc"];
+const DISPLAY_OPTIONS: &[&str] = &["gtk", "sdl", "spice-app", "vnc", "none"];
 const AUDIO_OPTIONS: &[(&str, &[&str])] = &[
     ("Intel HDA", &["intel-hda", "hda-duplex"]),
     ("AC97", &["ac97"]),
@@ -1914,7 +1914,8 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             gtk: Native Linux window\n\
             sdl: Cross-platform\n\
             spice-app: SPICE protocol (needs virt-viewer)\n\
-            vnc: Remote access only",
+            vnc: Remote access only\n\
+            none: Headless, no graphical output",
             os_name
         ),
         QemuField::Kvm => "KVM hardware acceleration.\n\n\

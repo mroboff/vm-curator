@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::hardware::{MultiGpuPassthroughStatus, PciDevice, SingleGpuConfig, UsbDevice};
 use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo, QemuProfileStore, SettingsHelpStore, SharedFoldersHelpStore};
 use crate::ui::widgets::build_visual_order;
-use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, SharedFolder, Snapshot};
+use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, QemuProcess, SharedFolder, Snapshot};
 
 /// Application screens/views
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +82,8 @@ pub enum ConfirmAction {
     DeleteSnapshot(String),
     RestoreSnapshot(String),
     DiscardScriptChanges,
+    StopVm,
+    ForceStopVm,
 }
 
 /// Input mode for text entry
@@ -634,6 +636,14 @@ pub struct App {
     /// Cached display capabilities per emulator (populated at startup)
     pub display_capabilities: HashMap<String, Vec<String>>,
 
+    // === VM Process Monitoring ===
+    /// Receives QEMU process info from background detection thread
+    pub vm_status_rx: Receiver<Vec<QemuProcess>>,
+    /// Map of vm_id -> PID for currently running VMs
+    pub running_vms: HashMap<String, u32>,
+    /// Map of vm_id -> when SIGTERM was sent (for force-stop timeout)
+    pub stopping_vms: HashMap<String, Instant>,
+
     // === Single GPU Passthrough ===
     /// Single GPU passthrough configuration
     pub single_gpu_config: Option<SingleGpuConfig>,
@@ -725,6 +735,18 @@ impl App {
             }
         }
 
+        // Spawn background VM status detection thread
+        let (vm_status_tx, vm_status_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let processes = crate::vm::detect_qemu_processes();
+                if vm_status_tx.send(processes).is_err() {
+                    break; // Receiver dropped (app exited)
+                }
+            }
+        });
+
         Ok(Self {
             screen: Screen::MainMenu,
             screen_stack: Vec::new(),
@@ -778,6 +800,11 @@ impl App {
             settings_gpu_validation: None,
             display_capabilities,
 
+            // VM Process Monitoring
+            vm_status_rx,
+            running_vms: HashMap::new(),
+            stopping_vms: HashMap::new(),
+
             // Single GPU Passthrough
             single_gpu_config: None,
             single_gpu_selected_field: 0,
@@ -791,7 +818,7 @@ impl App {
     /// over `spice`. Falls back to a default list if detection returned nothing.
     pub fn get_display_options_for_emulator(&self, emulator: &str) -> Vec<String> {
         // Preferred order of display backends
-        let preferred_order = ["gtk", "sdl", "spice-app", "vnc"];
+        let preferred_order = ["gtk", "sdl", "spice-app", "vnc", "none"];
 
         if let Some(detected) = self.display_capabilities.get(emulator) {
             let mut result = Vec::new();
@@ -803,7 +830,7 @@ impl App {
             }
             // Add any remaining detected backends not in preferred order
             for d in detected {
-                if !result.iter().any(|r| r == d) && d != "spice" && d != "none" {
+                if !result.iter().any(|r| r == d) && d != "spice" {
                     result.push(d.clone());
                 }
             }
@@ -1151,6 +1178,57 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Non-blocking check for VM status updates from background thread.
+    /// Consumes all pending messages, keeping only the latest result.
+    pub fn check_vm_status(&mut self) {
+        let mut latest = None;
+        while let Ok(processes) = self.vm_status_rx.try_recv() {
+            latest = Some(processes);
+        }
+        if let Some(processes) = latest {
+            self.running_vms = self.match_running_vms(&processes);
+            // Clean up stopping_vms for VMs that have actually stopped
+            self.stopping_vms.retain(|id, _| self.running_vms.contains_key(id));
+        }
+    }
+
+    /// Match QEMU processes against known VMs using the process working directory.
+    ///
+    /// Launch scripts run QEMU from the VM's directory, so /proc/<pid>/cwd
+    /// reliably identifies which VM a process belongs to — unlike disk filenames
+    /// which are often generic (e.g., "disk.qcow2").
+    fn match_running_vms(&self, processes: &[QemuProcess]) -> HashMap<String, u32> {
+        let mut result = HashMap::new();
+        for vm in &self.vms {
+            for proc in processes {
+                if let Some(ref cwd) = proc.cwd {
+                    // cwd is available — use it as the authoritative match
+                    if cwd == &vm.path {
+                        result.insert(vm.id.clone(), proc.pid);
+                        break;
+                    }
+                } else {
+                    // No cwd available (permissions?) — fall back to full disk path in cmdline
+                    if let Some(disk) = vm.config.primary_disk() {
+                        if let Some(disk_path_str) = disk.path.to_str() {
+                            if !disk_path_str.is_empty() && proc.cmdline.contains(disk_path_str) {
+                                result.insert(vm.id.clone(), proc.pid);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Get PID of the currently selected VM if it's running.
+    pub fn selected_vm_pid(&self) -> Option<u32> {
+        let vm = self.selected_vm()?;
+        self.running_vms.get(&vm.id).copied()
     }
 
     /// Load file browser entries for current directory

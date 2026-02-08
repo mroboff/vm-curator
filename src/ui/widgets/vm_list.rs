@@ -6,7 +6,8 @@ use ratatui::{
 use crate::app::App;
 use crate::metadata::{HierarchyConfig, MetadataStore, SortBy};
 use crate::vm::DiscoveredVm;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::time::Instant;
 
 /// Build the visual order of VMs based on hierarchy (used for navigation)
 /// Returns a Vec where index is visual position and value is filtered_idx
@@ -85,6 +86,8 @@ pub struct VmListWidget<'a> {
     pub selected: usize,
     pub hierarchy: &'a HierarchyConfig,
     pub metadata: &'a crate::metadata::MetadataStore,
+    pub running_vms: &'a HashMap<String, u32>,
+    pub stopping_vms: &'a HashMap<String, Instant>,
 }
 
 impl<'a> VmListWidget<'a> {
@@ -96,6 +99,8 @@ impl<'a> VmListWidget<'a> {
             selected: app.selected_vm,
             hierarchy: &app.hierarchy,
             metadata: &app.metadata,
+            running_vms: &app.running_vms,
+            stopping_vms: &app.stopping_vms,
         }
     }
 
@@ -109,8 +114,11 @@ impl<'a> VmListWidget<'a> {
         // Build hierarchical structure
         let vm_hierarchy = build_vm_hierarchy(self.vms, self.filtered_indices, self.hierarchy, self.metadata);
 
+        // Available width for list items: area minus borders minus highlight symbol ("→ ")
+        let inner_width = area.width.saturating_sub(2 + 3) as usize;
+
         // Render as tree with proper indices
-        let (items, index_map) = render_hierarchy_items(&vm_hierarchy, self.hierarchy, self.metadata);
+        let (items, index_map) = render_hierarchy_items(&vm_hierarchy, self.hierarchy, self.metadata, self.running_vms, self.stopping_vms, inner_width);
 
         // Get the filtered_idx for the currently selected visual position
         let selected_filtered_idx = self.visual_order.get(self.selected).copied();
@@ -242,6 +250,9 @@ fn render_hierarchy_items<'a>(
     vm_hierarchy: &BTreeMap<String, BTreeMap<String, Vec<VmEntry<'a>>>>,
     hierarchy: &'a HierarchyConfig,
     metadata: &crate::metadata::MetadataStore,
+    running_vms: &HashMap<String, u32>,
+    stopping_vms: &HashMap<String, Instant>,
+    inner_width: usize,
 ) -> (Vec<ListItem<'a>>, Vec<Option<usize>>) {
     let mut items = Vec::new();
     let mut index_map: Vec<Option<usize>> = Vec::new();
@@ -291,16 +302,28 @@ fn render_hierarchy_items<'a>(
                         // Get display name from metadata
                         let display_name = get_display_name(entry.vm, metadata);
 
-                        items.push(ListItem::new(Line::from(vec![
-                            Span::styled(
-                                format!("  {}{} ", subcat_cont, vm_branch),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                            Span::styled(
-                                display_name,
-                                Style::default().fg(Color::White),
-                            ),
-                        ])));
+                        let is_stopping = stopping_vms.contains_key(&entry.vm.id);
+                        let is_running = running_vms.contains_key(&entry.vm.id);
+
+                        let prefix = format!("  {}{} ", subcat_cont, vm_branch);
+                        // +2 for the indicator "●" and its leading space
+                        let used_width = prefix.len() + display_name.len();
+
+                        if is_stopping || is_running {
+                            let padding = inner_width.saturating_sub(used_width + 2);
+                            let color = if is_stopping { Color::Yellow } else { Color::Green };
+                            items.push(ListItem::new(Line::from(vec![
+                                Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                                Span::styled(display_name, Style::default().fg(Color::White)),
+                                Span::raw(" ".repeat(padding)),
+                                Span::styled(" \u{25cf}", Style::default().fg(color)),
+                            ])));
+                        } else {
+                            items.push(ListItem::new(Line::from(vec![
+                                Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                                Span::styled(display_name, Style::default().fg(Color::White)),
+                            ])));
+                        }
                         index_map.push(Some(entry.filtered_idx));
                     }
                 }

@@ -407,23 +407,74 @@ pub fn rename_vm(vm: &DiscoveredVm, new_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check if a VM is currently running (basic check via process list)
-pub fn is_vm_running(vm: &DiscoveredVm) -> bool {
-    // Try to find a QEMU process with this VM's disk
-    if let Some(disk) = vm.config.primary_disk() {
-        let disk_name = disk.path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+/// A running QEMU process with its PID, command line, and working directory.
+pub struct QemuProcess {
+    pub pid: u32,
+    pub cmdline: String,
+    /// The working directory of the process (from /proc/<pid>/cwd)
+    pub cwd: Option<std::path::PathBuf>,
+}
 
-        if let Ok(output) = Command::new("pgrep")
-            .args(["-f", &format!("qemu.*{}", disk_name)])
-            .output()
-        {
-            return output.status.success();
+/// Detect all running QEMU processes.
+/// Returns process info including the working directory read from /proc.
+pub fn detect_qemu_processes() -> Vec<QemuProcess> {
+    let output = match Command::new("pgrep")
+        .args(["-a", "qemu-system"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut processes = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Each line: "12345 qemu-system-x86_64 -m 4096 ..."
+        if let Some(space_pos) = line.find(' ') {
+            if let Ok(pid) = line[..space_pos].parse::<u32>() {
+                let cmdline = line[space_pos + 1..].to_string();
+                // Read the process working directory from /proc
+                let cwd = std::fs::read_link(format!("/proc/{}/cwd", pid)).ok();
+                processes.push(QemuProcess { pid, cmdline, cwd });
+            }
         }
     }
-    false
+    processes
 }
+
+/// Send SIGTERM to a QEMU process (triggers ACPI shutdown in modern QEMU).
+pub fn stop_vm_by_pid(pid: u32) -> Result<()> {
+    let status = Command::new("kill")
+        .arg(pid.to_string())
+        .status()
+        .context("Failed to send SIGTERM")?;
+    if !status.success() {
+        bail!("kill returned non-zero exit code");
+    }
+    Ok(())
+}
+
+/// Force-kill a QEMU process with SIGKILL.
+pub fn force_stop_vm(pid: u32) -> Result<()> {
+    let status = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .context("Failed to send SIGKILL")?;
+    if !status.success() {
+        bail!("kill -9 returned non-zero exit code");
+    }
+    Ok(())
+}
+
+
 
 // USB Passthrough configuration markers
 const USB_MARKER_START: &str = "# >>> USB Passthrough (managed by vm-curator) >>>";
@@ -1150,5 +1201,29 @@ mod tests {
     fn test_shell_escape_special() {
         assert_eq!(shell_escape("/home/user/My Documents"), "'/home/user/My Documents'");
         assert_eq!(shell_escape("path with spaces"), "'path with spaces'");
+    }
+
+    #[test]
+    fn test_detect_qemu_processes_parsing() {
+        // Simulate pgrep -a output parsing logic (same as detect_qemu_processes but without /proc)
+        let output = "12345 qemu-system-x86_64 -m 4096 -drive file=disk.qcow2\n\
+                       67890 qemu-system-aarch64 -m 2048 -hda test.img\n";
+        let mut pids = Vec::new();
+        let mut cmdlines = Vec::new();
+        for line in output.lines() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            if let Some(space_pos) = line.find(' ') {
+                if let Ok(pid) = line[..space_pos].parse::<u32>() {
+                    pids.push(pid);
+                    cmdlines.push(line[space_pos + 1..].to_string());
+                }
+            }
+        }
+        assert_eq!(pids.len(), 2);
+        assert_eq!(pids[0], 12345);
+        assert!(cmdlines[0].contains("disk.qcow2"));
+        assert_eq!(pids[1], 67890);
+        assert!(cmdlines[1].contains("test.img"));
     }
 }

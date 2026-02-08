@@ -7,10 +7,10 @@ use ratatui::prelude::*;
 use ratatui::backend::CrosstermBackend;
 use regex::Regex;
 use std::io::Stdout;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::app::{App, BackgroundResult, ConfirmAction, InputMode, Screen, TextInputContext};
-use crate::vm::{launch_vm_with_error_check, lifecycle::is_vm_running, BootMode};
+use crate::vm::{launch_vm_with_error_check, BootMode};
 use std::thread;
 
 /// Run the TUI application
@@ -23,6 +23,9 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
 
         // Check for background operation results
         app.check_background_results();
+
+        // Check for VM status updates from background thread
+        app.check_vm_status();
 
         // Poll with timeout to allow periodic checks
         if event::poll(Duration::from_millis(100))? {
@@ -184,7 +187,7 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
             app.pop_screen();
 
             if let Some(vm) = app.selected_vm().cloned() {
-                if is_vm_running(&vm) {
+                if app.running_vms.contains_key(&vm.id) {
                     app.set_status(format!("{} is already running", vm.display_name()));
                 } else {
                     let options = app.get_launch_options();
@@ -205,7 +208,7 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
         }
         ConfirmAction::ResetVm => {
             if let Some(vm) = app.selected_vm() {
-                if is_vm_running(vm) {
+                if app.running_vms.contains_key(&vm.id) {
                     app.set_status("Error: Cannot reset VM while it is running. Please shut down the VM first.");
                 } else if let Err(e) = crate::vm::lifecycle::reset_vm(vm) {
                     app.set_status(format!("Error: {}", e));
@@ -230,7 +233,7 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
         }
         ConfirmAction::RestoreSnapshot(name) => {
             if let Some(vm) = app.selected_vm() {
-                if is_vm_running(vm) {
+                if app.running_vms.contains_key(&vm.id) {
                     app.set_status("Error: Cannot restore snapshot while VM is running. Please shut down the VM first.");
                 } else if let Some(disk) = vm.config.primary_disk() {
                     let disk_path = disk.path.clone();
@@ -253,7 +256,7 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
         }
         ConfirmAction::DeleteSnapshot(name) => {
             if let Some(vm) = app.selected_vm() {
-                if is_vm_running(vm) {
+                if app.running_vms.contains_key(&vm.id) {
                     app.set_status("Error: Cannot delete snapshot while VM is running. Please shut down the VM first.");
                 } else if let Some(disk) = vm.config.primary_disk() {
                     let disk_path = disk.path.clone();
@@ -281,6 +284,40 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
             app.script_editor_modified = false;
             app.pop_screen(); // Close confirm dialog
             app.pop_screen(); // Close editor
+        }
+        ConfirmAction::StopVm => {
+            app.pop_screen();
+            if let Some(vm) = app.selected_vm().cloned() {
+                if let Some(pid) = app.running_vms.get(&vm.id).copied() {
+                    match crate::vm::stop_vm_by_pid(pid) {
+                        Ok(()) => {
+                            app.stopping_vms.insert(vm.id.clone(), Instant::now());
+                            app.set_status(format!("Stopping {}...", vm.display_name()));
+                        }
+                        Err(e) => {
+                            app.set_status(format!("Failed to stop {}: {}", vm.display_name(), e));
+                        }
+                    }
+                } else {
+                    app.set_status(format!("{} is not running", vm.display_name()));
+                }
+            }
+        }
+        ConfirmAction::ForceStopVm => {
+            app.pop_screen();
+            if let Some(vm) = app.selected_vm().cloned() {
+                if let Some(pid) = app.running_vms.get(&vm.id).copied() {
+                    match crate::vm::force_stop_vm(pid) {
+                        Ok(()) => {
+                            app.stopping_vms.remove(&vm.id);
+                            app.set_status(format!("Force stopped {}", vm.display_name()));
+                        }
+                        Err(e) => {
+                            app.set_status(format!("Failed to force stop {}: {}", vm.display_name(), e));
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -497,6 +534,26 @@ fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('s') | KeyCode::Char('S') => {
             app.push_screen(Screen::Settings);
         }
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            if let Some(vm) = app.selected_vm().cloned() {
+                if app.selected_vm_pid().is_some() {
+                    if let Some(sent_at) = app.stopping_vms.get(&vm.id) {
+                        if sent_at.elapsed() > Duration::from_secs(10) {
+                            app.push_screen(Screen::Confirm(ConfirmAction::ForceStopVm));
+                        } else {
+                            app.set_status(format!(
+                                "Waiting for {} to shut down... (press x again after 10s to force)",
+                                vm.display_name()
+                            ));
+                        }
+                    } else {
+                        app.push_screen(Screen::Confirm(ConfirmAction::StopVm));
+                    }
+                } else {
+                    app.set_status("VM is not running");
+                }
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -531,6 +588,26 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                 let menu_items = get_menu_items(vm, &app.config);
                 if let Some(item) = menu_items.get(selected_idx) {
                     match item.action {
+                        MenuAction::StopVm => {
+                            if let Some(vm) = app.selected_vm().cloned() {
+                                if app.selected_vm_pid().is_some() {
+                                    if let Some(sent_at) = app.stopping_vms.get(&vm.id) {
+                                        if sent_at.elapsed() > Duration::from_secs(10) {
+                                            app.push_screen(Screen::Confirm(ConfirmAction::ForceStopVm));
+                                        } else {
+                                            app.set_status(format!(
+                                                "Waiting for {} to shut down...",
+                                                vm.display_name()
+                                            ));
+                                        }
+                                    } else {
+                                        app.push_screen(Screen::Confirm(ConfirmAction::StopVm));
+                                    }
+                                } else {
+                                    app.set_status("VM is not running");
+                                }
+                            }
+                        }
                         MenuAction::BootOptions => {
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::BootOptions);
@@ -864,7 +941,7 @@ fn handle_snapshots(app: &mut App, key: KeyEvent) -> Result<()> {
             // Create snapshot - open text input for name
             if let Some(vm) = app.selected_vm() {
                 // Warn if VM is running - snapshot operations on running VMs can cause corruption
-                if is_vm_running(vm) {
+                if app.running_vms.contains_key(&vm.id) {
                     app.set_status("Warning: VM is running. Snapshot may be inconsistent.");
                 }
                 // Pre-fill with timestamp-based suggestion
@@ -1210,6 +1287,18 @@ fn render_confirm(app: &App, action: &ConfirmAction, frame: &mut Frame) {
         }
         ConfirmAction::DiscardScriptChanges => {
             ("Discard Changes", "You have unsaved changes. Discard them?".to_string())
+        }
+        ConfirmAction::StopVm => {
+            let name = app.selected_vm()
+                .map(|vm| vm.display_name())
+                .unwrap_or_else(|| "VM".to_string());
+            ("Stop VM", format!("Stop {}?", name))
+        }
+        ConfirmAction::ForceStopVm => {
+            let name = app.selected_vm()
+                .map(|vm| vm.display_name())
+                .unwrap_or_else(|| "VM".to_string());
+            ("Force Stop VM", format!("Force stop {}? This may cause data loss.", name))
         }
     };
 

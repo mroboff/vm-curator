@@ -38,8 +38,8 @@ pub fn render(frame: &mut Frame) {
         )),
         Line::from(""),
         key_line("m", "Open Management menu"),
-        key_line("c", "View VM Configuration"),
-        key_line("i", "View detailed Info"),
+        key_line("x", "Stop selected VM (graceful shutdown)"),
+        key_line("c", "Create new VM"),
         key_line("/", "Search/filter VMs"),
         Line::from(""),
         Line::from(Span::styled(

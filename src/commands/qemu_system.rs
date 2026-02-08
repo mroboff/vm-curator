@@ -78,7 +78,7 @@ pub fn get_supported_displays(emulator: &str) -> Vec<String> {
         }
         // Each display backend is typically listed on its own line
         let backend = trimmed.split_whitespace().next().unwrap_or("");
-        if !backend.is_empty() && backend != "none" {
+        if !backend.is_empty() {
             displays.push(backend.to_string());
         }
     }

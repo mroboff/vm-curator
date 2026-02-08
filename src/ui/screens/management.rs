@@ -18,6 +18,7 @@ pub struct MenuItem {
 /// Actions that can be performed from the management menu
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
+    StopVm,
     BootOptions,
     Snapshots,
     UsbPassthrough,
@@ -35,6 +36,11 @@ pub enum MenuAction {
 /// Get menu items based on config and VM state
 pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     let mut items = vec![
+        MenuItem {
+            name: "Stop VM",
+            description: "Shut down the running VM (ACPI poweroff)",
+            action: MenuAction::StopVm,
+        },
         MenuItem {
             name: "Boot Options",
             description: "Normal, install, or custom ISO boot",
@@ -134,6 +140,7 @@ const DISPLAY_OPTIONS: &[(&str, &str)] = &[
     ("sdl", "SDL - Better for 3D acceleration"),
     ("spice-app", "SPICE - Remote desktop (needs virt-viewer)"),
     ("vnc", "VNC - Network accessible display"),
+    ("none", "None - Headless, no graphical output"),
 ];
 
 /// Get dynamic display options based on detected emulator capabilities.

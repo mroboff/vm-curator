@@ -91,6 +91,8 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
     let mut hints = vec![
         Span::styled(" [Enter]", Style::default().fg(Color::Yellow)),
         Span::raw(" Launch "),
+        Span::styled(" [x]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Stop "),
         Span::styled(" [m]", Style::default().fg(Color::Yellow)),
         Span::raw(" Manage "),
         Span::styled(" [c]", Style::default().fg(Color::Yellow)),
@@ -105,7 +107,31 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
         Span::raw(" Quit "),
     ];
 
-    // Add status message if present
+    // Show stopping VM status
+    if app.status_message.is_none() {
+        for (id, sent_at) in &app.stopping_vms {
+            let elapsed = sent_at.elapsed().as_secs();
+            let vm_name = app.vms.iter()
+                .find(|vm| &vm.id == id)
+                .map(|vm| vm.display_name())
+                .unwrap_or_else(|| id.clone());
+            hints.clear();
+            if elapsed >= 10 {
+                hints.push(Span::styled(
+                    format!("Stopping {}... (press x to force stop)", vm_name),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else {
+                hints.push(Span::styled(
+                    format!("Stopping {}...", vm_name),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            break; // Show only the first stopping VM
+        }
+    }
+
+    // Add status message if present (overrides everything)
     if let Some(ref msg) = app.status_message {
         hints.clear();
         hints.push(Span::styled(
