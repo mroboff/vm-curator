@@ -675,7 +675,7 @@ fn generate_usb_passthrough_args(devices: &[crate::vm::UsbPassthrough]) -> Strin
 
     // Add xHCI controller if USB 3.0 devices are present
     if has_usb3 {
-        args.push("-device qemu-xhci,id=xhci".to_string());
+        args.push("-device qemu-xhci,id=xhci,p2=8,p3=8".to_string());
     }
 
     // Add each USB device, attaching USB 3.0 devices to xHCI controller

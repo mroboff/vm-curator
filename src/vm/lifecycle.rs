@@ -121,7 +121,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
         // Add xHCI controller if USB 3.0 devices are present
         if has_usb3 {
             args.push("-device".to_string());
-            args.push("qemu-xhci,id=xhci".to_string());
+            args.push("qemu-xhci,id=xhci,p2=8,p3=8".to_string());
         }
 
         // Add each USB device, attaching USB 3.0 devices to xHCI controller
@@ -565,7 +565,7 @@ fn generate_usb_section(devices: &[UsbPassthrough]) -> String {
 
     // Add xHCI controller if USB 3.0 devices are present
     if has_usb3 {
-        section.push_str(" -device qemu-xhci,id=xhci");
+        section.push_str(" -device qemu-xhci,id=xhci,p2=8,p3=8");
     }
 
     // Add each USB device, attaching USB 3.0 devices to xHCI controller

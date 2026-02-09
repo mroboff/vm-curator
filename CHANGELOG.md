@@ -1,5 +1,8 @@
 # Changelog
 
+**v0.3.3**
+- Increase xHCI USB controller ports from 4 to 8 for USB passthrough (supports up to 8 USB 2.0 + 8 USB 3.0 devices)
+
 **v0.3.2**
 - Fix Secure Boot OVMF firmware selection for Windows 11 VMs
 
