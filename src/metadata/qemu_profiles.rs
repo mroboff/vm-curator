@@ -46,7 +46,7 @@ pub struct QemuProfile {
     /// Network adapter model (virtio, e1000, rtl8139, ne2k_pci, pcnet, none)
     pub network_model: String,
 
-    /// Disk interface (virtio, ide, sata, scsi, sd)
+    /// Disk interface (virtio, ide, scsi, sd)
     pub disk_interface: String,
 
     /// Default disk size in gigabytes
