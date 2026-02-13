@@ -1541,7 +1541,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
 /// QEMU field options for cycling through values
 const VGA_OPTIONS: &[&str] = &["std", "virtio", "qxl", "cirrus", "vmware", "none"];
 const NETWORK_OPTIONS: &[&str] = &["virtio", "e1000", "rtl8139", "ne2k_pci", "pcnet", "none"];
-const DISK_INTERFACE_OPTIONS: &[&str] = &["virtio", "ide", "sata", "scsi"];
+const DISK_INTERFACE_OPTIONS: &[&str] = &["virtio", "ide", "scsi"];
 const DISPLAY_OPTIONS: &[&str] = &["gtk", "sdl", "spice-app", "vnc", "none"];
 const AUDIO_OPTIONS: &[(&str, &[&str])] = &[
     ("Intel HDA", &["intel-hda", "hda-duplex"]),
@@ -1993,7 +1993,6 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             "Disk interface for {}.\n\n\
             virtio: Best perf (needs driver)\n\
             ide: Universal compat\n\
-            sata: Modern systems\n\
             scsi: Server workloads",
             os_name
         ),

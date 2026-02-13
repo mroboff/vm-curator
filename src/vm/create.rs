@@ -673,9 +673,16 @@ fn build_qemu_command_with_os(
     }
 
     // Disk (interface escaped to prevent injection)
+    // Map "sata" to "ide" for backwards compatibility — QEMU doesn't support if=sata,
+    // but on Q35 machines, if=ide routes through the AHCI controller (giving SATA behavior)
+    let disk_if = if config.disk_interface == "sata" {
+        "ide"
+    } else {
+        &config.disk_interface
+    };
     args.push(format!(
         "-drive file=\"$DISK\",format=qcow2,if={},index=0,media=disk",
-        shell_escape(&config.disk_interface)
+        shell_escape(disk_if)
     ));
 
     // CD-ROM (for install mode)
