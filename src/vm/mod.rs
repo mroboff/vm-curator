@@ -1,5 +1,6 @@
 pub mod create;
 pub mod discovery;
+pub mod import;
 pub mod launch_parser;
 pub mod lifecycle;
 pub mod qemu_config;

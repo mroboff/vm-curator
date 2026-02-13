@@ -280,7 +280,7 @@ fn handle_existing_disk(
 }
 
 /// Write VM metadata file (vm-curator.toml)
-fn write_vm_metadata(vm_dir: &Path, display_name: &str, os_profile: Option<&str>) -> Result<()> {
+pub fn write_vm_metadata(vm_dir: &Path, display_name: &str, os_profile: Option<&str>) -> Result<()> {
     let metadata_path = vm_dir.join("vm-curator.toml");
 
     let mut content = String::new();
@@ -919,7 +919,7 @@ fn generate_network_args(
             // No networking backend
         }
         "passt" => {
-            args.push(format!("        -netdev passt,id=net0 \\"));
+            args.push("        -netdev passt,id=net0 \\".to_string());
             args.push(format!("        -device {},netdev=net0 \\", net_device));
         }
         "bridge" => {

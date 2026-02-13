@@ -5,10 +5,9 @@
 //! display manager and running from a TTY.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
-use super::multi_gpu::LookingGlassConfig;
 use super::pci::PciDevice;
 
 /// Supported display managers (systemd-based only)
@@ -231,29 +230,26 @@ pub fn detect_gpu_driver(device: &PciDevice) -> GpuDriver {
 
 /// Check if the system supports single GPU passthrough
 pub fn check_single_gpu_support() -> SingleGpuSupport {
-    let mut support = SingleGpuSupport::default();
+    let (boot_vga, has_single_gpu) = if let Ok(devices) = super::pci::enumerate_pci_devices() {
+        (
+            devices.iter().find(|d| d.is_boot_vga).cloned(),
+            devices.iter().filter(|d| d.is_gpu()).count() == 1,
+        )
+    } else {
+        (None, false)
+    };
 
-    // Check IOMMU
-    support.iommu_enabled = Path::new("/sys/kernel/iommu_groups").exists()
-        && fs::read_dir("/sys/kernel/iommu_groups")
-            .map(|d| d.count() > 0)
-            .unwrap_or(false);
-
-    // Check VFIO modules
-    support.vfio_available = Path::new("/sys/bus/pci/drivers/vfio-pci").exists()
-        || check_module_available("vfio_pci");
-
-    // Check for boot VGA
-    if let Ok(devices) = super::pci::enumerate_pci_devices() {
-        support.boot_vga = devices.iter().find(|d| d.is_boot_vga).cloned();
-        support.has_single_gpu = devices.iter().filter(|d| d.is_gpu()).count() == 1;
-    }
-
-    // Check display manager
-    support.display_manager = Some(detect_display_manager());
-
-    // Check Looking Glass
-    support.looking_glass_client = LookingGlassConfig::find_client();
+    let support = SingleGpuSupport {
+        iommu_enabled: Path::new("/sys/kernel/iommu_groups").exists()
+            && fs::read_dir("/sys/kernel/iommu_groups")
+                .map(|d| d.count() > 0)
+                .unwrap_or(false),
+        vfio_available: Path::new("/sys/bus/pci/drivers/vfio-pci").exists()
+            || check_module_available("vfio_pci"),
+        boot_vga,
+        has_single_gpu,
+        display_manager: Some(detect_display_manager()),
+    };
 
     support
 }
@@ -288,8 +284,6 @@ pub struct SingleGpuSupport {
     pub has_single_gpu: bool,
     /// Detected display manager
     pub display_manager: Option<DisplayManager>,
-    /// Looking Glass client path (if found)
-    pub looking_glass_client: Option<PathBuf>,
 }
 
 impl SingleGpuSupport {

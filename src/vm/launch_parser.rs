@@ -7,8 +7,10 @@ use crate::commands::qemu_img;
 
 /// Parse a launch.sh script and extract QEMU configuration
 pub fn parse_launch_script(script_path: &Path, content: &str) -> Result<QemuConfig> {
-    let mut config = QemuConfig::default();
-    config.raw_script = content.to_string();
+    let mut config = QemuConfig {
+        raw_script: content.to_string(),
+        ..Default::default()
+    };
 
     let vm_dir = script_path.parent().unwrap_or(Path::new("."));
 
@@ -292,12 +294,12 @@ fn extract_quoted_value(s: &str) -> String {
         }
 
         s[1..end_idx].to_string()
-    } else if s.starts_with('\'') {
+    } else if let Some(stripped) = s.strip_prefix('\'') {
         // Single quotes don't nest - find first closing quote
-        if let Some(end) = s[1..].find('\'') {
-            s[1..=end].to_string()
+        if let Some(end) = stripped.find('\'') {
+            stripped[..end].to_string()
         } else {
-            s[1..].to_string()
+            stripped.to_string()
         }
     } else {
         // Unquoted value - take until whitespace or comment
@@ -423,9 +425,9 @@ fn extract_drive_file(line: &str) -> Option<String> {
     if let Some(idx) = line.find("file=") {
         let rest = &line[idx + 5..];
         // Handle quoted paths
-        if rest.starts_with('"') {
-            let end = rest[1..].find('"')?;
-            return Some(rest[1..=end].to_string());
+        if let Some(inner) = rest.strip_prefix('"') {
+            let end = inner.find('"')?;
+            return Some(inner[..end].to_string());
         }
         // Handle unquoted paths
         let path: String = rest
@@ -442,13 +444,13 @@ fn extract_drive_file(line: &str) -> Option<String> {
 /// Extract a path from an argument
 fn extract_path_from_arg(arg: &str) -> Option<String> {
     let trimmed = arg.trim();
-    if trimmed.starts_with('"') {
-        let end = trimmed[1..].find('"')?;
-        return Some(trimmed[1..=end].to_string());
+    if let Some(inner) = trimmed.strip_prefix('"') {
+        let end = inner.find('"')?;
+        return Some(inner[..end].to_string());
     }
-    if trimmed.starts_with('\'') {
-        let end = trimmed[1..].find('\'')?;
-        return Some(trimmed[1..=end].to_string());
+    if let Some(inner) = trimmed.strip_prefix('\'') {
+        let end = inner.find('\'')?;
+        return Some(inner[..end].to_string());
     }
     let path: String = trimmed
         .chars()
@@ -476,7 +478,7 @@ fn resolve_path(path: &str, vm_dir: &Path) -> PathBuf {
 }
 
 /// Detect disk format using qemu-img info, falling back to extension-based guessing
-fn guess_disk_format(path: &PathBuf) -> DiskFormat {
+fn guess_disk_format(path: &Path) -> DiskFormat {
     // First, try to detect the actual format using qemu-img info
     if path.exists() {
         if let Some(format_str) = qemu_img::detect_disk_format(path) {

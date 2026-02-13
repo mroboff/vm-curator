@@ -653,7 +653,7 @@ fn extract_pci_addresses(pci_args: &[String]) -> Vec<String> {
         .filter_map(|arg| {
             // Format: "-device vfio-pci,host=0000:XX:XX.X"
             arg.split("host=").nth(1).map(|s| {
-                s.split(|c| c == ',' || c == ' ')
+                s.split([',', ' '])
                     .next()
                     .unwrap_or(s)
                     .to_string()
@@ -1192,11 +1192,7 @@ fn extract_qemu_command_for_passthrough(
         if let Some(caps) = RE_MACHINE.captures(&qemu_cmd) {
             let machine_opts = caps.get(1).unwrap().as_str();
             if !machine_opts.contains("kernel_irqchip") {
-                let new_opts = if machine_opts.contains(',') {
-                    format!("{},kernel_irqchip=on", machine_opts)
-                } else {
-                    format!("{},kernel_irqchip=on", machine_opts)
-                };
+                let new_opts = format!("{},kernel_irqchip=on", machine_opts);
                 qemu_cmd = RE_MACHINE.replace(&qemu_cmd, format!("-machine {}", new_opts).as_str()).to_string();
             }
         }

@@ -454,6 +454,11 @@ fn render(app: &App, frame: &mut Frame) {
             render_dim_overlay(frame);
             screens::settings::render(app, frame);
         }
+        Screen::ImportWizard => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::import_wizard::render(app, frame);
+        }
     }
 }
 
@@ -467,7 +472,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
     // Global quit with q/Q (except in text input modes where q might be typed)
     if (key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q'))
-        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::CreateWizard | Screen::CreateWizardCustomOs | Screen::NetworkSettings)
+        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::CreateWizard | Screen::CreateWizardCustomOs | Screen::NetworkSettings | Screen::ImportWizard)
     {
         app.should_quit = true;
         return Ok(());
@@ -499,6 +504,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::CreateWizardDownload => screens::create_wizard::handle_download_key(app, key)?,
         Screen::NetworkSettings => screens::network_settings::handle_key(app, key)?,
         Screen::Settings => { screens::settings::handle_input(app, key)?; }
+        Screen::ImportWizard => screens::import_wizard::handle_key(app, key)?,
     }
 
     Ok(())
@@ -536,6 +542,9 @@ fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('?') => app.push_screen(Screen::Help),
         KeyCode::Char('c') | KeyCode::Char('C') => {
             app.start_create_wizard();
+        }
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.start_import_wizard();
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
             app.push_screen(Screen::Settings);
@@ -948,9 +957,8 @@ fn handle_raw_script(app: &mut App, key: KeyEvent) -> Result<()> {
 }
 
 fn handle_detailed_info(app: &mut App, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Esc => app.pop_screen(),
-        _ => {}
+    if key.code == KeyCode::Esc {
+        app.pop_screen();
     }
     Ok(())
 }
@@ -1475,6 +1483,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         FileBrowserMode::Iso => "Select ISO",
         FileBrowserMode::Disk => "Select Disk Image",
         FileBrowserMode::Directory => "Select Directory",
+        FileBrowserMode::ImportConfig => "Select Config File",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -1512,6 +1521,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
             FileBrowserMode::Iso => "No ISO files found in this directory.",
             FileBrowserMode::Disk => "No disk images found in this directory.",
             FileBrowserMode::Directory => "No subdirectories in this directory.",
+            FileBrowserMode::ImportConfig => "No config files (.xml, .conf) found in this directory.",
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
             .style(Style::default().fg(Color::DarkGray))
@@ -1588,6 +1598,68 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                         // Directory selected (from [Select This Directory] entry)
                         app.add_shared_folder(selected_path.to_string_lossy().to_string());
                         app.pop_screen(); // Return to SharedFolders screen
+                    }
+                    FileBrowserMode::ImportConfig => {
+                        // Selected a config file for import
+                        match crate::vm::import::parse_config_file(&selected_path) {
+                            Ok(vm) => {
+                                app.pop_screen(); // Close file browser
+
+                                let library_path = app.config.vm_library_path.clone();
+                                if let Some(ref mut state) = app.import_state {
+                                    state.vm_name = vm.name.clone();
+                                    state.folder_name =
+                                        crate::app::CreateWizardState::find_available_folder_name(
+                                            &library_path,
+                                            &crate::app::CreateWizardState::generate_folder_name(&vm.name),
+                                        );
+                                    let has_notes = !vm.import_notes.is_empty();
+                                    state.selected_vm = Some(vm);
+                                    state.error_message = None;
+                                    state.field_focus = 0;
+
+                                    if has_notes {
+                                        state.warnings_acknowledged = false;
+                                        state.step = crate::app::ImportStep::CompatibilityWarnings;
+                                    } else {
+                                        state.warnings_acknowledged = true;
+                                        state.step = crate::app::ImportStep::ConfigureDisk;
+                                    }
+                                } else {
+                                    // No import state - start fresh
+                                    let has_notes = !vm.import_notes.is_empty();
+                                    let source = vm.source.clone();
+                                    let folder_name =
+                                        crate::app::CreateWizardState::find_available_folder_name(
+                                            &library_path,
+                                            &crate::app::CreateWizardState::generate_folder_name(&vm.name),
+                                        );
+                                    let vm_name = vm.name.clone();
+                                    let (step, warnings_acknowledged) = if has_notes {
+                                        (crate::app::ImportStep::CompatibilityWarnings, false)
+                                    } else {
+                                        (crate::app::ImportStep::ConfigureDisk, true)
+                                    };
+
+                                    app.import_state = Some(crate::app::ImportWizardState {
+                                        source: Some(source),
+                                        vm_name,
+                                        folder_name,
+                                        selected_vm: Some(vm),
+                                        step,
+                                        warnings_acknowledged,
+                                        ..crate::app::ImportWizardState::default()
+                                    });
+                                    app.push_screen(crate::app::Screen::ImportWizard);
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(ref mut state) = app.import_state {
+                                    state.error_message = Some(format!("Failed to parse: {}", e));
+                                }
+                                app.pop_screen(); // Close file browser
+                            }
+                        }
                     }
                 }
             }

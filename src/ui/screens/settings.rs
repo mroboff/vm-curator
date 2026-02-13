@@ -195,15 +195,14 @@ fn make_visible(item: SettingsItem, indent: usize) -> VisibleItem {
 
 /// Build the list of visible items based on current config
 fn build_visible_items(config: &Config) -> Vec<VisibleItem> {
-    let mut items = Vec::new();
-
-    // General settings (always visible)
-    items.push(make_visible(SettingsItem::VmLibraryPath, 0));
-    items.push(make_visible(SettingsItem::DefaultMemory, 0));
-    items.push(make_visible(SettingsItem::DefaultCpuCores, 0));
-    items.push(make_visible(SettingsItem::DefaultDiskSize, 0));
-    items.push(make_visible(SettingsItem::DefaultDisplay, 0));
-    items.push(make_visible(SettingsItem::DefaultEnableKvm, 0));
+    let mut items = vec![
+        make_visible(SettingsItem::VmLibraryPath, 0),
+        make_visible(SettingsItem::DefaultMemory, 0),
+        make_visible(SettingsItem::DefaultCpuCores, 0),
+        make_visible(SettingsItem::DefaultDiskSize, 0),
+        make_visible(SettingsItem::DefaultDisplay, 0),
+        make_visible(SettingsItem::DefaultEnableKvm, 0),
+    ];
     items.push(make_visible(SettingsItem::ConfirmBeforeLaunch, 0));
 
     // GPU Passthrough section
@@ -795,11 +794,8 @@ fn cycle_setting(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
         let current_idx = options.iter().position(|&o| o == current).unwrap_or(0);
         let next_idx = (current_idx + 1) % options.len();
 
-        match item {
-            SettingsItem::DefaultDisplay => {
-                app.config.default_display = options[next_idx].to_string();
-            }
-            _ => {}
+        if item == SettingsItem::DefaultDisplay {
+            app.config.default_display = options[next_idx].to_string();
         }
         save_config(app)?;
     }
@@ -814,9 +810,9 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
         SettingsItem::VmLibraryPath => {
             let path = std::path::PathBuf::from(value);
             // Expand ~ to home directory
-            let path = if value.starts_with("~/") {
+            let path = if let Some(rest) = value.strip_prefix("~/") {
                 if let Some(home) = dirs::home_dir() {
-                    home.join(&value[2..])
+                    home.join(rest)
                 } else {
                     path
                 }
@@ -877,24 +873,21 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
 
 /// Execute an action button
 fn execute_action(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
-    match item {
-        SettingsItem::SingleGpuRunSetup => {
-            // Get the GPU driver - use nvidia by default, or detect from system
-            let gpu_driver = detect_gpu_driver();
+    if item == SettingsItem::SingleGpuRunSetup {
+        // Get the GPU driver - use nvidia by default, or detect from system
+        let gpu_driver = detect_gpu_driver();
 
-            match run_system_setup(&gpu_driver) {
-                SystemSetupResult::Launched => {
-                    app.set_status("Setup launched in terminal window. Follow the prompts there.");
-                }
-                SystemSetupResult::NoTerminal => {
-                    app.set_status("No terminal found. Install alacritty, kitty, ghostty, konsole, or gnome-terminal.");
-                }
-                SystemSetupResult::Error(e) => {
-                    app.set_status(format!("Setup failed: {}", e));
-                }
+        match run_system_setup(&gpu_driver) {
+            SystemSetupResult::Launched => {
+                app.set_status("Setup launched in terminal window. Follow the prompts there.");
+            }
+            SystemSetupResult::NoTerminal => {
+                app.set_status("No terminal found. Install alacritty, kitty, ghostty, konsole, or gnome-terminal.");
+            }
+            SystemSetupResult::Error(e) => {
+                app.set_status(format!("Setup failed: {}", e));
             }
         }
-        _ => {}
     }
     Ok(())
 }

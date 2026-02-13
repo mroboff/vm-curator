@@ -444,9 +444,10 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
         let config = match parse_launch_script(&launch_script, &script_content) {
             Ok(cfg) => cfg,
             Err(_) => {
-                let mut default_config = QemuConfig::default();
-                default_config.raw_script = script_content;
-                default_config
+                QemuConfig {
+                    raw_script: script_content,
+                    ..QemuConfig::default()
+                }
             }
         };
 
@@ -464,7 +465,7 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
     }
 
     // Sort by display name
-    vms.sort_by(|a, b| a.display_name().cmp(&b.display_name()));
+    vms.sort_by_key(|v| v.display_name());
 
     Ok(vms)
 }

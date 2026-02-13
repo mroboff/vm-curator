@@ -169,12 +169,10 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
         let reader = BufReader::new(stderr);
         let mut all_lines = Vec::new();
 
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // Capture all stderr output - we'll filter later if needed
-                if !line.trim().is_empty() {
-                    all_lines.push(line);
-                }
+        for line in reader.lines().map_while(Result::ok) {
+            // Capture all stderr output - we'll filter later if needed
+            if !line.trim().is_empty() {
+                all_lines.push(line);
             }
         }
 
@@ -747,7 +745,7 @@ fn extract_hex_value(s: &str, prefix: &str) -> Option<u16> {
     let rest = &s[start..];
 
     // Find end of hex value (comma, space, quote, or end of string)
-    let end = rest.find(|c: char| c == ',' || c == ' ' || c == '"' || c == '\'')
+    let end = rest.find([',', ' ', '"', '\''])
         .unwrap_or(rest.len());
 
     let hex_str = &rest[..end];
@@ -928,9 +926,8 @@ fn extract_path_value(s: &str) -> Option<String> {
     let start = s.find("path=")? + 5;
     let rest = &s[start..];
 
-    if rest.starts_with('\'') {
+    if let Some(inner) = rest.strip_prefix('\'') {
         // Single-quoted path: find matching closing quote (handle escaped quotes)
-        let inner = &rest[1..];
         let mut result = String::new();
         let mut chars = inner.chars();
         while let Some(c) = chars.next() {
@@ -951,7 +948,7 @@ fn extract_path_value(s: &str) -> Option<String> {
     } else {
         // Unquoted path: ends at comma or space
         let end = rest
-            .find(|c: char| c == ',' || c == ' ' || c == '"')
+            .find([',', ' ', '"'])
             .unwrap_or(rest.len());
         Some(rest[..end].to_string())
     }
@@ -962,7 +959,7 @@ fn extract_simple_value(s: &str, prefix: &str) -> Option<String> {
     let start = s.find(prefix)? + prefix.len();
     let rest = &s[start..];
     let end = rest
-        .find(|c: char| c == ',' || c == ' ' || c == '"' || c == '\'')
+        .find([',', ' ', '"', '\''])
         .unwrap_or(rest.len());
     let value = rest[..end].trim();
     if value.is_empty() {

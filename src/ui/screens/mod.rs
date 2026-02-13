@@ -1,6 +1,7 @@
 pub mod configuration;
 pub mod create_wizard;
 pub mod help;
+pub mod import_wizard;
 pub mod main_menu;
 pub mod management;
 pub mod multi_gpu_setup;

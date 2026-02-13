@@ -105,9 +105,10 @@ impl AudioDevice {
 }
 
 /// Network backend type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkBackend {
     /// SLIRP - default, no root needed
+    #[default]
     User,
     /// passt - modern, fast, no root needed
     Passt,
@@ -115,12 +116,6 @@ pub enum NetworkBackend {
     Bridge(String),
     /// No networking
     None,
-}
-
-impl Default for NetworkBackend {
-    fn default() -> Self {
-        Self::User
-    }
 }
 
 impl fmt::Display for NetworkBackend {
