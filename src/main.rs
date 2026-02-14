@@ -151,9 +151,9 @@ fn prompt_vm_library_setup(mut config: Config) -> Result<Config> {
     // Use input if provided, otherwise keep default
     if !input.is_empty() {
         // Expand ~ to home directory
-        let expanded = if input.starts_with("~/") {
+        let expanded = if let Some(rest) = input.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                home.join(&input[2..])
+                home.join(rest)
             } else {
                 PathBuf::from(input)
             }

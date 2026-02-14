@@ -68,6 +68,10 @@ pub enum Screen {
     NetworkSettings,
     /// Application settings
     Settings,
+    /// VM Import wizard
+    ImportWizard,
+    /// Notes editor
+    EditNotes,
 }
 
 /// Context for text input dialogs
@@ -86,6 +90,7 @@ pub enum ConfirmAction {
     DeleteSnapshot(String),
     RestoreSnapshot(String),
     DiscardScriptChanges,
+    DiscardNotesChanges,
     StopVm,
     ForceStopVm,
 }
@@ -104,6 +109,7 @@ pub enum FileBrowserMode {
     Iso,
     Disk,
     Directory,
+    ImportConfig,
 }
 
 /// Action to take with an existing disk when using it for a new VM
@@ -422,8 +428,6 @@ impl CreateWizardState {
             .map(|c| {
                 if c.is_alphanumeric() {
                     c
-                } else if c.is_whitespace() || c == '_' {
-                    '-'
                 } else {
                     '-'
                 }
@@ -455,7 +459,7 @@ impl CreateWizardState {
     /// e.g., "windows-10" -> "windows-10-2" -> "windows-10-3"
     /// Returns the base name with a numeric suffix if needed, or with "-error" suffix
     /// if no available name was found within the limit (indicating a problem).
-    fn find_available_folder_name(library_path: &std::path::Path, base_name: &str) -> String {
+    pub fn find_available_folder_name(library_path: &std::path::Path, base_name: &str) -> String {
         let first_candidate = library_path.join(base_name);
         if !first_candidate.exists() {
             return base_name.to_string();
@@ -577,6 +581,86 @@ pub enum AddPfStep {
     GuestPort,
 }
 
+// =========================================================================
+// VM Import Wizard Types
+// =========================================================================
+
+/// Source type for VM import
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportSource {
+    Libvirt,
+    Quickemu,
+}
+
+/// Disk handling action during import
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportDiskAction {
+    #[default]
+    Symlink,
+    Copy,
+    Move,
+}
+
+/// Steps in the import wizard
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ImportStep {
+    #[default]
+    SelectSource,
+    SelectVm,
+    CompatibilityWarnings,
+    ConfigureDisk,
+    ReviewAndImport,
+}
+
+/// A VM discovered from an external source that can be imported
+#[derive(Debug, Clone)]
+pub struct ImportableVm {
+    pub name: String,
+    pub config_path: PathBuf,
+    pub source: ImportSource,
+    pub qemu_config: WizardQemuConfig,
+    pub disk_paths: Vec<PathBuf>,
+    pub detected_os_profile: Option<String>,
+    pub import_notes: Vec<String>,
+    pub disks_readable: Vec<bool>,
+}
+
+/// State for the VM import wizard
+#[derive(Debug, Clone)]
+pub struct ImportWizardState {
+    pub step: ImportStep,
+    pub source: Option<ImportSource>,
+    pub discovered_vms: Vec<ImportableVm>,
+    pub selected_vm_index: usize,
+    pub selected_vm: Option<ImportableVm>,
+    pub vm_name: String,
+    pub folder_name: String,
+    pub disk_action: ImportDiskAction,
+    pub field_focus: usize,
+    pub error_message: Option<String>,
+    pub editing_name: bool,
+    pub warnings_acknowledged: bool,
+}
+
+impl Default for ImportWizardState {
+    fn default() -> Self {
+        Self {
+            step: ImportStep::SelectSource,
+            source: None,
+            discovered_vms: Vec::new(),
+            selected_vm_index: 0,
+            selected_vm: None,
+            vm_name: String::new(),
+            folder_name: String::new(),
+            disk_action: ImportDiskAction::Symlink,
+            field_focus: 0,
+            error_message: None,
+            editing_name: false,
+            warnings_acknowledged: false,
+        }
+    }
+}
+
 /// Application state
 pub struct App {
     /// Current screen
@@ -671,6 +755,8 @@ pub struct App {
     pub shared_folders_help: SharedFoldersHelpStore,
     /// VM creation wizard state
     pub wizard_state: Option<CreateWizardState>,
+    /// VM import wizard state
+    pub import_state: Option<ImportWizardState>,
     /// Settings screen selected item
     pub settings_selected: usize,
     /// Settings screen editing mode
@@ -855,6 +941,7 @@ impl App {
             settings_help,
             shared_folders_help,
             wizard_state: None,
+            import_state: None,
             settings_selected: 0,
             settings_editing: false,
             settings_edit_buffer: String::new(),
@@ -1329,6 +1416,7 @@ impl App {
             FileBrowserMode::Iso => &[".iso", ".ISO"],
             FileBrowserMode::Disk => &[".qcow2", ".QCOW2", ".qcow", ".QCOW"],
             FileBrowserMode::Directory => &[],
+            FileBrowserMode::ImportConfig => &[".xml", ".XML", ".conf"],
         };
 
         // For Directory mode, add a [Select This Directory] sentinel entry first
@@ -1476,19 +1564,75 @@ impl App {
     }
 
     // =========================================================================
+    // Notes Editor Methods
+    // =========================================================================
+
+    /// Load the selected VM's notes into the editor
+    pub fn load_notes_into_editor(&mut self) {
+        if let Some(vm) = self.selected_vm() {
+            let notes_text = vm.notes.as_deref().unwrap_or("");
+            self.script_editor_lines = notes_text.lines().map(String::from).collect();
+            if self.script_editor_lines.is_empty() {
+                self.script_editor_lines.push(String::new());
+            }
+            self.script_editor_cursor = (0, 0);
+            self.script_editor_modified = false;
+            self.script_editor_h_scroll = 0;
+            self.raw_script_scroll = 0;
+        }
+    }
+
+    /// Save the editor content as notes to vm-curator.toml
+    pub fn save_notes_from_editor(&mut self) -> Result<()> {
+        let vm = self.selected_vm()
+            .ok_or_else(|| anyhow::anyhow!("No VM selected"))?;
+
+        let vm_path = vm.path.clone();
+        let display_name = vm.display_name();
+        let os_profile = vm.os_profile.clone();
+
+        let notes_text = self.script_editor_lines.join("\n");
+        // Trim trailing whitespace/newlines
+        let notes_text = notes_text.trim_end().to_string();
+        let notes = if notes_text.is_empty() { None } else { Some(notes_text.as_str()) };
+
+        crate::vm::create::write_vm_metadata(
+            &vm_path,
+            &display_name,
+            os_profile.as_deref(),
+            notes,
+        )?;
+
+        // Update the in-memory VM's notes
+        if let Some(filtered_idx) = self.visual_order.get(self.selected_vm) {
+            if let Some(actual_idx) = self.filtered_indices.get(*filtered_idx) {
+                if let Some(vm) = self.vms.get_mut(*actual_idx) {
+                    vm.notes = notes.map(String::from);
+                }
+            }
+        }
+
+        self.script_editor_modified = false;
+        Ok(())
+    }
+
+    // =========================================================================
     // VM Creation Wizard Methods
     // =========================================================================
 
     /// Start the VM creation wizard
     pub fn start_create_wizard(&mut self) {
-        let mut state = CreateWizardState::default();
-
-        // Apply user config defaults
-        state.disk_size_gb = self.config.default_disk_size_gb;
-        state.qemu_config.memory_mb = self.config.default_memory_mb;
-        state.qemu_config.cpu_cores = self.config.default_cpu_cores;
-        state.qemu_config.enable_kvm = self.config.default_enable_kvm;
-        state.qemu_config.display = self.config.default_display.clone();
+        let state = CreateWizardState {
+            disk_size_gb: self.config.default_disk_size_gb,
+            qemu_config: WizardQemuConfig {
+                memory_mb: self.config.default_memory_mb,
+                cpu_cores: self.config.default_cpu_cores,
+                enable_kvm: self.config.default_enable_kvm,
+                display: self.config.default_display.clone(),
+                ..WizardQemuConfig::default()
+            },
+            ..CreateWizardState::default()
+        };
 
         self.wizard_state = Some(state);
         self.push_screen(Screen::CreateWizard);
@@ -1598,6 +1742,24 @@ impl App {
             .as_ref()
             .filter(|s| !s.folder_name.is_empty())
             .map(|s| self.config.vm_library_path.join(&s.folder_name))
+    }
+
+    // =========================================================================
+    // VM Import Wizard Methods
+    // =========================================================================
+
+    /// Start the VM import wizard
+    pub fn start_import_wizard(&mut self) {
+        self.import_state = Some(ImportWizardState::default());
+        self.push_screen(Screen::ImportWizard);
+    }
+
+    /// Cancel the import wizard and return to main menu
+    pub fn cancel_import_wizard(&mut self) {
+        self.import_state = None;
+        while self.screen == Screen::ImportWizard {
+            self.pop_screen();
+        }
     }
 
     /// Get the selected OS profile in the wizard

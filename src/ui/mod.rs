@@ -285,6 +285,14 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
             app.pop_screen(); // Close confirm dialog
             app.pop_screen(); // Close editor
         }
+        ConfirmAction::DiscardNotesChanges => {
+            // Discard changes and exit notes editor
+            app.raw_script_scroll = 0;
+            app.script_editor_lines.clear();
+            app.script_editor_modified = false;
+            app.pop_screen(); // Close confirm dialog
+            app.pop_screen(); // Close editor
+        }
         ConfirmAction::StopVm => {
             app.pop_screen();
             if let Some(vm) = app.selected_vm().cloned() {
@@ -348,6 +356,11 @@ fn render(app: &App, frame: &mut Frame) {
             screens::main_menu::render(app, frame);
             render_dim_overlay(frame);
             screens::configuration::render_raw_script(app, frame);
+        }
+        Screen::EditNotes => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::configuration::render_edit_notes(app, frame);
         }
         Screen::DetailedInfo => {
             screens::main_menu::render(app, frame);
@@ -454,6 +467,11 @@ fn render(app: &App, frame: &mut Frame) {
             render_dim_overlay(frame);
             screens::settings::render(app, frame);
         }
+        Screen::ImportWizard => {
+            screens::main_menu::render(app, frame);
+            render_dim_overlay(frame);
+            screens::import_wizard::render(app, frame);
+        }
     }
 }
 
@@ -467,7 +485,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
     // Global quit with q/Q (except in text input modes where q might be typed)
     if (key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q'))
-        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::CreateWizard | Screen::CreateWizardCustomOs | Screen::NetworkSettings)
+        && !matches!(app.screen, Screen::Search | Screen::TextInput(_) | Screen::RawScript | Screen::EditNotes | Screen::CreateWizard | Screen::CreateWizardCustomOs | Screen::NetworkSettings | Screen::ImportWizard)
     {
         app.should_quit = true;
         return Ok(());
@@ -478,6 +496,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::Management => handle_management(app, key)?,
         Screen::Configuration => handle_configuration(app, key)?,
         Screen::RawScript => handle_raw_script(app, key)?,
+        Screen::EditNotes => handle_edit_notes(app, key)?,
         Screen::DetailedInfo => handle_detailed_info(app, key)?,
         Screen::Snapshots => handle_snapshots(app, key)?,
         Screen::BootOptions => handle_boot_options(app, key)?,
@@ -499,6 +518,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Screen::CreateWizardDownload => screens::create_wizard::handle_download_key(app, key)?,
         Screen::NetworkSettings => screens::network_settings::handle_key(app, key)?,
         Screen::Settings => { screens::settings::handle_input(app, key)?; }
+        Screen::ImportWizard => screens::import_wizard::handle_key(app, key)?,
     }
 
     Ok(())
@@ -536,6 +556,9 @@ fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('?') => app.push_screen(Screen::Help),
         KeyCode::Char('c') | KeyCode::Char('C') => {
             app.start_create_wizard();
+        }
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.start_import_wizard();
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
             app.push_screen(Screen::Settings);
@@ -718,6 +741,10 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                         MenuAction::ChangeDisplay => {
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::DisplayOptions);
+                        }
+                        MenuAction::EditNotes => {
+                            app.load_notes_into_editor();
+                            app.push_screen(Screen::EditNotes);
                         }
                         MenuAction::RenameVm => {
                             if let Some(vm) = app.selected_vm() {
@@ -947,10 +974,188 @@ fn handle_raw_script(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-fn handle_detailed_info(app: &mut App, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Esc => app.pop_screen(),
+fn handle_edit_notes(app: &mut App, key: KeyEvent) -> Result<()> {
+    let total_lines = app.script_editor_lines.len();
+
+    match (key.code, key.modifiers) {
+        // Save with Ctrl+S
+        (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
+            match app.save_notes_from_editor() {
+                Ok(()) => app.set_status("Notes saved"),
+                Err(e) => app.set_status(format!("Error saving notes: {}", e)),
+            }
+        }
+
+        // Cancel/Exit with Esc
+        (KeyCode::Esc, _) => {
+            if app.script_editor_modified {
+                app.push_screen(Screen::Confirm(ConfirmAction::DiscardNotesChanges));
+            } else {
+                app.raw_script_scroll = 0;
+                app.script_editor_lines.clear();
+                app.pop_screen();
+            }
+        }
+
+        // Navigation
+        (KeyCode::Up, _) => {
+            if app.script_editor_cursor.0 > 0 {
+                app.script_editor_cursor.0 -= 1;
+                let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                    .map(|l| l.len()).unwrap_or(0);
+                if app.script_editor_cursor.1 > line_len {
+                    app.script_editor_cursor.1 = line_len;
+                }
+                if app.script_editor_cursor.0 < app.raw_script_scroll as usize {
+                    app.raw_script_scroll = app.script_editor_cursor.0 as u16;
+                }
+            }
+        }
+        (KeyCode::Down, _) => {
+            if app.script_editor_cursor.0 < total_lines.saturating_sub(1) {
+                app.script_editor_cursor.0 += 1;
+                let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                    .map(|l| l.len()).unwrap_or(0);
+                if app.script_editor_cursor.1 > line_len {
+                    app.script_editor_cursor.1 = line_len;
+                }
+                let visible_height = 35usize;
+                if app.script_editor_cursor.0 >= app.raw_script_scroll as usize + visible_height {
+                    app.raw_script_scroll = (app.script_editor_cursor.0 - visible_height + 1) as u16;
+                }
+            }
+        }
+        (KeyCode::Left, _) => {
+            if app.script_editor_cursor.1 > 0 {
+                app.script_editor_cursor.1 -= 1;
+            } else if app.script_editor_cursor.0 > 0 {
+                app.script_editor_cursor.0 -= 1;
+                app.script_editor_cursor.1 = app.script_editor_lines.get(app.script_editor_cursor.0)
+                    .map(|l| l.len()).unwrap_or(0);
+            }
+            if app.script_editor_cursor.1 < app.script_editor_h_scroll {
+                app.script_editor_h_scroll = app.script_editor_cursor.1;
+            }
+        }
+        (KeyCode::Right, _) => {
+            let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                .map(|l| l.len()).unwrap_or(0);
+            if app.script_editor_cursor.1 < line_len {
+                app.script_editor_cursor.1 += 1;
+            } else if app.script_editor_cursor.0 < total_lines.saturating_sub(1) {
+                app.script_editor_cursor.0 += 1;
+                app.script_editor_cursor.1 = 0;
+            }
+            let visible_width = 80usize;
+            if app.script_editor_cursor.1 >= app.script_editor_h_scroll + visible_width {
+                app.script_editor_h_scroll = app.script_editor_cursor.1 - visible_width + 1;
+            }
+        }
+        (KeyCode::Home, _) => {
+            app.script_editor_cursor.1 = 0;
+            app.script_editor_h_scroll = 0;
+        }
+        (KeyCode::End, _) => {
+            let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                .map(|l| l.len()).unwrap_or(0);
+            app.script_editor_cursor.1 = line_len;
+        }
+        (KeyCode::PageUp, _) => {
+            let jump = 20;
+            app.script_editor_cursor.0 = app.script_editor_cursor.0.saturating_sub(jump);
+            app.raw_script_scroll = app.raw_script_scroll.saturating_sub(jump as u16);
+            let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                .map(|l| l.len()).unwrap_or(0);
+            if app.script_editor_cursor.1 > line_len {
+                app.script_editor_cursor.1 = line_len;
+            }
+        }
+        (KeyCode::PageDown, _) => {
+            let jump = 20;
+            app.script_editor_cursor.0 = (app.script_editor_cursor.0 + jump).min(total_lines.saturating_sub(1));
+            app.raw_script_scroll = (app.raw_script_scroll + jump as u16).min(total_lines.saturating_sub(1) as u16);
+            let line_len = app.script_editor_lines.get(app.script_editor_cursor.0)
+                .map(|l| l.len()).unwrap_or(0);
+            if app.script_editor_cursor.1 > line_len {
+                app.script_editor_cursor.1 = line_len;
+            }
+        }
+
+        // Editing - Enter (new line)
+        (KeyCode::Enter, _) => {
+            let (line_idx, col) = app.script_editor_cursor;
+            if let Some(line) = app.script_editor_lines.get_mut(line_idx) {
+                let remainder = line[col..].to_string();
+                line.truncate(col);
+                app.script_editor_lines.insert(line_idx + 1, remainder);
+                app.script_editor_cursor = (line_idx + 1, 0);
+                app.script_editor_modified = true;
+            }
+        }
+
+        // Editing - Backspace
+        (KeyCode::Backspace, _) => {
+            let (line_idx, col) = app.script_editor_cursor;
+            if col > 0 {
+                if let Some(line) = app.script_editor_lines.get_mut(line_idx) {
+                    line.remove(col - 1);
+                    app.script_editor_cursor.1 -= 1;
+                    app.script_editor_modified = true;
+                }
+            } else if line_idx > 0 {
+                let current_line = app.script_editor_lines.remove(line_idx);
+                if let Some(prev_line) = app.script_editor_lines.get_mut(line_idx - 1) {
+                    let prev_len = prev_line.len();
+                    prev_line.push_str(&current_line);
+                    app.script_editor_cursor = (line_idx - 1, prev_len);
+                    app.script_editor_modified = true;
+                }
+            }
+        }
+
+        // Editing - Delete
+        (KeyCode::Delete, _) => {
+            let (line_idx, col) = app.script_editor_cursor;
+            if let Some(line) = app.script_editor_lines.get_mut(line_idx) {
+                if col < line.len() {
+                    line.remove(col);
+                    app.script_editor_modified = true;
+                } else if line_idx < total_lines - 1 {
+                    let next_line = app.script_editor_lines.remove(line_idx + 1);
+                    app.script_editor_lines.get_mut(line_idx).unwrap().push_str(&next_line);
+                    app.script_editor_modified = true;
+                }
+            }
+        }
+
+        // Editing - Tab (insert 4 spaces)
+        (KeyCode::Tab, _) => {
+            let (line_idx, col) = app.script_editor_cursor;
+            if let Some(line) = app.script_editor_lines.get_mut(line_idx) {
+                line.insert_str(col, "    ");
+                app.script_editor_cursor.1 += 4;
+                app.script_editor_modified = true;
+            }
+        }
+
+        // Typing characters
+        (KeyCode::Char(c), m) if !m.contains(KeyModifiers::CONTROL) => {
+            let (line_idx, col) = app.script_editor_cursor;
+            if let Some(line) = app.script_editor_lines.get_mut(line_idx) {
+                line.insert(col, c);
+                app.script_editor_cursor.1 += 1;
+                app.script_editor_modified = true;
+            }
+        }
+
         _ => {}
+    }
+    Ok(())
+}
+
+fn handle_detailed_info(app: &mut App, key: KeyEvent) -> Result<()> {
+    if key.code == KeyCode::Esc {
+        app.pop_screen();
     }
     Ok(())
 }
@@ -1319,7 +1524,7 @@ fn render_confirm(app: &App, action: &ConfirmAction, frame: &mut Frame) {
         ConfirmAction::DeleteSnapshot(name) => {
             ("Delete Snapshot", format!("Delete snapshot '{}'? This cannot be undone.", name))
         }
-        ConfirmAction::DiscardScriptChanges => {
+        ConfirmAction::DiscardScriptChanges | ConfirmAction::DiscardNotesChanges => {
             ("Discard Changes", "You have unsaved changes. Discard them?".to_string())
         }
         ConfirmAction::StopVm => {
@@ -1475,6 +1680,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         FileBrowserMode::Iso => "Select ISO",
         FileBrowserMode::Disk => "Select Disk Image",
         FileBrowserMode::Directory => "Select Directory",
+        FileBrowserMode::ImportConfig => "Select Config File",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -1512,6 +1718,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
             FileBrowserMode::Iso => "No ISO files found in this directory.",
             FileBrowserMode::Disk => "No disk images found in this directory.",
             FileBrowserMode::Directory => "No subdirectories in this directory.",
+            FileBrowserMode::ImportConfig => "No config files (.xml, .conf) found in this directory.",
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
             .style(Style::default().fg(Color::DarkGray))
@@ -1588,6 +1795,68 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                         // Directory selected (from [Select This Directory] entry)
                         app.add_shared_folder(selected_path.to_string_lossy().to_string());
                         app.pop_screen(); // Return to SharedFolders screen
+                    }
+                    FileBrowserMode::ImportConfig => {
+                        // Selected a config file for import
+                        match crate::vm::import::parse_config_file(&selected_path) {
+                            Ok(vm) => {
+                                app.pop_screen(); // Close file browser
+
+                                let library_path = app.config.vm_library_path.clone();
+                                if let Some(ref mut state) = app.import_state {
+                                    state.vm_name = vm.name.clone();
+                                    state.folder_name =
+                                        crate::app::CreateWizardState::find_available_folder_name(
+                                            &library_path,
+                                            &crate::app::CreateWizardState::generate_folder_name(&vm.name),
+                                        );
+                                    let has_notes = !vm.import_notes.is_empty();
+                                    state.selected_vm = Some(vm);
+                                    state.error_message = None;
+                                    state.field_focus = 0;
+
+                                    if has_notes {
+                                        state.warnings_acknowledged = false;
+                                        state.step = crate::app::ImportStep::CompatibilityWarnings;
+                                    } else {
+                                        state.warnings_acknowledged = true;
+                                        state.step = crate::app::ImportStep::ConfigureDisk;
+                                    }
+                                } else {
+                                    // No import state - start fresh
+                                    let has_notes = !vm.import_notes.is_empty();
+                                    let source = vm.source.clone();
+                                    let folder_name =
+                                        crate::app::CreateWizardState::find_available_folder_name(
+                                            &library_path,
+                                            &crate::app::CreateWizardState::generate_folder_name(&vm.name),
+                                        );
+                                    let vm_name = vm.name.clone();
+                                    let (step, warnings_acknowledged) = if has_notes {
+                                        (crate::app::ImportStep::CompatibilityWarnings, false)
+                                    } else {
+                                        (crate::app::ImportStep::ConfigureDisk, true)
+                                    };
+
+                                    app.import_state = Some(crate::app::ImportWizardState {
+                                        source: Some(source),
+                                        vm_name,
+                                        folder_name,
+                                        selected_vm: Some(vm),
+                                        step,
+                                        warnings_acknowledged,
+                                        ..crate::app::ImportWizardState::default()
+                                    });
+                                    app.push_screen(crate::app::Screen::ImportWizard);
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(ref mut state) = app.import_state {
+                                    state.error_message = Some(format!("Failed to parse: {}", e));
+                                }
+                                app.pop_screen(); // Close file browser
+                            }
+                        }
                     }
                 }
             }

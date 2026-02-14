@@ -40,11 +40,14 @@ pub fn render(app: &App, frame: &mut Frame) {
     let os_info = app.selected_vm_info();
     let ascii_art = app.selected_vm_ascii();
 
+    let notes = app.selected_vm().and_then(|vm| vm.notes.as_deref());
+
     AsciiInfoWidget {
         ascii_art,
         os_info: os_info.as_ref(),
         vm_name: &vm_name,
         scroll: app.info_scroll,
+        notes,
     }
     .render(main_chunks[1], frame.buffer_mut());
 
@@ -97,6 +100,8 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
         Span::raw(" Manage "),
         Span::styled(" [c]", Style::default().fg(Color::Yellow)),
         Span::raw(" Create "),
+        Span::styled(" [i]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Import "),
         Span::styled(" [s]", Style::default().fg(Color::Yellow)),
         Span::raw(" Settings "),
         Span::styled(" [/]", Style::default().fg(Color::Yellow)),
@@ -109,7 +114,7 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
 
     // Show stopping VM status
     if app.status_message.is_none() {
-        for (id, sent_at) in &app.stopping_vms {
+        if let Some((id, sent_at)) = app.stopping_vms.iter().next() {
             let elapsed = sent_at.elapsed().as_secs();
             let vm_name = app.vms.iter()
                 .find(|vm| &vm.id == id)
@@ -127,7 +132,6 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
                     Style::default().fg(Color::Yellow),
                 ));
             }
-            break; // Show only the first stopping VM
         }
     }
 

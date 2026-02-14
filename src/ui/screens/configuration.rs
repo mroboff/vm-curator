@@ -344,6 +344,138 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
     frame.render_widget(help, help_area);
 }
 
+/// Render notes editor (reuses the raw script editor pattern)
+pub fn render_edit_notes(app: &App, frame: &mut Frame) {
+    let area = frame.area();
+    let dialog_width = 90.min(area.width.saturating_sub(4));
+    let dialog_height = 40.min(area.height.saturating_sub(4));
+
+    let dialog_area = centered_rect(dialog_width, dialog_height, area);
+    frame.render_widget(Clear, dialog_area);
+
+    let vm_name = app.selected_vm()
+        .map(|vm| vm.display_name())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let modified_indicator = if app.script_editor_modified { " [modified]" } else { "" };
+
+    let block = Block::default()
+        .title(format!(" {} - Notes{} ", vm_name, modified_indicator))
+        .borders(Borders::ALL)
+        .border_style(if app.script_editor_modified {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Cyan)
+        })
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(dialog_area);
+    frame.render_widget(block, dialog_area);
+
+    // Split into line numbers, content, and help text
+    let v_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),     // Editor content
+            Constraint::Length(1),  // Help text
+        ])
+        .split(inner);
+
+    let editor_area = v_chunks[0];
+    let help_area = v_chunks[1];
+
+    // Split editor area into line numbers and text
+    let h_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(5),  // Line numbers
+            Constraint::Min(1),     // Text content
+        ])
+        .split(editor_area);
+
+    let line_num_area = h_chunks[0];
+    let text_area = h_chunks[1];
+
+    let visible_height = text_area.height as usize;
+    let total_lines = app.script_editor_lines.len();
+    let scroll_offset = app.raw_script_scroll as usize;
+
+    let start_line = scroll_offset;
+    let end_line = (scroll_offset + visible_height).min(total_lines);
+
+    // Render line numbers
+    let line_numbers: Vec<Line> = (start_line..end_line)
+        .map(|i| {
+            let style = if i == app.script_editor_cursor.0 {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            Line::styled(format!("{:4} ", i + 1), style)
+        })
+        .collect();
+    let line_nums_widget = Paragraph::new(line_numbers);
+    frame.render_widget(line_nums_widget, line_num_area);
+
+    // Render text content with cursor
+    let text_width = text_area.width as usize;
+    let h_scroll = app.script_editor_h_scroll;
+
+    let text_lines: Vec<Line> = (start_line..end_line)
+        .map(|i| {
+            let line = app.script_editor_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+
+            let visible_line = if h_scroll < line.len() {
+                &line[h_scroll..]
+            } else {
+                ""
+            };
+
+            let display_line: String = visible_line.chars().take(text_width).collect();
+
+            if i == app.script_editor_cursor.0 {
+                Line::styled(display_line, Style::default().fg(Color::White))
+            } else {
+                Line::styled(display_line, Style::default().fg(Color::Gray))
+            }
+        })
+        .collect();
+
+    let text_widget = Paragraph::new(text_lines);
+    frame.render_widget(text_widget, text_area);
+
+    // Draw cursor
+    let cursor_line = app.script_editor_cursor.0;
+    let cursor_col = app.script_editor_cursor.1;
+
+    if cursor_line >= scroll_offset && cursor_line < scroll_offset + visible_height {
+        let screen_y = text_area.y + (cursor_line - scroll_offset) as u16;
+        let screen_x = if cursor_col >= h_scroll {
+            let col_in_view = cursor_col - h_scroll;
+            if col_in_view < text_width {
+                text_area.x + col_in_view as u16
+            } else {
+                text_area.x + text_area.width - 1
+            }
+        } else {
+            text_area.x
+        };
+
+        frame.set_cursor_position((screen_x, screen_y));
+    }
+
+    // Help text
+    let help_text = if app.script_editor_modified {
+        "[Ctrl+S] Save  [Esc] Cancel  [↑/↓/←/→] Navigate  [PgUp/PgDn] Scroll"
+    } else {
+        "[Esc] Back  [↑/↓/←/→] Navigate  [PgUp/PgDn] Scroll"
+    };
+    let help = Paragraph::new(help_text)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, help_area);
+}
+
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;

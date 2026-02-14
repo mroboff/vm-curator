@@ -528,10 +528,8 @@ pub fn handle_custom_os_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
 
                     app.pop_screen(); // Return to wizard
-                } else {
-                    if let Some(ref mut state) = app.wizard_state {
-                        state.error_message = Some("Please enter an OS name".to_string());
-                    }
+                } else if let Some(ref mut state) = app.wizard_state {
+                    state.error_message = Some("Please enter an OS name".to_string());
                 }
             }
             _ => {}
@@ -542,16 +540,13 @@ pub fn handle_custom_os_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
 /// Handle key input for download screen
 pub fn handle_download_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Esc => {
-            // Cancel download
-            if let Some(ref mut state) = app.wizard_state {
-                state.iso_downloading = false;
-                state.iso_download_progress = 0.0;
-            }
-            app.pop_screen();
+    if key.code == KeyCode::Esc {
+        // Cancel download
+        if let Some(ref mut state) = app.wizard_state {
+            state.iso_downloading = false;
+            state.iso_download_progress = 0.0;
         }
-        _ => {}
+        app.pop_screen();
     }
     Ok(())
 }
@@ -724,7 +719,7 @@ fn render_os_list(app: &App, frame: &mut Frame, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(prefix, os_style),
                     Span::styled(format!("   {}", chosen_marker), os_style),
-                    Span::styled(format!("{}", profile.display_name), os_style),
+                    Span::styled(profile.display_name.to_string(), os_style),
                     Span::styled(format!("  ({})", summary), Style::default().fg(Color::DarkGray)),
                 ]));
 
@@ -1426,8 +1421,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
                 if let Some(ref mut state) = app.wizard_state {
                     let buffer = state.wizard_edit_buffer.clone();
                     if let Some(value) = parse_size_with_suffix(&buffer, "GB") {
-                        let clamped = value.max(1).min(10000);
-                        state.disk_size_gb = clamped;
+                        state.disk_size_gb = value.clamp(1, 10000);
                     }
                     state.editing_field = None;
                     state.wizard_edit_buffer.clear();
@@ -2077,14 +2071,12 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                     if editing_memory {
                         // Parse with suffix support (target: MB)
                         if let Some(value) = parse_size_with_suffix(&buffer, "MB") {
-                            let clamped = value.max(128).min(1048576);
-                            state.qemu_config.memory_mb = clamped;
+                            state.qemu_config.memory_mb = value.clamp(128, 1048576);
                         }
                     } else if editing_cpu {
                         // Parse as plain number
                         if let Ok(value) = buffer.trim().parse::<u32>() {
-                            let clamped = value.max(1).min(256);
-                            state.qemu_config.cpu_cores = clamped;
+                            state.qemu_config.cpu_cores = value.clamp(1, 256);
                         }
                     }
                     state.editing_field = None;
@@ -2369,12 +2361,10 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
     match field {
         QemuField::Memory => {
             let change = 256 * delta;
-            let new_val = (state.qemu_config.memory_mb as i32 + change).max(128).min(1048576);
-            state.qemu_config.memory_mb = new_val as u32;
+            state.qemu_config.memory_mb = (state.qemu_config.memory_mb as i32 + change).clamp(128, 1048576) as u32;
         }
         QemuField::CpuCores => {
-            let new_val = (state.qemu_config.cpu_cores as i32 + delta).max(1).min(256);
-            state.qemu_config.cpu_cores = new_val as u32;
+            state.qemu_config.cpu_cores = (state.qemu_config.cpu_cores as i32 + delta).clamp(1, 256) as u32;
         }
         QemuField::Vga => {
             cycle_option(&mut state.qemu_config.vga, VGA_OPTIONS, delta);

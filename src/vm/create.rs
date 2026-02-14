@@ -230,7 +230,7 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
     let launch_script_path = write_launch_script(&vm_dir, &script_content)?;
 
     // Write VM metadata file with custom display name
-    write_vm_metadata(&vm_dir, &state.vm_name, state.selected_os.as_deref())?;
+    write_vm_metadata(&vm_dir, &state.vm_name, state.selected_os.as_deref(), None)?;
 
     Ok(CreatedVm {
         path: vm_dir,
@@ -280,7 +280,12 @@ fn handle_existing_disk(
 }
 
 /// Write VM metadata file (vm-curator.toml)
-fn write_vm_metadata(vm_dir: &Path, display_name: &str, os_profile: Option<&str>) -> Result<()> {
+pub fn write_vm_metadata(
+    vm_dir: &Path,
+    display_name: &str,
+    os_profile: Option<&str>,
+    notes: Option<&str>,
+) -> Result<()> {
     let metadata_path = vm_dir.join("vm-curator.toml");
 
     let mut content = String::new();
@@ -289,6 +294,15 @@ fn write_vm_metadata(vm_dir: &Path, display_name: &str, os_profile: Option<&str>
 
     if let Some(profile) = os_profile {
         content.push_str(&format!("os_profile = \"{}\"\n", profile));
+    }
+
+    if let Some(notes_text) = notes {
+        if notes_text.contains('\n') {
+            // Multi-line: use TOML literal string
+            content.push_str(&format!("notes = '''\n{}'''\n", notes_text));
+        } else {
+            content.push_str(&format!("notes = \"{}\"\n", notes_text.replace('"', "\\\"")));
+        }
     }
 
     fs::write(&metadata_path, content)
@@ -919,7 +933,7 @@ fn generate_network_args(
             // No networking backend
         }
         "passt" => {
-            args.push(format!("        -netdev passt,id=net0 \\"));
+            args.push("        -netdev passt,id=net0 \\".to_string());
             args.push(format!("        -device {},netdev=net0 \\", net_device));
         }
         "bridge" => {

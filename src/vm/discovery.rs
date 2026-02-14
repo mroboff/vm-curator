@@ -19,6 +19,8 @@ pub struct DiscoveredVm {
     pub custom_name: Option<String>,
     /// OS profile ID from vm-curator.toml (if set)
     pub os_profile: Option<String>,
+    /// User notes from vm-curator.toml (if set)
+    pub notes: Option<String>,
 }
 
 impl DiscoveredVm {
@@ -360,24 +362,27 @@ fn fallback_title_case(s: &str) -> String {
 }
 
 /// Read VM metadata from vm-curator.toml
-fn read_vm_metadata(vm_path: &Path) -> (Option<String>, Option<String>) {
+fn read_vm_metadata(vm_path: &Path) -> (Option<String>, Option<String>, Option<String>) {
     let metadata_path = vm_path.join("vm-curator.toml");
 
     if !metadata_path.exists() {
-        return (None, None);
+        return (None, None, None);
     }
 
     let content = match std::fs::read_to_string(&metadata_path) {
         Ok(c) => c,
-        Err(_) => return (None, None),
+        Err(_) => return (None, None, None),
     };
 
     // Simple TOML parsing for our specific keys
     let mut display_name = None;
     let mut os_profile = None;
+    let mut notes = None;
 
-    for line in content.lines() {
-        let line = line.trim();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
         if line.starts_with("display_name") {
             if let Some(value) = extract_toml_string_value(line) {
                 display_name = Some(value);
@@ -386,10 +391,49 @@ fn read_vm_metadata(vm_path: &Path) -> (Option<String>, Option<String>) {
             if let Some(value) = extract_toml_string_value(line) {
                 os_profile = Some(value);
             }
+        } else if line.starts_with("notes") {
+            // Check for multi-line literal string (notes = '''\n...\n''')
+            if let Some(after_eq) = line.split_once('=').map(|x| x.1) {
+                let val = after_eq.trim();
+                if let Some(first_part) = val.strip_prefix("'''") {
+                    // Multi-line: accumulate lines until closing '''
+                    let mut buf = String::new();
+                    if let Some(content) = first_part.strip_suffix("'''") {
+                        // Single-line triple-quoted: notes = '''content'''
+                        buf.push_str(content);
+                    } else {
+                        if !first_part.is_empty() {
+                            buf.push_str(first_part);
+                        }
+                        i += 1;
+                        while i < lines.len() {
+                            let l = lines[i];
+                            if let Some(end_pos) = l.find("'''") {
+                                buf.push_str(&l[..end_pos]);
+                                break;
+                            }
+                            if !buf.is_empty() {
+                                buf.push('\n');
+                            }
+                            buf.push_str(l);
+                            i += 1;
+                        }
+                    }
+                    if !buf.is_empty() {
+                        notes = Some(buf);
+                    }
+                } else if let Some(value) = extract_toml_string_value(line) {
+                    // Single-line quoted string
+                    if !value.is_empty() {
+                        notes = Some(value);
+                    }
+                }
+            }
         }
+        i += 1;
     }
 
-    (display_name, os_profile)
+    (display_name, os_profile, notes)
 }
 
 /// Extract a string value from a TOML line like: key = "value"
@@ -444,14 +488,15 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
         let config = match parse_launch_script(&launch_script, &script_content) {
             Ok(cfg) => cfg,
             Err(_) => {
-                let mut default_config = QemuConfig::default();
-                default_config.raw_script = script_content;
-                default_config
+                QemuConfig {
+                    raw_script: script_content,
+                    ..QemuConfig::default()
+                }
             }
         };
 
         // Read vm-curator.toml metadata if it exists
-        let (custom_name, os_profile) = read_vm_metadata(&path);
+        let (custom_name, os_profile, notes) = read_vm_metadata(&path);
 
         vms.push(DiscoveredVm {
             id,
@@ -460,11 +505,12 @@ pub fn discover_vms(library_path: &Path) -> Result<Vec<DiscoveredVm>> {
             config,
             custom_name,
             os_profile,
+            notes,
         });
     }
 
     // Sort by display name
-    vms.sort_by(|a, b| a.display_name().cmp(&b.display_name()));
+    vms.sort_by_key(|v| v.display_name());
 
     Ok(vms)
 }
@@ -524,6 +570,7 @@ mod tests {
             config: QemuConfig::default(),
             custom_name: None,
             os_profile: None,
+            notes: None,
         };
         assert_eq!(vm.display_name(), "Microsoft® Windows 95");
     }
@@ -537,6 +584,7 @@ mod tests {
             config: QemuConfig::default(),
             custom_name: Some("CachyOS Gaming Rig".to_string()),
             os_profile: Some("linux-cachyos".to_string()),
+            notes: None,
         };
         // Custom name takes priority
         assert_eq!(vm.display_name(), "CachyOS Gaming Rig");

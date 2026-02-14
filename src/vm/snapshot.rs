@@ -246,7 +246,7 @@ pub fn get_disk_info(disk_path: &Path) -> Result<DiskInfo> {
         format: info.format,
         virtual_size: format_size(info.virtual_size),
         disk_size: info.actual_size.map(format_size).unwrap_or_else(|| "unknown".to_string()),
-        cluster_size: info.cluster_size.map(|s| format_size(s)),
+        cluster_size: info.cluster_size.map(format_size),
         backing_file: info.backing_filename,
     })
 }
