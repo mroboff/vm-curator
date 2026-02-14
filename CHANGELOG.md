@@ -1,5 +1,8 @@
 # Changelog
 
+**v0.4.1**
+- Fix Cargo.lock version mismatch that prevented AUR package from building (`cargo fetch --locked` failed due to stale lockfile in v0.4.0 release tarball)
+
 **v0.4.0**
 - **VM Import Wizard**: Import existing virtual machines from libvirt (virsh) XML configurations and Quickemu .conf files
   - 5-step guided import: select source, choose VM, review compatibility warnings, configure disk handling, review and import
