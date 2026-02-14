@@ -10,6 +10,10 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 
 ### Changelog
 
+**v0.4.0**
+- **VM Import Wizard**: Import existing VMs from libvirt XML configs and Quickemu .conf files with guided 5-step wizard
+- **VM Notes**: Add free-form personal notes to any VM, displayed in the main info panel
+
 **v0.3.4**
 - Fix "unsupported bus type 'sata'" error when launching Windows and macOS VMs with default profiles
 

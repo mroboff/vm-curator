@@ -1,5 +1,16 @@
 # Changelog
 
+**v0.4.0**
+- **VM Import Wizard**: Import existing virtual machines from libvirt (virsh) XML configurations and Quickemu .conf files
+  - 5-step guided import: select source, choose VM, review compatibility warnings, configure disk handling, review and import
+  - Automatic OS profile detection from imported configurations
+  - Disk handling options: symlink, copy, or move existing disk images
+  - Compatibility warnings for unsupported features (macvtap, virtio-net bridges, SPICE displays)
+- **VM Notes**: Add free-form personal notes to any VM from the management menu
+  - Multi-line text editor with full keyboard navigation
+  - Notes stored in per-VM `vm-curator.toml` and displayed in the main info panel below Fun Facts
+  - Notes preserved across VM renames
+
 **v0.3.4**
 - Fix "unsupported bus type 'sata'" error when launching Windows and macOS VMs with default profiles
 
