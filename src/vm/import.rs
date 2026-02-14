@@ -750,7 +750,7 @@ pub fn execute_import(
     );
 
     write_launch_script(&vm_dir, &script_content)?;
-    write_vm_metadata(&vm_dir, vm_name, vm.detected_os_profile.as_deref())?;
+    write_vm_metadata(&vm_dir, vm_name, vm.detected_os_profile.as_deref(), None)?;
 
     Ok(vm_dir)
 }

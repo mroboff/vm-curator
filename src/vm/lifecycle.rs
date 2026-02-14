@@ -361,45 +361,12 @@ pub fn delete_vm(vm: &DiscoveredVm, permanent: bool) -> Result<()> {
 
 /// Rename a VM by updating its display name in vm-curator.toml
 pub fn rename_vm(vm: &DiscoveredVm, new_name: &str) -> Result<()> {
-    let metadata_path = vm.path.join("vm-curator.toml");
+    // Preserve existing os_profile and notes
+    let os_profile = vm.os_profile.as_deref()
+        .or(Some(&vm.id));
+    let notes = vm.notes.as_deref();
 
-    // Read existing metadata or create new
-    let os_profile = if metadata_path.exists() {
-        // Parse existing file to preserve os_profile
-        let content = std::fs::read_to_string(&metadata_path)
-            .context("Failed to read VM metadata")?;
-
-        // Simple extraction of os_profile
-        content.lines()
-            .find(|line| line.trim().starts_with("os_profile"))
-            .and_then(|line| {
-                let parts: Vec<&str> = line.splitn(2, '=').collect();
-                if parts.len() == 2 {
-                    let value = parts[1].trim();
-                    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                        Some(value[1..value.len()-1].to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-    } else {
-        // No existing file, use VM's id as fallback profile
-        Some(vm.id.clone())
-    };
-
-    // Write updated metadata
-    let mut content = String::new();
-    content.push_str("# VM Curator metadata\n\n");
-    content.push_str(&format!("display_name = \"{}\"\n", new_name.replace('"', "\\\"")));
-
-    if let Some(profile) = os_profile {
-        content.push_str(&format!("os_profile = \"{}\"\n", profile));
-    }
-
-    std::fs::write(&metadata_path, content)
+    crate::vm::create::write_vm_metadata(&vm.path, new_name, os_profile, notes)
         .context("Failed to write VM metadata")?;
 
     Ok(())

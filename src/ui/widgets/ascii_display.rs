@@ -11,6 +11,7 @@ pub struct AsciiInfoWidget<'a> {
     pub os_info: Option<&'a OsInfo>,
     pub vm_name: &'a str,
     pub scroll: u16,
+    pub notes: Option<&'a str>,
 }
 
 impl<'a> AsciiInfoWidget<'a> {
@@ -86,12 +87,36 @@ impl<'a> AsciiInfoWidget<'a> {
                     lines.push(Line::from(format!("• {}", fact)));
                 }
             }
+
+            // User notes
+            if let Some(notes) = self.notes {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Notes",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                for line in notes.lines() {
+                    lines.push(Line::from(line.to_string()));
+                }
+            }
         } else {
             // Just show the VM name
             lines.push(Line::from(Span::styled(
                 self.vm_name,
                 Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
             )));
+
+            // User notes (even without OS info)
+            if let Some(notes) = self.notes {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Notes",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                for line in notes.lines() {
+                    lines.push(Line::from(line.to_string()));
+                }
+            }
         }
 
         // Don't use trim: true as it breaks ASCII art spacing

@@ -28,6 +28,7 @@ pub enum MenuAction {
     MultiGpuPassthrough,
     SingleGpuPassthrough,
     ChangeDisplay,
+    EditNotes,
     RenameVm,
     ResetVm,
     DeleteVm,
@@ -92,6 +93,11 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "Change Display",
             description: "GTK, SDL, SPICE-app, or VNC output",
             action: MenuAction::ChangeDisplay,
+        },
+        MenuItem {
+            name: "Edit Notes",
+            description: "Add or edit personal notes for this VM",
+            action: MenuAction::EditNotes,
         },
         MenuItem {
             name: "Rename VM",

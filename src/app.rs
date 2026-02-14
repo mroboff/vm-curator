@@ -70,6 +70,8 @@ pub enum Screen {
     Settings,
     /// VM Import wizard
     ImportWizard,
+    /// Notes editor
+    EditNotes,
 }
 
 /// Context for text input dialogs
@@ -88,6 +90,7 @@ pub enum ConfirmAction {
     DeleteSnapshot(String),
     RestoreSnapshot(String),
     DiscardScriptChanges,
+    DiscardNotesChanges,
     StopVm,
     ForceStopVm,
 }
@@ -1557,6 +1560,59 @@ impl App {
             }
         }
 
+        Ok(())
+    }
+
+    // =========================================================================
+    // Notes Editor Methods
+    // =========================================================================
+
+    /// Load the selected VM's notes into the editor
+    pub fn load_notes_into_editor(&mut self) {
+        if let Some(vm) = self.selected_vm() {
+            let notes_text = vm.notes.as_deref().unwrap_or("");
+            self.script_editor_lines = notes_text.lines().map(String::from).collect();
+            if self.script_editor_lines.is_empty() {
+                self.script_editor_lines.push(String::new());
+            }
+            self.script_editor_cursor = (0, 0);
+            self.script_editor_modified = false;
+            self.script_editor_h_scroll = 0;
+            self.raw_script_scroll = 0;
+        }
+    }
+
+    /// Save the editor content as notes to vm-curator.toml
+    pub fn save_notes_from_editor(&mut self) -> Result<()> {
+        let vm = self.selected_vm()
+            .ok_or_else(|| anyhow::anyhow!("No VM selected"))?;
+
+        let vm_path = vm.path.clone();
+        let display_name = vm.display_name();
+        let os_profile = vm.os_profile.clone();
+
+        let notes_text = self.script_editor_lines.join("\n");
+        // Trim trailing whitespace/newlines
+        let notes_text = notes_text.trim_end().to_string();
+        let notes = if notes_text.is_empty() { None } else { Some(notes_text.as_str()) };
+
+        crate::vm::create::write_vm_metadata(
+            &vm_path,
+            &display_name,
+            os_profile.as_deref(),
+            notes,
+        )?;
+
+        // Update the in-memory VM's notes
+        if let Some(filtered_idx) = self.visual_order.get(self.selected_vm) {
+            if let Some(actual_idx) = self.filtered_indices.get(*filtered_idx) {
+                if let Some(vm) = self.vms.get_mut(*actual_idx) {
+                    vm.notes = notes.map(String::from);
+                }
+            }
+        }
+
+        self.script_editor_modified = false;
         Ok(())
     }
 

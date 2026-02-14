@@ -40,11 +40,14 @@ pub fn render(app: &App, frame: &mut Frame) {
     let os_info = app.selected_vm_info();
     let ascii_art = app.selected_vm_ascii();
 
+    let notes = app.selected_vm().and_then(|vm| vm.notes.as_deref());
+
     AsciiInfoWidget {
         ascii_art,
         os_info: os_info.as_ref(),
         vm_name: &vm_name,
         scroll: app.info_scroll,
+        notes,
     }
     .render(main_chunks[1], frame.buffer_mut());
 
