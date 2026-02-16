@@ -28,6 +28,24 @@ pub fn create_disk(path: &Path, size: &str) -> Result<()> {
     Ok(())
 }
 
+/// Convert a disk image from one format to another (e.g., DMG to qcow2)
+#[allow(dead_code)]
+pub fn convert_disk(source: &Path, dest: &Path, dest_format: &str) -> Result<()> {
+    let source_str = path_to_str(source)?;
+    let dest_str = path_to_str(dest)?;
+    let output = Command::new("qemu-img")
+        .args(["convert", "-O", dest_format, source_str, dest_str])
+        .output()
+        .context("Failed to run qemu-img convert")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to convert disk: {}", stderr);
+    }
+
+    Ok(())
+}
+
 /// Detect the format of a disk image (returns format string like "qcow2", "raw", etc.)
 pub fn detect_disk_format(path: &Path) -> Option<String> {
     let path_str = path_to_str(path).ok()?;

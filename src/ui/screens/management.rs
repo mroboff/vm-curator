@@ -309,6 +309,7 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
         ("Normal boot", "Start the VM normally"),
         ("Install mode", "Boot from installation media"),
         ("Boot with custom ISO", "Select an ISO file to boot"),
+        ("Boot with recovery DMG", "Select a DMG file as recovery image"),
     ];
 
     let items: Vec<ListItem> = boot_items

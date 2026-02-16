@@ -991,20 +991,53 @@ fn render_step_select_iso(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(os_info, chunks[0]);
 
     // Header
-    let header = Paragraph::new("Installation ISO:")
+    let header = Paragraph::new("Install Media:")
         .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
     frame.render_widget(header, chunks[2]);
 
     // Options
     let mut lines = Vec::new();
+    let mut option_idx = 0;
+
+    // BIOS/ROM option first (if the selected profile has bios_rom config)
+    let bios_rom_config = state.selected_os.as_ref()
+        .and_then(|id| app.qemu_profiles.get(id))
+        .and_then(|p| p.bios_rom.as_ref());
+
+    if let Some(bios_config) = bios_rom_config {
+        let req_label = if bios_config.required { " (REQUIRED)" } else { " (optional)" };
+        let is_rom_selected = state.field_focus == option_idx;
+        let rom_style = if is_rom_selected {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let rom_prefix = if is_rom_selected { "> " } else { "  " };
+        lines.push(Line::styled(
+            format!("{}( ) Browse for {} file...{}", rom_prefix, bios_config.label, req_label),
+            rom_style,
+        ));
+
+        if let Some(ref hint) = bios_config.hint {
+            lines.push(Line::styled(format!("       {}", hint), Style::default().fg(Color::DarkGray)));
+        }
+
+        if let Some(ref rom_path) = state.bios_rom_path {
+            lines.push(Line::styled(
+                format!("       ROM: {}", rom_path.display()),
+                Style::default().fg(Color::Green),
+            ));
+        }
+
+        lines.push(Line::from(""));
+        option_idx += 1;
+    }
 
     // Check if this OS has a free ISO URL
     let has_download = state.selected_os.as_ref()
         .and_then(|id| app.qemu_profiles.get(id))
         .and_then(|p| p.iso_url.as_ref())
         .is_some();
-
-    let mut option_idx = 0;
 
     if has_download {
         let is_selected = state.field_focus == option_idx;
@@ -1028,6 +1061,16 @@ fn render_step_select_iso(app: &App, frame: &mut Frame, area: Rect) {
     lines.push(Line::styled(format!("{}( ) Browse for local ISO file...", browse_prefix), browse_style));
     option_idx += 1;
 
+    let is_recovery_selected = state.field_focus == option_idx;
+    let recovery_style = if is_recovery_selected {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let recovery_prefix = if is_recovery_selected { "> " } else { "  " };
+    lines.push(Line::styled(format!("{}( ) Browse for recovery image (DMG)...", recovery_prefix), recovery_style));
+    option_idx += 1;
+
     let is_none_selected = state.field_focus == option_idx;
     let none_style = if is_none_selected {
         Style::default().fg(Color::Yellow)
@@ -1035,14 +1078,16 @@ fn render_step_select_iso(app: &App, frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::White)
     };
     let none_prefix = if is_none_selected { "> " } else { "  " };
-    lines.push(Line::styled(format!("{}( ) No ISO (configure later)", none_prefix), none_style));
+    lines.push(Line::styled(format!("{}( ) Skip (configure later)", none_prefix), none_style));
 
-    let options = Paragraph::new(lines);
+    let options = Paragraph::new(lines)
+        .wrap(Wrap { trim: false });
     frame.render_widget(options, chunks[3]);
 
     // Selected path
     if let Some(ref path) = state.iso_path {
-        let path_text = Paragraph::new(format!("Selected: {}", path.display()))
+        let label = if state.is_recovery_image { "Selected recovery image" } else { "Selected ISO" };
+        let path_text = Paragraph::new(format!("{}: {}", label, path.display()))
             .style(Style::default().fg(Color::Green));
         frame.render_widget(path_text, chunks[4]);
     }
@@ -1061,7 +1106,20 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
         .and_then(|p| p.iso_url.as_ref())
         .is_some();
 
-    let max_options = if has_download { 3 } else { 2 };
+    let has_bios_rom = app.wizard_state.as_ref()
+        .and_then(|s| s.selected_os.as_ref())
+        .and_then(|id| app.qemu_profiles.get(id))
+        .and_then(|p| p.bios_rom.as_ref())
+        .is_some();
+
+    // Compute option indices matching the render order: ROM, download, browse, recovery, skip
+    let mut idx = 0;
+    let rom_idx = if has_bios_rom { let i = idx; idx += 1; Some(i) } else { None };
+    let download_idx = if has_download { let i = idx; idx += 1; Some(i) } else { None };
+    let browse_idx = idx; idx += 1;
+    let recovery_browse_idx = idx; idx += 1;
+    let no_iso_idx = idx; idx += 1;
+    let max_options = idx;
 
     match key.code {
         KeyCode::Esc => {
@@ -1083,38 +1141,56 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Enter => {
             let focus = app.wizard_state.as_ref().map(|s| s.field_focus).unwrap_or(0);
-            let option_offset = if has_download { 0 } else { 1 };
 
-            match focus + option_offset {
-                0 => {
-                    // Open download page in browser
-                    if let Some(url) = app.wizard_state.as_ref()
-                        .and_then(|s| s.selected_os.as_ref())
-                        .and_then(|id| app.qemu_profiles.get(id))
-                        .and_then(|p| p.iso_url.as_ref())
-                    {
-                        // Try to open in browser
-                        let url = url.clone();
-                        if let Err(e) = open_url_in_browser(&url) {
-                            app.set_status(format!("Failed to open browser: {}", e));
-                        } else {
-                            app.set_status("Opened download page in browser. Use 'Browse for ISO' after downloading.");
-                        }
+            if Some(focus) == rom_idx {
+                // Browse for ROM/BIOS file
+                app.load_file_browser(crate::app::FileBrowserMode::Bios);
+                app.push_screen(crate::app::Screen::FileBrowser);
+            } else if Some(focus) == download_idx {
+                // Open download page in browser
+                if let Some(url) = app.wizard_state.as_ref()
+                    .and_then(|s| s.selected_os.as_ref())
+                    .and_then(|id| app.qemu_profiles.get(id))
+                    .and_then(|p| p.iso_url.as_ref())
+                {
+                    let url = url.clone();
+                    if let Err(e) = open_url_in_browser(&url) {
+                        app.set_status(format!("Failed to open browser: {}", e));
+                    } else {
+                        app.set_status("Opened download page in browser. Use 'Browse for ISO' after downloading.");
                     }
                 }
-                1 => {
-                    // Browse for ISO - open file browser
-                    app.load_file_browser(crate::app::FileBrowserMode::Iso);
-                    app.push_screen(crate::app::Screen::FileBrowser);
-                }
-                2 => {
-                    // No ISO
+            } else if focus == browse_idx {
+                // Browse for ISO - open file browser
+                app.load_file_browser(crate::app::FileBrowserMode::Iso);
+                app.push_screen(crate::app::Screen::FileBrowser);
+            } else if focus == recovery_browse_idx {
+                // Browse for recovery image (DMG) - open file browser
+                app.load_file_browser(crate::app::FileBrowserMode::RecoveryImage);
+                app.push_screen(crate::app::Screen::FileBrowser);
+            } else if focus == no_iso_idx {
+                // Skip - check if ROM is required but missing
+                let rom_required_but_missing = app.wizard_state.as_ref()
+                    .and_then(|s| s.selected_os.as_ref())
+                    .and_then(|id| app.qemu_profiles.get(id))
+                    .and_then(|p| p.bios_rom.as_ref())
+                    .map(|b| b.required)
+                    .unwrap_or(false)
+                    && app.wizard_state.as_ref()
+                        .map(|s| s.bios_rom_path.is_none())
+                        .unwrap_or(false);
+
+                if rom_required_but_missing {
                     if let Some(ref mut state) = app.wizard_state {
-                        state.iso_path = None;
+                        state.error_message = Some("Warning: ROM file is required for this OS but not selected. Proceeding anyway.".to_string());
                     }
-                    let _ = app.wizard_next_step();
                 }
-                _ => {}
+
+                if let Some(ref mut state) = app.wizard_state {
+                    state.iso_path = None;
+                    state.is_recovery_image = false;
+                }
+                let _ = app.wizard_next_step();
             }
         }
         _ => {}
@@ -2511,6 +2587,12 @@ fn render_step_confirm(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled("ISO:            ", Style::default().fg(Color::Yellow)),
         Span::raw(iso_str),
     ]));
+    if let Some(ref rom_path) = state.bios_rom_path {
+        lines.push(Line::from(vec![
+            Span::styled("BIOS/ROM:       ", Style::default().fg(Color::Yellow)),
+            Span::raw(rom_path.display().to_string()),
+        ]));
+    }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("Hardware:       ", Style::default().fg(Color::Yellow)),
@@ -2700,58 +2782,5 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_size_with_suffix_memory() {
-        // Plain number assumes target unit (MB)
-        assert_eq!(parse_size_with_suffix("8192", "MB"), Some(8192));
-        assert_eq!(parse_size_with_suffix("2048", "MB"), Some(2048));
-
-        // GB to MB conversion
-        assert_eq!(parse_size_with_suffix("8GB", "MB"), Some(8192));
-        assert_eq!(parse_size_with_suffix("8gb", "MB"), Some(8192));  // case insensitive
-        assert_eq!(parse_size_with_suffix("32GB", "MB"), Some(32768));
-        assert_eq!(parse_size_with_suffix("96GB", "MB"), Some(98304));  // exceeds old 64GB limit
-        assert_eq!(parse_size_with_suffix("1024GB", "MB"), Some(1048576));  // 1TB
-
-        // MB to MB (no conversion)
-        assert_eq!(parse_size_with_suffix("8192MB", "MB"), Some(8192));
-
-        // KB to MB conversion
-        assert_eq!(parse_size_with_suffix("8388608KB", "MB"), Some(8192));
-
-        // Whitespace handling
-        assert_eq!(parse_size_with_suffix("  8192  ", "MB"), Some(8192));
-        assert_eq!(parse_size_with_suffix("8 GB", "MB"), Some(8192));
-    }
-
-    #[test]
-    fn test_parse_size_with_suffix_disk() {
-        // Plain number assumes target unit (GB)
-        assert_eq!(parse_size_with_suffix("500", "GB"), Some(500));
-        assert_eq!(parse_size_with_suffix("100", "GB"), Some(100));
-
-        // GB to GB (no conversion)
-        assert_eq!(parse_size_with_suffix("500GB", "GB"), Some(500));
-        assert_eq!(parse_size_with_suffix("500gb", "GB"), Some(500));
-
-        // MB to GB conversion
-        assert_eq!(parse_size_with_suffix("512000MB", "GB"), Some(500));
-        assert_eq!(parse_size_with_suffix("1024MB", "GB"), Some(1));
-    }
-
-    #[test]
-    fn test_parse_size_with_suffix_invalid() {
-        // Empty string
-        assert_eq!(parse_size_with_suffix("", "MB"), None);
-
-        // Non-numeric
-        assert_eq!(parse_size_with_suffix("abc", "MB"), None);
-        assert_eq!(parse_size_with_suffix("GB", "MB"), None);
-
-        // Negative values
-        assert_eq!(parse_size_with_suffix("-100", "MB"), None);
-    }
-}
+#[path = "tests/create_wizard.rs"]
+mod tests;

@@ -107,9 +107,11 @@ pub enum InputMode {
 pub enum FileBrowserMode {
     #[default]
     Iso,
+    RecoveryImage,
     Disk,
     Directory,
     ImportConfig,
+    Bios,
 }
 
 /// Action to take with an existing disk when using it for a new VM
@@ -152,7 +154,7 @@ impl WizardStep {
     pub fn title(&self) -> &'static str {
         match self {
             WizardStep::SelectOs => "Select Operating System",
-            WizardStep::SelectIso => "Select Installation ISO",
+            WizardStep::SelectIso => "Select Install Media",
             WizardStep::ConfigureDisk => "Configure Disk",
             WizardStep::ConfigureQemu => "Configure QEMU",
             WizardStep::Confirm => "Review & Create",
@@ -225,6 +227,8 @@ pub struct WizardQemuConfig {
     pub bridge_name: Option<String>,
     /// Additional QEMU arguments
     pub extra_args: Vec<String>,
+    /// BIOS/ROM file path (for classic Mac and other systems needing custom firmware)
+    pub bios_path: Option<PathBuf>,
 }
 
 impl Default for WizardQemuConfig {
@@ -250,6 +254,7 @@ impl Default for WizardQemuConfig {
             port_forwards: Vec::new(),
             bridge_name: None,
             extra_args: Vec::new(),
+            bios_path: None,
         }
     }
 }
@@ -279,10 +284,11 @@ impl WizardQemuConfig {
             rtc_localtime: profile.rtc_localtime,
             usb_tablet: profile.usb_tablet,
             display: profile.display.clone(),
-            network_backend: "user".to_string(),
+            network_backend: profile.network_backend.clone(),
             port_forwards: Vec::new(),
             bridge_name: None,
             extra_args: profile.extra_args.clone(),
+            bios_path: None,
         }
     }
 }
@@ -330,8 +336,10 @@ pub struct CreateWizardState {
     pub selected_os: Option<String>,
     /// Custom OS entry (if "Other" selected)
     pub custom_os: Option<CustomOsEntry>,
-    /// ISO file path
+    /// ISO or recovery image file path
     pub iso_path: Option<PathBuf>,
+    /// Whether the selected media is a recovery image (DMG) rather than an ISO
+    pub is_recovery_image: bool,
     /// Whether an ISO download is in progress
     pub iso_downloading: bool,
     /// ISO download progress (0.0 - 1.0)
@@ -344,6 +352,8 @@ pub struct CreateWizardState {
     pub existing_disk_path: Option<PathBuf>,
     /// Action to take with existing disk (copy or move)
     pub existing_disk_action: DiskAction,
+    /// BIOS/ROM file path (for classic Mac and other systems needing custom firmware)
+    pub bios_rom_path: Option<PathBuf>,
     /// QEMU configuration
     pub qemu_config: WizardQemuConfig,
     /// Auto-launch VM after creation
@@ -395,12 +405,14 @@ impl Default for CreateWizardState {
             selected_os: None,
             custom_os: None,
             iso_path: None,
+            is_recovery_image: false,
             iso_downloading: false,
             iso_download_progress: 0.0,
             disk_size_gb: 32,
             use_existing_disk: false,
             existing_disk_path: None,
             existing_disk_action: DiskAction::Copy,
+            bios_rom_path: None,
             qemu_config: WizardQemuConfig::default(),
             auto_launch: true,
             field_focus: 0,
@@ -1414,9 +1426,11 @@ impl App {
         // Determine file extensions to filter by based on mode
         let extensions: &[&str] = match mode {
             FileBrowserMode::Iso => &[".iso", ".ISO"],
+            FileBrowserMode::RecoveryImage => &[".dmg", ".DMG", ".qcow2", ".QCOW2"],
             FileBrowserMode::Disk => &[".qcow2", ".QCOW2", ".qcow", ".QCOW"],
             FileBrowserMode::Directory => &[],
             FileBrowserMode::ImportConfig => &[".xml", ".XML", ".conf"],
+            FileBrowserMode::Bios => &[".bin", ".BIN", ".rom", ".ROM", ".qcow2", ".QCOW2", ".fd", ".FD"],
         };
 
         // For Directory mode, add a [Select This Directory] sentinel entry first

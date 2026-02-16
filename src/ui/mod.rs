@@ -1208,13 +1208,14 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
 
     match key.code {
         KeyCode::Esc => app.pop_screen(),
-        KeyCode::Char('j') | KeyCode::Down => app.menu_next(3),
+        KeyCode::Char('j') | KeyCode::Down => app.menu_next(4),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
-        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') => {
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
             let item = match key.code {
                 KeyCode::Char('1') => 0,
                 KeyCode::Char('2') => 1,
                 KeyCode::Char('3') => 2,
+                KeyCode::Char('4') => 3,
                 _ => app.selected_menu_item,
             };
 
@@ -1232,6 +1233,11 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
                 2 => {
                     // Open file browser for ISO selection
                     app.load_file_browser(FileBrowserMode::Iso);
+                    app.push_screen(Screen::FileBrowser);
+                }
+                3 => {
+                    // Open file browser for recovery image (DMG) selection
+                    app.load_file_browser(FileBrowserMode::RecoveryImage);
                     app.push_screen(Screen::FileBrowser);
                 }
                 _ => {}
@@ -1678,9 +1684,11 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
 
     let title_prefix = match app.file_browser_mode {
         FileBrowserMode::Iso => "Select ISO",
+        FileBrowserMode::RecoveryImage => "Select Recovery Image",
         FileBrowserMode::Disk => "Select Disk Image",
         FileBrowserMode::Directory => "Select Directory",
         FileBrowserMode::ImportConfig => "Select Config File",
+        FileBrowserMode::Bios => "Select BIOS/ROM File",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -1716,9 +1724,11 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
     if app.file_browser_entries.is_empty() {
         let msg_text = match app.file_browser_mode {
             FileBrowserMode::Iso => "No ISO files found in this directory.",
+            FileBrowserMode::RecoveryImage => "No recovery images (.dmg, .qcow2) found in this directory.",
             FileBrowserMode::Disk => "No disk images found in this directory.",
             FileBrowserMode::Directory => "No subdirectories in this directory.",
             FileBrowserMode::ImportConfig => "No config files (.xml, .conf) found in this directory.",
+            FileBrowserMode::Bios => "No firmware files (.bin, .rom, .qcow2, .fd) found in this directory.",
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
             .style(Style::default().fg(Color::DarkGray))
@@ -1771,6 +1781,7 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                             // Set the ISO path in wizard state
                             if let Some(ref mut state) = app.wizard_state {
                                 state.iso_path = Some(selected_path);
+                                state.is_recovery_image = false;
                             }
                             app.pop_screen(); // Close file browser
 
@@ -1784,12 +1795,36 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
                         }
                     }
+                    FileBrowserMode::RecoveryImage => {
+                        if app.wizard_state.is_some() {
+                            if let Some(ref mut state) = app.wizard_state {
+                                state.iso_path = Some(selected_path);
+                                state.is_recovery_image = true;
+                            }
+                            app.pop_screen();
+                            let _ = app.wizard_next_step();
+                        } else {
+                            // Boot options mode
+                            app.boot_mode = BootMode::Recovery(selected_path);
+                            app.pop_screen(); // Close file browser
+                            app.pop_screen(); // Close boot options
+                            app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
+                        }
+                    }
                     FileBrowserMode::Disk => {
                         // Selected a disk file - must be in wizard mode
                         if let Some(ref mut state) = app.wizard_state {
                             state.existing_disk_path = Some(selected_path);
                         }
                         app.pop_screen(); // Close file browser, return to disk config step
+                    }
+                    FileBrowserMode::Bios => {
+                        // Selected a ROM/BIOS file - must be in wizard mode
+                        if let Some(ref mut state) = app.wizard_state {
+                            state.bios_rom_path = Some(selected_path.clone());
+                            state.qemu_config.bios_path = Some(selected_path);
+                        }
+                        app.pop_screen(); // Close file browser, return to ISO step
                     }
                     FileBrowserMode::Directory => {
                         // Directory selected (from [Select This Directory] entry)

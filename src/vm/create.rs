@@ -25,6 +25,16 @@ use crate::app::{CreateWizardState, DiskAction, WizardQemuConfig};
 use crate::commands::qemu_img;
 use crate::vm::qemu_config::{PortForward, PortProtocol};
 
+/// Install media type for QEMU command generation
+pub enum InstallMedia<'a> {
+    /// No install media
+    None,
+    /// ISO mounted as CD-ROM; None = $ISO variable, Some = custom path expression
+    Iso(Option<&'a str>),
+    /// Recovery image (DMG) mounted as IDE drive; None = $RECOVERY_IMG variable, Some = custom path
+    RecoveryImage(Option<&'a str>),
+}
+
 /// Generate a random UUID for SMBIOS
 fn generate_uuid() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -219,12 +229,30 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
         create_disk_image(&vm_dir, &disk_filename, state.disk_size_gb)?
     };
 
+    // Copy BIOS/ROM file to VM directory if provided
+    let mut qemu_config = state.qemu_config.clone();
+    if let Some(ref rom_path) = state.bios_rom_path {
+        let rom_filename = rom_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "rom.bin".to_string());
+        let dest = vm_dir.join(&rom_filename);
+        fs::copy(rom_path, &dest)
+            .with_context(|| format!(
+                "Failed to copy ROM file from {} to {}",
+                rom_path.display(),
+                dest.display()
+            ))?;
+        qemu_config.bios_path = Some(PathBuf::from(&rom_filename));
+    }
+
     // Generate and write launch script with OS-awareness
     let script_content = generate_launch_script_with_os(
         &state.vm_name,
         &disk_filename,
         state.iso_path.as_deref(),
-        &state.qemu_config,
+        state.is_recovery_image,
+        &qemu_config,
         state.selected_os.as_deref(),
     );
     let launch_script_path = write_launch_script(&vm_dir, &script_content)?;
@@ -344,6 +372,28 @@ fn is_windows_10_or_11(os_profile: Option<&str>) -> bool {
 /// Check if an OS profile is Windows 11 specifically
 fn is_windows_11(os_profile: Option<&str>) -> bool {
     matches!(os_profile, Some("windows-11"))
+}
+
+/// Check if an OS profile is an Intel (x86_64) macOS
+fn is_intel_macos(os_profile: Option<&str>, emulator: &str) -> bool {
+    if !emulator.contains("x86_64") {
+        return false;
+    }
+    os_profile.map_or(false, |p| p.starts_with("macos-") || p.starts_with("mac-osx-"))
+}
+
+/// Check if an OS profile is a modern macOS that requires OpenCore
+#[allow(dead_code)]
+fn is_modern_macos(os_profile: Option<&str>) -> bool {
+    matches!(
+        os_profile,
+        Some("macos-big-sur")
+            | Some("macos-monterey")
+            | Some("macos-ventura")
+            | Some("macos-sonoma")
+            | Some("macos-sequoia")
+            | Some("macos-tahoe")
+    )
 }
 
 /// Generate SMBIOS options for Windows to avoid corporate machine detection
@@ -483,12 +533,14 @@ pub fn generate_launch_script_with_os(
     vm_name: &str,
     disk_filename: &str,
     iso_path: Option<&Path>,
+    is_recovery_image: bool,
     config: &WizardQemuConfig,
     os_profile: Option<&str>,
 ) -> String {
     let mut script = String::new();
 
     let is_windows = is_windows_10_or_11(os_profile);
+    let is_intel_macos_vm = is_intel_macos(os_profile, &config.emulator);
     let needs_tpm = config.tpm || is_windows_11(os_profile);
     let needs_uefi = config.uefi || is_windows_11(os_profile);
 
@@ -502,6 +554,9 @@ pub fn generate_launch_script_with_os(
     if is_windows {
         script.push_str("# Windows VM with unique SMBIOS identifiers\n");
     }
+    if is_intel_macos_vm {
+        script.push_str("# macOS VM with Apple SMC emulation\n");
+    }
     if needs_tpm {
         script.push_str("# TPM 2.0 enabled (requires swtpm package)\n");
     }
@@ -514,13 +569,45 @@ pub fn generate_launch_script_with_os(
     script.push_str("VM_DIR=\"$(dirname \"$(readlink -f \"$0\")\")\"\n");
     script.push_str(&format!("DISK=\"$VM_DIR/{}\"\n", disk_filename));
 
-    if let Some(iso) = iso_path {
-        // Shell-escape the ISO path to prevent command injection
-        script.push_str(&format!("ISO={}\n", shell_escape(&iso.display().to_string())));
+    if is_recovery_image {
+        // Recovery image (DMG) variable
+        if let Some(path) = iso_path {
+            script.push_str(&format!("RECOVERY_IMG={}\n", shell_escape(&path.display().to_string())));
+        } else {
+            script.push_str("RECOVERY_IMG=\"\"\n");
+        }
     } else {
-        script.push_str("ISO=\"\"\n");
+        // ISO variable
+        if let Some(iso) = iso_path {
+            script.push_str(&format!("ISO={}\n", shell_escape(&iso.display().to_string())));
+        } else {
+            script.push_str("ISO=\"\"\n");
+        }
     }
+
+    // BIOS/ROM file variable
+    if let Some(ref bios_path) = config.bios_path {
+        let filename = bios_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| bios_path.display().to_string());
+        script.push_str(&format!("ROM=\"$VM_DIR/{}\"\n", filename));
+    }
+
     script.push('\n');
+
+    // macOS OpenCore bootloader verification
+    if is_intel_macos_vm && needs_uefi && config.bios_path.is_some() {
+        script.push_str(r#"# Verify OpenCore bootloader exists
+if [[ ! -f "$ROM" ]]; then
+    echo "Error: OpenCore bootloader not found at $ROM"
+    echo "Download from: https://github.com/kholia/OSX-KVM"
+    echo "Place OpenCore.qcow2 in: $VM_DIR/"
+    exit 1
+fi
+
+"#);
+    }
 
     // Windows-specific: SMBIOS options
     if is_windows {
@@ -544,22 +631,38 @@ pub fn generate_launch_script_with_os(
     script.push_str("    echo \"Options:\"\n");
     script.push_str("    echo \"  --install        Boot from installation media\"\n");
     script.push_str("    echo \"  --cdrom <iso>    Boot with specified ISO as CD-ROM\"\n");
+    script.push_str("    echo \"  --recovery <dmg> Boot with recovery image (DMG)\"\n");
     script.push_str("    echo \"  (no options)     Normal boot from hard disk\"\n");
     script.push_str("}\n\n");
 
     // Build QEMU commands with OS-awareness
-    let base_cmd = build_qemu_command_with_os(config, disk_filename, false, None, os_profile);
-    let install_cmd = build_qemu_command_with_os(config, disk_filename, true, None, os_profile);
+    let base_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::None, os_profile);
+
+    let install_cmd = if is_recovery_image {
+        build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(None), os_profile)
+    } else {
+        build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(None), os_profile)
+    };
 
     // Main script logic
     script.push_str("case \"$1\" in\n");
     script.push_str("    --install)\n");
-    script.push_str("        if [[ -z \"$ISO\" ]] || [[ ! -f \"$ISO\" ]]; then\n");
-    script.push_str("            echo \"Error: Installation ISO not found at $ISO\"\n");
-    script.push_str("            echo \"Please edit this script to set the ISO path or use --cdrom\"\n");
-    script.push_str("            exit 1\n");
-    script.push_str("        fi\n");
-    script.push_str("        echo \"Booting from installation ISO...\"\n");
+
+    if is_recovery_image {
+        script.push_str("        if [[ -z \"$RECOVERY_IMG\" ]] || [[ ! -f \"$RECOVERY_IMG\" ]]; then\n");
+        script.push_str("            echo \"Error: Recovery image not found at $RECOVERY_IMG\"\n");
+        script.push_str("            echo \"Please edit this script to set the path or use --recovery\"\n");
+        script.push_str("            exit 1\n");
+        script.push_str("        fi\n");
+        script.push_str("        echo \"Booting from recovery image...\"\n");
+    } else {
+        script.push_str("        if [[ -z \"$ISO\" ]] || [[ ! -f \"$ISO\" ]]; then\n");
+        script.push_str("            echo \"Error: Installation ISO not found at $ISO\"\n");
+        script.push_str("            echo \"Please edit this script to set the ISO path or use --cdrom\"\n");
+        script.push_str("            exit 1\n");
+        script.push_str("        fi\n");
+        script.push_str("        echo \"Booting from installation ISO...\"\n");
+    }
 
     // Start TPM before QEMU if needed
     if needs_tpm {
@@ -568,6 +671,8 @@ pub fn generate_launch_script_with_os(
 
     script.push_str(&format!("        {}\n", install_cmd));
     script.push_str("        ;;\n");
+
+    // --cdrom option (always available)
     script.push_str("    --cdrom)\n");
     script.push_str("        if [[ -z \"$2\" ]] || [[ ! -f \"$2\" ]]; then\n");
     script.push_str("            echo \"Error: Please specify a valid ISO file\"\n");
@@ -579,10 +684,26 @@ pub fn generate_launch_script_with_os(
         script.push_str("        start_tpm\n");
     }
 
-    // Build command for custom ISO (will substitute $2)
-    let cdrom_cmd = build_qemu_command_with_os(config, disk_filename, true, Some("\"$2\""), os_profile);
+    let cdrom_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(Some("\"$2\"")), os_profile);
     script.push_str(&format!("        {}\n", cdrom_cmd));
     script.push_str("        ;;\n");
+
+    // --recovery option (always available)
+    script.push_str("    --recovery)\n");
+    script.push_str("        if [[ -z \"$2\" ]] || [[ ! -f \"$2\" ]]; then\n");
+    script.push_str("            echo \"Error: Please specify a valid DMG file\"\n");
+    script.push_str("            exit 1\n");
+    script.push_str("        fi\n");
+    script.push_str("        echo \"Booting with recovery image: $2\"\n");
+
+    if needs_tpm {
+        script.push_str("        start_tpm\n");
+    }
+
+    let recovery_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(Some("\"$2\"")), os_profile);
+    script.push_str(&format!("        {}\n", recovery_cmd));
+    script.push_str("        ;;\n");
+
     script.push_str("    --help|-h)\n");
     script.push_str("        show_help\n");
     script.push_str("        exit 0\n");
@@ -610,13 +731,13 @@ pub fn generate_launch_script_with_os(
 fn build_qemu_command_with_os(
     config: &WizardQemuConfig,
     _disk_filename: &str,
-    with_cdrom: bool,
-    custom_iso: Option<&str>,
+    install_media: &InstallMedia,
     os_profile: Option<&str>,
 ) -> String {
     let mut args: Vec<String> = Vec::new();
 
     let is_windows = is_windows_10_or_11(os_profile);
+    let is_intel_macos_vm = is_intel_macos(os_profile, &config.emulator);
     let needs_tpm = config.tpm || is_windows_11(os_profile);
     let needs_uefi = config.uefi || is_windows_11(os_profile);
 
@@ -626,6 +747,11 @@ fn build_qemu_command_with_os(
     // KVM acceleration
     if config.enable_kvm {
         args.push("-enable-kvm".to_string());
+    }
+
+    // BIOS/ROM file (skip for macOS UEFI — OpenCore is handled as an AHCI drive)
+    if config.bios_path.is_some() && !(is_intel_macos_vm && needs_uefi) {
+        args.push("-bios \"$ROM\"".to_string());
     }
 
     // Machine type (escaped to prevent injection)
@@ -661,6 +787,12 @@ fn build_qemu_command_with_os(
         args.push("\"${SMBIOS_OPTS[@]}\"".to_string());
     }
 
+    // Apple SMC and SMBIOS for Intel macOS
+    if is_intel_macos_vm {
+        args.push("-device \"isa-applesmc,osk=ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc\"".to_string());
+        args.push("-smbios type=2".to_string());
+    }
+
     // UEFI boot with writable OVMF_VARS
     if needs_uefi {
         let needs_secboot = needs_tpm;
@@ -689,25 +821,94 @@ fn build_qemu_command_with_os(
     // Disk (interface escaped to prevent injection)
     // Map "sata" to "ide" for backwards compatibility — QEMU doesn't support if=sata,
     // but on Q35 machines, if=ide routes through the AHCI controller (giving SATA behavior)
-    let disk_if = if config.disk_interface == "sata" {
-        "ide"
-    } else {
-        &config.disk_interface
-    };
-    args.push(format!(
-        "-drive file=\"$DISK\",format=qcow2,if={},index=0,media=disk",
-        shell_escape(disk_if)
-    ));
+    let machine_name = config.machine.as_deref().unwrap_or("");
+    match machine_name {
+        "q800" => {
+            // q800: explicit SCSI device attachment for built-in ESP controller
+            args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=hd0".to_string());
+            args.push("-device scsi-hd,drive=hd0".to_string());
+        }
+        "mac99" => {
+            // mac99: explicit IDE device attachment with bus specification
+            args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=hd0".to_string());
+            args.push("-device ide-hd,drive=hd0,bus=ide.0".to_string());
+        }
+        _ => {
+            if is_intel_macos_vm && needs_uefi {
+                // Explicit AHCI controller with predictable bus addressing for macOS
+                args.push("-device ich9-ahci,id=sata".to_string());
+                // OpenCore bootloader as sata.0 (if provided via bios_rom)
+                if config.bios_path.is_some() {
+                    args.push("-drive file=\"$ROM\",format=qcow2,if=none,id=oc".to_string());
+                    args.push("-device ide-hd,drive=oc,bus=sata.0".to_string());
+                }
+                // Main disk (sata.1 with OpenCore, sata.0 without)
+                let disk_bus = if config.bios_path.is_some() { "sata.1" } else { "sata.0" };
+                args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=maindisk".to_string());
+                args.push(format!("-device ide-hd,drive=maindisk,bus={}", disk_bus));
+            } else {
+                let disk_if = if config.disk_interface == "sata" {
+                    "ide"
+                } else {
+                    &config.disk_interface
+                };
+                args.push(format!(
+                    "-drive file=\"$DISK\",format=qcow2,if={},index=0,media=disk",
+                    shell_escape(disk_if)
+                ));
+            }
+        }
+    }
 
-    // CD-ROM (for install mode)
-    if with_cdrom {
-        let iso_ref = custom_iso.unwrap_or("\"$ISO\"");
-        args.push(format!(
-            "-drive file={},media=cdrom,index=1",
-            iso_ref
-        ));
-        // Boot from CD-ROM
-        args.push("-boot d".to_string());
+    // Install media (CD-ROM or recovery image)
+    match install_media {
+        InstallMedia::None => {}
+        InstallMedia::Iso(custom_path) => {
+            let iso_ref = custom_path.unwrap_or("\"$ISO\"");
+            match machine_name {
+                "q800" => {
+                    args.push(format!("-drive file={},format=raw,if=none,id=cd0,media=cdrom", iso_ref));
+                    args.push("-device scsi-cd,drive=cd0".to_string());
+                }
+                "mac99" => {
+                    args.push(format!("-drive file={},format=raw,if=none,id=cd0,media=cdrom", iso_ref));
+                    args.push("-device ide-cd,drive=cd0,bus=ide.1".to_string());
+                }
+                _ => {
+                    if is_intel_macos_vm && needs_uefi {
+                        // macOS UEFI: attach ISO on AHCI bus
+                        let iso_bus = if config.bios_path.is_some() { "sata.3" } else { "sata.2" };
+                        args.push(format!("-drive file={},format=raw,if=none,id=cd0,media=cdrom", iso_ref));
+                        args.push(format!("-device ide-cd,drive=cd0,bus={}", iso_bus));
+                        // No -boot d for macOS (OpenCore handles boot)
+                    } else {
+                        args.push(format!("-drive file={},media=cdrom,index=1", iso_ref));
+                        // Boot from CD-ROM
+                        args.push("-boot d".to_string());
+                    }
+                }
+            }
+            if !is_intel_macos_vm || !needs_uefi {
+                // Boot from CD-ROM (non-macOS or non-UEFI paths that didn't already add it)
+                if machine_name == "q800" || machine_name == "mac99" {
+                    args.push("-boot d".to_string());
+                }
+            }
+        }
+        InstallMedia::RecoveryImage(custom_path) => {
+            let dmg_ref = custom_path.unwrap_or("\"$RECOVERY_IMG\"");
+            if is_intel_macos_vm && needs_uefi {
+                // macOS UEFI: attach recovery image on AHCI bus
+                // No format= specified — QEMU auto-detects DMG vs qcow2
+                let recovery_bus = if config.bios_path.is_some() { "sata.2" } else { "sata.1" };
+                args.push(format!("-drive file={},snapshot=on,if=none,id=recovery", dmg_ref));
+                args.push(format!("-device ide-hd,drive=recovery,bus={}", recovery_bus));
+            } else {
+                // Non-macOS UEFI: use legacy IDE attachment
+                args.push(format!("-drive file={},snapshot=on,format=dmg,if=ide,index=2,media=disk", dmg_ref));
+            }
+            // No -boot d: OpenCore/UEFI bootloader handles boot selection
+        }
     }
 
     // VGA / Graphics (escaped to prevent injection)
@@ -727,7 +928,11 @@ fn build_qemu_command_with_os(
 
     // Audio backend (must be declared before devices that use it)
     if !config.audio.is_empty() {
-        args.push("-audiodev pa,id=audio0".to_string());
+        if config.display == "spice-app" {
+            args.push("-audiodev spice,id=audio0".to_string());
+        } else {
+            args.push("-audiodev pa,id=audio0".to_string());
+        }
     }
 
     // Audio devices (known safe values from profiles, but escape for safety)
@@ -740,6 +945,10 @@ fn build_qemu_command_with_os(
             }
             "ac97" => args.push("-device AC97,audiodev=audio0".to_string()),
             "sb16" => args.push("-device sb16,audiodev=audio0".to_string()),
+            "screamer" => {
+                // Screamer is built into the mac99 machine; no -device line needed.
+                // The -audiodev backend declared above is sufficient.
+            }
             _ => {
                 // Unknown audio device - escape it
                 args.push(format!("-device {},audiodev=audio0", shell_escape(audio)));
@@ -784,9 +993,12 @@ fn build_qemu_command_with_os(
         }
     }
 
-    // USB tablet for mouse
+    // USB tablet for mouse (+ keyboard for macOS)
     if config.usb_tablet {
         args.push("-usb".to_string());
+        if is_intel_macos_vm {
+            args.push("-device usb-kbd".to_string());
+        }
         args.push("-device usb-tablet".to_string());
     }
 
@@ -961,150 +1173,5 @@ fn generate_network_args(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::CreateWizardState;
-
-    #[test]
-    fn test_shell_escape_safe_strings() {
-        // Safe strings should pass through unchanged
-        assert_eq!(shell_escape("hello"), "hello");
-        assert_eq!(shell_escape("path/to/file.iso"), "path/to/file.iso");
-        assert_eq!(shell_escape("my-vm_name.qcow2"), "my-vm_name.qcow2");
-    }
-
-    #[test]
-    fn test_shell_escape_unsafe_strings() {
-        // Strings with spaces
-        assert_eq!(shell_escape("hello world"), "'hello world'");
-        // Strings with quotes
-        assert_eq!(shell_escape("it's a test"), "'it'\\''s a test'");
-        // Strings with shell metacharacters
-        assert_eq!(shell_escape("test; echo pwned"), "'test; echo pwned'");
-        assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
-        assert_eq!(shell_escape("`whoami`"), "'`whoami`'");
-        assert_eq!(shell_escape("test\"; echo pwned; echo \""), "'test\"; echo pwned; echo \"'");
-    }
-
-    #[test]
-    fn test_generate_folder_name() {
-        assert_eq!(CreateWizardState::generate_folder_name("Windows 10"), "windows-10");
-        assert_eq!(CreateWizardState::generate_folder_name("Debian GNU/Linux"), "debian-gnu-linux");
-        assert_eq!(CreateWizardState::generate_folder_name("MS-DOS 6.22"), "ms-dos-6-22");
-        assert_eq!(CreateWizardState::generate_folder_name("  Spaced  Out  "), "spaced-out");
-    }
-
-    #[test]
-    fn test_generate_launch_script() {
-        let config = WizardQemuConfig::default();
-        let script = generate_launch_script_with_os(
-            "Test VM",
-            "test.qcow2",
-            Some(Path::new("/tmp/test.iso")),
-            &config,
-            None,
-        );
-
-        assert!(script.contains("#!/bin/bash"));
-        assert!(script.contains("Test VM"));
-        assert!(script.contains("test.qcow2"));
-        assert!(script.contains("/tmp/test.iso"));
-        assert!(script.contains("--install"));
-        assert!(script.contains("--cdrom"));
-    }
-
-    #[test]
-    fn test_build_qemu_command_basic() {
-        let config = WizardQemuConfig {
-            emulator: "qemu-system-x86_64".to_string(),
-            memory_mb: 2048,
-            cpu_cores: 2,
-            cpu_model: Some("host".to_string()),
-            machine: Some("q35".to_string()),
-            vga: "std".to_string(),
-            audio: vec![],
-            network_model: "e1000".to_string(),
-            disk_interface: "ide".to_string(),
-            enable_kvm: true,
-            uefi: false,
-            tpm: false,
-            rtc_localtime: false,
-            usb_tablet: true,
-            display: "gtk".to_string(),
-            gl_acceleration: false,
-            network_backend: "user".to_string(),
-            port_forwards: vec![],
-            bridge_name: None,
-            extra_args: vec![],
-        };
-
-        let cmd = build_qemu_command_with_os(&config, "disk.qcow2", false, None, None);
-
-        assert!(cmd.contains("qemu-system-x86_64"));
-        assert!(cmd.contains("-enable-kvm"));
-        assert!(cmd.contains("-m 2048M"));
-        assert!(cmd.contains("-smp 2"));
-        assert!(cmd.contains("-vga std"));
-        assert!(cmd.contains("-display gtk"));
-        assert!(cmd.contains("-device e1000"));
-        assert!(cmd.contains("-usb"));
-        assert!(cmd.contains("-device usb-tablet"));
-    }
-
-    #[test]
-    fn test_build_qemu_command_with_cdrom() {
-        let config = WizardQemuConfig::default();
-        let cmd = build_qemu_command_with_os(&config, "disk.qcow2", true, None, None);
-
-        assert!(cmd.contains("-drive file=\"$ISO\",media=cdrom"));
-        assert!(cmd.contains("-boot d"));
-    }
-
-    #[test]
-    fn test_generate_network_args_user_with_portfwd() {
-        let forwards = vec![
-            PortForward { protocol: PortProtocol::Tcp, host_port: 2222, guest_port: 22 },
-            PortForward { protocol: PortProtocol::Tcp, host_port: 8080, guest_port: 80 },
-        ];
-        let args = generate_network_args("e1000", "user", None, &forwards);
-        assert_eq!(args.len(), 2);
-        assert!(args[0].contains("hostfwd=tcp::2222-:22"));
-        assert!(args[0].contains("hostfwd=tcp::8080-:80"));
-        assert!(args[1].contains("e1000,netdev=net0"));
-    }
-
-    #[test]
-    fn test_generate_network_args_passt() {
-        let args = generate_network_args("virtio", "passt", None, &[]);
-        assert_eq!(args.len(), 2);
-        assert!(args[0].contains("-netdev passt,id=net0"));
-        assert!(args[1].contains("virtio-net-pci,netdev=net0"));
-    }
-
-    #[test]
-    fn test_generate_network_args_bridge() {
-        let args = generate_network_args("e1000", "bridge", Some("virbr0"), &[]);
-        assert_eq!(args.len(), 2);
-        assert!(args[0].contains("-netdev bridge,id=net0,br=virbr0"));
-    }
-
-    #[test]
-    fn test_generate_network_args_none() {
-        let args = generate_network_args("none", "user", None, &[]);
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn test_build_qemu_command_with_audio() {
-        let config = WizardQemuConfig {
-            audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-            ..Default::default()
-        };
-
-        let cmd = build_qemu_command_with_os(&config, "disk.qcow2", false, None, None);
-
-        assert!(cmd.contains("-audiodev pa,id=audio0"));
-        assert!(cmd.contains("-device intel-hda"));
-        assert!(cmd.contains("-device hda-duplex,audiodev=audio0"));
-    }
-}
+#[path = "tests/create.rs"]
+mod tests;

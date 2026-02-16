@@ -2071,6 +2071,28 @@ macOS Sequoia brings iPhone Mirroring, allowing users to control their iPhone di
 
 Apple Intelligence introduces AI-powered writing tools, image generation, and Siri improvements. Window management gets native tiling support."""
 
+[macos-tahoe]
+display_name = "Apple® macOS Tahoe"
+name = "macOS Tahoe"
+publisher = "Apple Inc."
+release_date = "2025-09-15"
+architecture = "x86_64"
+fun_facts = [
+    "Named after Lake Tahoe, straddling the California-Nevada border",
+    "Switched macOS version numbering from sequential to year-of-use — 26 for 2026",
+    "Introduced Liquid Glass, a translucent new UI theme across the system"
+]
+
+[macos-tahoe.blurb]
+short = "macOS 26 featuring the Liquid Glass UI redesign and year-based versioning."
+long = """
+macOS Tahoe marks a major visual refresh with Apple's Liquid Glass design language, \
+giving windows, menus, and controls a translucent, fluid appearance across the system.
+
+The release also introduced a new version numbering scheme — jumping from macOS 15 to \
+macOS 26 to reflect the intended year of use rather than a sequential count. Named after \
+Lake Tahoe on the California-Nevada border, continuing Apple's California-inspired naming."""
+
 # =============================================================================
 # Mobile / Android
 # =============================================================================

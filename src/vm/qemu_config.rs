@@ -228,6 +228,7 @@ pub enum BootMode {
     Normal,
     Install,
     Cdrom(PathBuf),
+    Recovery(PathBuf),
     Network,
 }
 
@@ -249,6 +250,9 @@ pub struct QemuConfig {
     pub tpm: bool,
     pub extra_args: Vec<String>,
     pub raw_script: String,
+    /// BIOS/ROM file path (for classic Mac and other systems needing custom firmware)
+    #[serde(default)]
+    pub bios_path: Option<PathBuf>,
 }
 
 impl Default for QemuConfig {
@@ -269,6 +273,7 @@ impl Default for QemuConfig {
             tpm: false,
             extra_args: Vec::new(),
             raw_script: String::new(),
+            bios_path: None,
         }
     }
 }

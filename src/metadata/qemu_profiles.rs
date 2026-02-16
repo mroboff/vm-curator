@@ -10,6 +10,26 @@ use std::path::Path;
 /// Embedded QEMU profiles from assets/metadata/qemu_profiles.toml
 const EMBEDDED_PROFILES: &str = include_str!("../../assets/metadata/qemu_profiles.toml");
 
+/// BIOS/ROM file configuration for profiles that need a custom firmware
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BiosRomConfig {
+    /// Whether the ROM file is required for the VM to work
+    pub required: bool,
+    /// Human-readable label (e.g., "Macintosh ROM")
+    #[serde(default = "default_bios_label")]
+    pub label: String,
+    /// Expected filename (e.g., "MacROM.bin")
+    #[serde(default)]
+    pub default_filename: Option<String>,
+    /// Hint text for the user about where to obtain the ROM
+    #[serde(default)]
+    pub hint: Option<String>,
+}
+
+fn default_bios_label() -> String {
+    "BIOS/ROM File".to_string()
+}
+
 /// A QEMU configuration profile for a specific operating system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QemuProfile {
@@ -43,8 +63,12 @@ pub struct QemuProfile {
     #[serde(default)]
     pub audio: Vec<String>,
 
-    /// Network adapter model (virtio, e1000, rtl8139, ne2k_pci, pcnet, none)
+    /// Network adapter model (virtio, e1000, rtl8139, ne2k_pci, pcnet, vmxnet3, none)
     pub network_model: String,
+
+    /// Network backend (user, passt, bridge, none)
+    #[serde(default = "default_network_backend")]
+    pub network_backend: String,
 
     /// Disk interface (virtio, ide, scsi, sd)
     pub disk_interface: String,
@@ -87,6 +111,14 @@ pub struct QemuProfile {
     /// Tips/notes for this OS
     #[serde(default)]
     pub notes: Option<String>,
+
+    /// BIOS/ROM file configuration (for classic Mac and other systems needing custom firmware)
+    #[serde(default)]
+    pub bios_rom: Option<BiosRomConfig>,
+}
+
+fn default_network_backend() -> String {
+    "user".to_string()
 }
 
 fn default_display() -> String {
@@ -106,6 +138,7 @@ impl Default for QemuProfile {
             vga: "std".to_string(),
             audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
             network_model: "e1000".to_string(),
+            network_backend: "user".to_string(),
             disk_interface: "ide".to_string(),
             disk_size_gb: 32,
             enable_kvm: true,
@@ -117,6 +150,7 @@ impl Default for QemuProfile {
             extra_args: vec![],
             iso_url: None,
             notes: None,
+            bios_rom: None,
         }
     }
 }
@@ -345,72 +379,5 @@ impl QemuProfileStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_load_embedded_profiles() {
-        let store = QemuProfileStore::load_embedded();
-        assert!(!store.is_empty(), "Should have loaded some profiles");
-
-        // Check that some expected profiles exist
-        assert!(store.get("windows-10").is_some(), "Should have Windows 10");
-        assert!(store.get("linux-debian").is_some(), "Should have Debian");
-        assert!(store.get("freebsd").is_some(), "Should have FreeBSD");
-    }
-
-    #[test]
-    fn test_profile_summary() {
-        let profile = QemuProfile {
-            display_name: "Test OS".to_string(),
-            memory_mb: 4096,
-            disk_size_gb: 64,
-            uefi: true,
-            disk_interface: "virtio".to_string(),
-            ..Default::default()
-        };
-
-        let summary = profile.summary();
-        assert!(summary.contains("4GB RAM"));
-        assert!(summary.contains("64GB"));
-        assert!(summary.contains("UEFI"));
-        assert!(summary.contains("virtio"));
-    }
-
-    #[test]
-    fn test_categories() {
-        let store = QemuProfileStore::load_embedded();
-        let categories = store.categories();
-
-        assert!(categories.contains(&"windows".to_string()));
-        assert!(categories.contains(&"linux".to_string()));
-        assert!(categories.contains(&"bsd".to_string()));
-    }
-
-    #[test]
-    fn test_search() {
-        let store = QemuProfileStore::load_embedded();
-
-        let results = store.search("windows");
-        assert!(!results.is_empty(), "Should find Windows profiles");
-
-        let results = store.search("debian");
-        assert!(!results.is_empty(), "Should find Debian profiles");
-    }
-
-    #[test]
-    fn test_free_iso_profiles() {
-        let store = QemuProfileStore::load_embedded();
-        let free_profiles = store.list_with_free_iso();
-
-        // Should have at least some free/open-source OSes
-        assert!(
-            !free_profiles.is_empty(),
-            "Should have profiles with free ISOs"
-        );
-
-        // Check that a known free OS is in the list
-        let has_debian = free_profiles.iter().any(|(id, _)| *id == "linux-debian");
-        assert!(has_debian, "Debian should have a free ISO URL");
-    }
-}
+#[path = "tests/qemu_profiles.rs"]
+mod tests;

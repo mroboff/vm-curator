@@ -52,6 +52,9 @@ pub fn parse_launch_script(script_path: &Path, content: &str) -> Result<QemuConf
     // Check for TPM
     config.tpm = content.contains("-tpmdev") || content.contains("swtpm");
 
+    // Extract BIOS/ROM path (for classic Mac and other custom firmware)
+    config.bios_path = extract_bios_path(content, vm_dir);
+
     // Extract disks
     config.disks = extract_disks(content, vm_dir);
 
@@ -664,6 +667,52 @@ fn parse_hostfwd_segment(segment: &str) -> Option<PortForward> {
     })
 }
 
+/// Extract BIOS/ROM path from -bios argument
+///
+/// Parses lines like `-bios "$ROM"` and resolves shell variables.
+/// Filters out OVMF/EFI paths (those are handled by UEFI detection).
+fn extract_bios_path(content: &str, vm_dir: &Path) -> Option<PathBuf> {
+    let vars = extract_shell_variables(content, vm_dir);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some(idx) = trimmed.find("-bios ") {
+            let rest = &trimmed[idx + 6..];
+            let raw_path = if rest.starts_with('"') {
+                // Quoted path like -bios "$ROM"
+                let inner = &rest[1..];
+                if let Some(end) = inner.find('"') {
+                    inner[..end].to_string()
+                } else {
+                    inner.to_string()
+                }
+            } else {
+                // Unquoted path
+                rest.chars()
+                    .take_while(|c| !c.is_whitespace() && *c != '\\')
+                    .collect()
+            };
+
+            // Expand shell variables
+            let expanded = expand_variables(&raw_path, &vars, vm_dir);
+            let path = resolve_path(&expanded, vm_dir);
+
+            // Filter out OVMF/EFI paths - those are UEFI firmware, not BIOS ROMs
+            let path_str = path.to_string_lossy().to_lowercase();
+            if path_str.contains("ovmf") || path_str.contains("efi") || path_str.contains("uefi") {
+                continue;
+            }
+
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Extract extra arguments we don't specifically handle
 fn extract_extra_args(content: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -701,92 +750,5 @@ fn extract_extra_args(content: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_memory() {
-        assert_eq!(extract_memory("-m 512"), Some(512));
-        assert_eq!(extract_memory("-m 2G"), Some(2048));
-        assert_eq!(extract_memory("qemu -m 1024 -cpu host"), Some(1024));
-    }
-
-    #[test]
-    fn test_extract_emulator() {
-        assert_eq!(
-            extract_emulator("#!/bin/bash\nqemu-system-i386 -m 512"),
-            Some(QemuEmulator::I386)
-        );
-        assert_eq!(
-            extract_emulator("qemu-system-ppc -M mac99"),
-            Some(QemuEmulator::Ppc)
-        );
-    }
-
-    #[test]
-    fn test_extract_vga() {
-        assert_eq!(
-            extract_vga("-vga cirrus -m 512"),
-            Some(VgaType::Cirrus)
-        );
-        assert_eq!(
-            extract_vga("-vga virtio"),
-            Some(VgaType::Virtio)
-        );
-    }
-
-    #[test]
-    fn test_parse_hostfwd_segment() {
-        let pf = parse_hostfwd_segment("tcp::2222-:22").unwrap();
-        assert_eq!(pf.protocol, PortProtocol::Tcp);
-        assert_eq!(pf.host_port, 2222);
-        assert_eq!(pf.guest_port, 22);
-
-        let pf = parse_hostfwd_segment("udp::5353-:5353").unwrap();
-        assert_eq!(pf.protocol, PortProtocol::Udp);
-        assert_eq!(pf.host_port, 5353);
-        assert_eq!(pf.guest_port, 5353);
-
-        // With address
-        let pf = parse_hostfwd_segment("tcp:127.0.0.1:8080-:80").unwrap();
-        assert_eq!(pf.protocol, PortProtocol::Tcp);
-        assert_eq!(pf.host_port, 8080);
-        assert_eq!(pf.guest_port, 80);
-    }
-
-    #[test]
-    fn test_extract_port_forwards() {
-        let line = "-netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80";
-        let forwards = extract_port_forwards(line);
-        assert_eq!(forwards.len(), 2);
-        assert_eq!(forwards[0].host_port, 2222);
-        assert_eq!(forwards[0].guest_port, 22);
-        assert_eq!(forwards[1].host_port, 8080);
-        assert_eq!(forwards[1].guest_port, 80);
-    }
-
-    #[test]
-    fn test_extract_network_passt() {
-        let content = "qemu-system-x86_64 \\\n  -netdev passt,id=net0 \\\n  -device virtio-net-pci,netdev=net0";
-        let config = extract_network(content).unwrap();
-        assert_eq!(config.backend, NetworkBackend::Passt);
-    }
-
-    #[test]
-    fn test_extract_network_bridge() {
-        let content = "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device e1000,netdev=net0";
-        let config = extract_network(content).unwrap();
-        assert_eq!(config.backend, NetworkBackend::Bridge("virbr0".to_string()));
-        assert_eq!(config.bridge, Some("virbr0".to_string()));
-    }
-
-    #[test]
-    fn test_extract_network_user_with_portfwd() {
-        let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0";
-        let config = extract_network(content).unwrap();
-        assert_eq!(config.backend, NetworkBackend::User);
-        assert_eq!(config.port_forwards.len(), 1);
-        assert_eq!(config.port_forwards[0].host_port, 2222);
-        assert_eq!(config.port_forwards[0].guest_port, 22);
-    }
-}
+#[path = "tests/launch_parser.rs"]
+mod tests;

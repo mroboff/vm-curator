@@ -1815,6 +1815,12 @@ display = "gtk"
 extra_args = []
 notes = "Requires qemu-system-m68k. Consider using a dedicated emulator like Basilisk II."
 
+[mac-system6.bios_rom]
+required = true
+label = "Macintosh ROM"
+default_filename = "MacROM.bin"
+hint = "Requires a Quadra 800 ROM dump (e.g., MacROM.bin). Not included due to copyright."
+
 [mac-system7]
 display_name = "Macintosh System 7"
 category = "classic-mac"
@@ -1837,6 +1843,12 @@ display = "gtk"
 extra_args = []
 notes = "Requires qemu-system-m68k. Consider using Basilisk II for better compatibility."
 
+[mac-system7.bios_rom]
+required = true
+label = "Macintosh ROM"
+default_filename = "MacROM.bin"
+hint = "Requires a Quadra 800 ROM dump (e.g., MacROM.bin). Not included due to copyright."
+
 [mac-os8]
 display_name = "Mac OS 8"
 category = "classic-mac"
@@ -1845,9 +1857,9 @@ memory_mb = 128
 cpu_cores = 1
 cpu_model = "g3"
 machine = "mac99"
-vga = "none"
-audio = []
-network_model = "none"
+vga = "std"
+audio = ["screamer"]
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 2
 enable_kvm = false
@@ -1859,6 +1871,11 @@ display = "gtk"
 extra_args = []
 notes = "PowerPC Mac OS. QEMU support is limited. Consider SheepShaver."
 
+[mac-os8.bios_rom]
+required = false
+label = "Mac ROM"
+hint = "Optional. QEMU uses built-in OpenBIOS for PowerPC by default."
+
 [mac-os9]
 display_name = "Mac OS 9"
 category = "classic-mac"
@@ -1867,9 +1884,9 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "g3"
 machine = "mac99"
-vga = "none"
-audio = []
-network_model = "none"
+vga = "std"
+audio = ["screamer"]
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = false
@@ -1880,6 +1897,11 @@ usb_tablet = false
 display = "gtk"
 extra_args = []
 notes = "Last 'Classic' Mac OS. QEMU support limited. Use SheepShaver for better results."
+
+[mac-os9.bios_rom]
+required = false
+label = "Mac ROM"
+hint = "Optional. QEMU uses built-in OpenBIOS for PowerPC by default."
 
 # =============================================================================
 # Mac OS X / macOS - All versions
@@ -1894,9 +1916,9 @@ memory_mb = 512
 cpu_cores = 1
 cpu_model = "g4"
 machine = "mac99"
-vga = "none"
-audio = []
-network_model = "none"
+vga = "std"
+audio = ["screamer"]
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 8
 enable_kvm = false
@@ -1916,9 +1938,9 @@ memory_mb = 512
 cpu_cores = 1
 cpu_model = "g4"
 machine = "mac99"
-vga = "none"
-audio = []
-network_model = "none"
+vga = "std"
+audio = ["screamer"]
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 8
 enable_kvm = false
@@ -1938,9 +1960,9 @@ memory_mb = 512
 cpu_cores = 1
 cpu_model = "g4"
 machine = "mac99"
-vga = "none"
-audio = []
-network_model = "none"
+vga = "std"
+audio = ["screamer"]
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 10
 enable_kvm = false
@@ -1958,11 +1980,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 2048
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 32
 enable_kvm = true
@@ -1970,9 +1993,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
-notes = "macOS virtualization may require Apple hardware per EULA."
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display. macOS virtualization may require Apple hardware per EULA."
 
 [mac-osx-snow-leopard]
 display_name = "Mac OS X 10.6 Snow Leopard"
@@ -1980,11 +2003,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 2048
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 32
 enable_kvm = true
@@ -1992,9 +2016,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
-notes = "macOS virtualization may require Apple hardware per EULA."
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display. macOS virtualization may require Apple hardware per EULA."
 
 [mac-osx-lion]
 display_name = "Mac OS X 10.7 Lion"
@@ -2002,11 +2026,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 40
 enable_kvm = true
@@ -2014,8 +2039,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display."
 
 [mac-osx-mountain-lion]
 display_name = "OS X 10.8 Mountain Lion"
@@ -2023,11 +2049,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 40
 enable_kvm = true
@@ -2035,8 +2062,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display."
 
 [macos-sierra]
 display_name = "macOS 10.12 Sierra"
@@ -2044,11 +2072,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 64
 enable_kvm = true
@@ -2056,8 +2085,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display."
 
 [macos-high-sierra]
 display_name = "macOS 10.13 High Sierra"
@@ -2065,11 +2095,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 64
 enable_kvm = true
@@ -2077,8 +2108,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display."
 
 [macos-mojave]
 display_name = "macOS 10.14 Mojave"
@@ -2086,11 +2118,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 64
 enable_kvm = true
@@ -2098,8 +2131,9 @@ uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display."
 
 [macos-catalina]
 display_name = "macOS 10.15 Catalina"
@@ -2107,11 +2141,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 4096
 cpu_cores = 2
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 64
 enable_kvm = true
@@ -2119,8 +2154,15 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires passt for networking and virt-viewer (remote-viewer) for spice-app display. OpenCore bootloader recommended but optional."
+
+[macos-catalina.bios_rom]
+required = false
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 [macos-big-sur]
 display_name = "macOS 11 Big Sur"
@@ -2128,11 +2170,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 8192
 cpu_cores = 4
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 80
 enable_kvm = true
@@ -2140,8 +2183,15 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display."
+
+[macos-big-sur.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 [macos-monterey]
 display_name = "macOS 12 Monterey"
@@ -2149,11 +2199,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 8192
 cpu_cores = 4
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 80
 enable_kvm = true
@@ -2161,8 +2212,15 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display."
+
+[macos-monterey.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 [macos-ventura]
 display_name = "macOS 13 Ventura"
@@ -2170,11 +2228,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 8192
 cpu_cores = 4
-cpu_model = "Penryn"
+cpu_model = "Penryn,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 80
 enable_kvm = true
@@ -2182,8 +2241,15 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display."
+
+[macos-ventura.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 [macos-sonoma]
 display_name = "macOS 14 Sonoma"
@@ -2191,11 +2257,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 8192
 cpu_cores = 4
-cpu_model = "Penryn"
+cpu_model = "Skylake-Client,-hle,-rtm,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 80
 enable_kvm = true
@@ -2203,9 +2270,15 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
-notes = "Requires OpenCore. vmxnet3 network may be more stable than e1000."
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display."
+
+[macos-sonoma.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 [macos-sequoia]
 display_name = "macOS 15 Sequoia"
@@ -2213,11 +2286,12 @@ category = "macos"
 emulator = "qemu-system-x86_64"
 memory_mb = 16384
 cpu_cores = 4
-cpu_model = "Penryn"
+cpu_model = "Skylake-Client,-hle,-rtm,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
 machine = "q35"
-vga = "vmware"
+vga = "none"
 audio = ["intel-hda", "hda-duplex"]
-network_model = "e1000"
+network_model = "vmxnet3"
+network_backend = "passt"
 disk_interface = "ide"
 disk_size_gb = 80
 enable_kvm = true
@@ -2225,9 +2299,44 @@ uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
-display = "gtk"
-extra_args = []
-notes = "Requires OpenCore. vmxnet3 network may be more stable than e1000."
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display."
+
+[macos-sequoia.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
+
+[macos-tahoe]
+display_name = "macOS 26 Tahoe"
+category = "macos"
+emulator = "qemu-system-x86_64"
+memory_mb = 16384
+cpu_cores = 4
+cpu_model = "Skylake-Client,-hle,-rtm,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
+machine = "q35"
+vga = "none"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "vmxnet3"
+network_backend = "passt"
+disk_interface = "ide"
+disk_size_gb = 80
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = false
+usb_tablet = true
+display = "spice-app"
+extra_args = ["-device vmware-svga,vgamem_mb=256"]
+notes = "Requires OpenCore bootloader, passt for networking, and virt-viewer (remote-viewer) for spice-app display. Use recovery image (DMG/qcow2) for installation."
+
+[macos-tahoe.bios_rom]
+required = true
+label = "OpenCore Bootloader"
+default_filename = "OpenCore.qcow2"
+hint = "Download from https://github.com/kholia/OSX-KVM"
 
 # =============================================================================
 # Amiga / AROS (m68k/x86_64)
