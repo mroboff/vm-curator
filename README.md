@@ -1,12 +1,6 @@
 # vm-curator
 
-A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines with 3D acceleration!
-
-### Important Note ##
-
-Para-virtualized and full GPU pass-through (single and multi) are now operational. Testing and feedback wanted!
-
-Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) for more information, and to post your results.
+A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — with 3D acceleration, GPU passthrough, VM import, and 120+ pre-configured OS profiles!
 
 ### Changelog
 
@@ -14,76 +8,89 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 - **macOS Intel VM Support**: Comprehensive overhaul of macOS Intel profiles with Apple SMC emulation, AHCI disk, OpenCore bootloader integration, version-specific CPU models (Penryn/Skylake-Client), passt networking with vmxnet3, and spice-app display with vmware-svga
 - **QEMU Profile Audit**: Review and update of 40+ QEMU profiles against current OS compatibility research — fixes critical boot failures (Bazzite, Pop!_OS, OpenWrt), corrects VGA/network/audio defaults for BSD, Windows 9x, BeOS, Plan 9, and retro OSes, and bumps resource allocations for Proxmox, Tails, and Classic Mac profiles
 
-**v0.4.1**
-- Fix Cargo.lock version mismatch that prevented AUR package from building
-
-**v0.4.0**
-- **VM Import Wizard**: Import existing VMs from libvirt XML configs and Quickemu .conf files with guided 5-step wizard
-- **VM Notes**: Add free-form personal notes to any VM, displayed in the main info panel
-
-**v0.3.4**
-- Fix "unsupported bus type 'sata'" error when launching Windows and macOS VMs with default profiles
-
-**v0.3.3**
-- Increase xHCI USB controller ports from 4 to 8 for USB passthrough (supports up to 8 USB 2.0 + 8 USB 3.0 devices)
-
-**v0.3.2**
-- Fix Secure Boot OVMF firmware selection for Windows 11 VMs
-
-**v0.3.1**
-- Fix GitHub Actions security issues found by zizmor
-
-**v0.3.0**
-- **Shared Folders**: Share host directories with VMs using virtio-9p, with add/remove/edit from the management menu
-- **Headless VM Support**: Run VMs without a graphical display (display=none), with process monitoring and status indicators
-- **VM Process Monitoring**: Detect running QEMU processes and show live status in the VM list
-- **Stop/Force-Stop VM**: Gracefully shut down (ACPI poweroff) or force-stop running VMs from the management menu
-- **Network Settings Screen**: New management menu screen to configure network backend (user/passt/bridge/none), adapter model, and port forwarding on existing VMs
-- **Bridge Networking UI**: Bridge name selection with cycling through detected system bridges, status checklist (helper binary, permissions, available bridges), and setup guidance
-- **Port Forwarding**: Add/remove port forwarding rules with presets (SSH, RDP, HTTP, HTTPS, VNC) for user and passt backends
-- **Network Backend Support**: Full support for user/SLIRP, passt, bridge, and none backends in both the create wizard and existing VM management
-- **Dynamic Display Detection**: Auto-detect available display backends per emulator (GTK, SDL, SPICE, VNC), replacing hardcoded list
-- **SPICE App Support**: Replace legacy SPICE with spice-app display backend (requires virt-viewer)
-
 [Full changelog](CHANGELOG.md)
 
 ### Features
 
 **VM Discovery & Organization**
 - Automatically scans your VM library for directories containing `launch.sh` scripts
-- Hierarchical organization by OS family (Windows, Linux, macOS, BSD, etc.)
-- Parses QEMU launch scripts to extract configuration (emulator, memory, CPU, VGA, audio, disks)
-- Smart categorization based on configurable hierarchy patterns
+- Hierarchical organization by 16 OS families with emoji icons and 49 subcategories
+- Parses QEMU launch scripts to extract configuration (emulator, memory, CPU, VGA, audio, network, disks)
+- Smart categorization with configurable hierarchy patterns
+- Live process monitoring — shows running VMs with status indicators
+- Search and filter VMs by name
 
 **VM Creation Wizard**
 - 5-step guided wizard for creating new VMs
-- 50+ pre-configured OS profiles with optimal QEMU settings
+- 120+ pre-configured OS profiles with optimal QEMU settings (Windows, macOS, Linux, BSD, Unix, retro, and more)
 - Automatic UEFI firmware detection across Linux distributions (Arch, Debian, Fedora, NixOS, etc.)
 - ISO file browser for selecting installation media
-- Configurable disk size, memory, CPU cores, and QEMU options
+- Configurable disk size, memory, CPU cores, and QEMU options with direct text editing and size suffixes (e.g., "8GB")
+- Use existing disk images (copy or move) instead of creating new ones
 - Support for custom OS entries with user metadata
+
+**VM Import Wizard**
+- Import existing VMs from libvirt (virsh) XML configurations and Quickemu `.conf` files
+- 5-step guided import: select source, choose VM, review compatibility warnings, configure disk handling, review and import
+- Automatic OS profile detection from imported configurations
+- Disk handling options: symlink, copy, or move existing disk images
+
+**GPU Passthrough**
+- **Single-GPU passthrough**: Pass your only GPU to a VM (requires TTY, stops display manager)
+- **Multi-GPU passthrough**: Pass a secondary GPU while keeping the primary for the host
+- **Looking Glass integration**: Near-zero latency display for multi-GPU setups with auto-launch support
+- **PCI passthrough screen**: Select PCI devices (GPUs, USB controllers, NVMe) for VM passthrough
+- **System setup wizard**: One-click VFIO/IOMMU configuration with initramfs regeneration
+
+**3D Graphics Acceleration**
+- Para-virtualized 3D acceleration with `virtio-vga-gl` and SDL `gl=on`
+- Tested on NVIDIA RTX-4090 with driver 590.48.01+
+- Automatic SDL display selection for 3D-enabled VMs
 
 **Snapshot Management**
 - Create, restore, and delete snapshots for qcow2 disk images
 - Visual snapshot list with timestamps and sizes
 - Background operations with progress feedback
 
-**Launch Script Editor**
-- Edit `launch.sh` scripts directly in the TUI
-- Syntax-aware display with line numbers
-- Automatic QEMU configuration re-parsing after saves
+**Network Configuration**
+- Network backend selection: user/SLIRP (NAT), passt, bridge, or none
+- Port forwarding with presets for common services (SSH, RDP, HTTP, HTTPS, VNC)
+- Bridge networking with automatic bridge detection, status checklist, and setup guidance
+- Configurable network adapter models per VM
+
+**Shared Folders**
+- Share host directories with VMs using virtio-9p
+- Add, remove, and edit shared folders from the management menu
+- Automatic mount tag generation
 
 **USB Passthrough**
-- USB device enumeration via libudev
-- Select devices for passthrough to VMs
+- USB device enumeration via libudev with sysfs fallback
+- xHCI USB 3.0 controller with 8 ports (supports up to 8 USB 2.0 + 8 USB 3.0 devices)
 - Persistent passthrough configuration
+- Hub filtering and keyboard/mouse detection for passthrough validation
+
+**VM Notes**
+- Free-form personal notes for any VM from the management menu
+- Multi-line text editor with full keyboard navigation
+- Notes displayed in the main info panel and preserved across VM renames
+
+**Launch Script Editor**
+- Edit `launch.sh` scripts directly in the TUI
+- Syntax-aware display with line numbers and horizontal scrolling
+- Automatic QEMU configuration re-parsing after saves
+- Automatic single-GPU passthrough script regeneration when applicable
 
 **Additional Features**
-- Vim-style navigation (j/k, arrows, mouse)
-- Search and filter VMs
+- Vim-style navigation (j/k, arrows, mouse) with full clickable interface
 - Multiple boot modes (normal, install, custom ISO)
-- OS metadata with historical blurbs and fun facts
-- ASCII art logos for classic operating systems
+- Dynamic display backend detection per emulator (GTK, SDL, SPICE-app, VNC)
+- Headless VM support (display=none) with process monitoring
+- Stop/force-stop VMs (ACPI poweroff or SIGKILL)
+- VM rename with persistent custom display names
+- OS metadata with historical blurbs, fun facts, and multi-step installation guides
+- 42+ ASCII art logos for classic and modern operating systems
+- BTRFS copy-on-write auto-disable for VM directories
+- First-time setup wizard for configuring the VM library directory
 - Configurable settings with persistence
 
 ### Screenshots
@@ -113,17 +120,43 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 
 ### Installation
 
-**Prerequisites**
-- Rust 1.70+
-- QEMU (`qemu-system-*` binaries)
-- libudev-dev (Debian/Ubuntu) or libudev (Arch/Fedora)
+**AUR (Arch / Arch-derived)**
 
 ```bash
+# Using your preferred AUR helper
+paru -S vm-curator
+yay -S vm-curator
+```
+
+**crates.io**
+
+```bash
+cargo install vm-curator
+```
+
+**Binary Packages**
+
+Pre-built packages (DEB, RPM, AppImage, tarball) are available from [GitHub Releases](https://github.com/mroboff/vm-curator/releases).
+
+**From Source**
+
+```bash
+git clone https://github.com/mroboff/vm-curator.git
 cd vm-curator
 cargo build --release
 ```
 
 The binary will be at `target/release/vm-curator`.
+
+**Prerequisites**
+- **Required**: QEMU (`qemu-system-*` binaries), qemu-img (for disk creation and snapshots), libudev
+- **Build**: Rust 1.70+, libudev-dev (Debian/Ubuntu) or systemd-libs (Arch/Fedora)
+- **Optional**:
+  - OVMF/edk2 — UEFI boot support (`edk2-ovmf` on Arch, `ovmf` on Debian/Ubuntu)
+  - virt-viewer — SPICE-app display backend
+  - passt — passt network backend
+  - Looking Glass client — multi-GPU passthrough display
+  - polkit — bridge networking permissions
 
 ### Usage
 
@@ -147,6 +180,9 @@ vm-curator launch windows-95 --cdrom /path/to/image.iso
 # View VM configuration
 vm-curator info windows-95
 
+# Import a VM
+vm-curator  # then press 'i' for the import wizard
+
 # Manage snapshots
 vm-curator snapshot windows-95 list
 vm-curator snapshot windows-95 create my-snapshot
@@ -166,7 +202,9 @@ vm-curator emulators
 | `j/k` or `Down/Up` | Navigate VM list |
 | `Enter` | Launch selected VM |
 | `m` | Open management menu |
+| `x` | Stop VM (if running) |
 | `c` | Open VM creation wizard |
+| `i` | Open VM import wizard |
 | `s` | Open settings |
 | `/` | Search/filter VMs |
 | `?` | Show help |
@@ -178,9 +216,27 @@ vm-curator emulators
 
 | Key | Action |
 |-----|--------|
+| `j/k` or `Down/Up` | Navigate menu |
 | `Enter` | Select menu option |
 | `e` | Edit launch script |
 | `u` | Configure USB passthrough |
+
+Management menu options:
+- Boot Options (normal, install, custom ISO)
+- Snapshots
+- USB Passthrough
+- PCI Passthrough
+- Shared Folders
+- Network Settings
+- Multi-GPU Passthrough (if enabled)
+- Single GPU Passthrough (if enabled)
+- Change Display
+- Edit Notes
+- Rename VM
+- Stop VM / Force Stop
+- Reset VM (recreate disk)
+- Delete VM
+- Edit Raw Configuration
 
 #### Create Wizard
 
@@ -204,11 +260,23 @@ vm_library_path = "~/vm-space"
 default_memory_mb = 4096
 default_cpu_cores = 2
 default_disk_size_gb = 64
-default_display = "gtk"      # gtk, sdl, spice
+default_display = "gtk"      # gtk, sdl, spice-app, vnc
 default_enable_kvm = true
 
 # Behavior
 confirm_before_launch = true
+
+# Multi-GPU passthrough (Looking Glass)
+enable_multi_gpu_passthrough = false
+default_ivshmem_size_mb = 64
+show_gpu_warnings = true
+looking_glass_client_path = ""       # Path to Looking Glass client
+looking_glass_auto_launch = true     # Auto-launch client when VM starts
+
+# Single GPU passthrough
+single_gpu_enabled = false
+single_gpu_auto_tty = false          # Experimental: auto switch TTY
+single_gpu_dm_override = ""          # Override display manager detection
 ```
 
 ### VM Library Structure
@@ -233,21 +301,41 @@ The `launch.sh` script should invoke QEMU. VM Curator parses this script to extr
 
 ### OS Profiles
 
-The creation wizard includes pre-configured profiles for 50+ operating systems:
+The creation wizard includes 120+ pre-configured profiles organized into 16 OS families:
 
-**Microsoft**: DOS, Windows 3.x, 95, 98, ME, 2000, XP, Vista, 7, 8, 10, 11, Server editions
+**Microsoft**: DOS, Windows 1.x–3.x, Windows 95/98/ME, Windows NT/2000/XP/Vista, Windows 7/8/10/11, Server editions
 
-**Apple**: Classic Mac OS (System 6-9), Mac OS X (10.4-10.15), macOS (11+)
+**Apple**: Classic Mac OS (System 6–9), Mac OS X PowerPC (Cheetah–Tiger), Mac OS X Intel (Leopard–El Capitan), macOS (Sierra–Tahoe)
 
-**Linux**: Arch, Debian, Ubuntu, Fedora, openSUSE, Mint, CentOS, RHEL, Gentoo, Slackware, Alpine, NixOS, Void, EndeavourOS, Manjaro, and more
+**Linux**: Arch, Manjaro, EndeavourOS, Garuda, CachyOS, Debian, Ubuntu, Mint, Pop!_OS, Fedora, RHEL, Rocky, Alma, Bazzite, openSUSE, Slackware, Gentoo, Void, NixOS, Alpine, and more
 
-**BSD**: FreeBSD, OpenBSD, NetBSD, DragonFly BSD
+**BSD**: FreeBSD, GhostBSD, OpenBSD, NetBSD, DragonFly BSD
 
-**Unix**: Solaris, OpenIndiana, illumos
+**Unix**: Solaris, OpenIndiana, illumos, HP-UX, IRIX, MINIX, QNX
 
-**Other**: Haiku, ReactOS, FreeDOS, Plan 9, Minix, TempleOS
+**IBM**: OS/2, eComStation, ArcaOS, AIX
 
-Each profile includes optimal QEMU settings for that OS (emulator, machine type, VGA, audio, network, etc.).
+**Commodore**: AmigaOS, AROS, MorphOS
+
+**Be / Haiku**: BeOS, Haiku
+
+**NeXT**: NeXTSTEP, OpenStep
+
+**Research**: Plan 9, 9front, Inferno
+
+**Alternative**: SerenityOS, Redox, TempleOS, KolibriOS, MenuetOS, ReactOS
+
+**Retro**: Atari TOS, CP/M, FreeDOS, DR-DOS, GEOS, RISC OS
+
+**Mobile**: Android-x86, LineageOS, Bliss OS
+
+**Infrastructure**: pfSense, OPNsense, OpenWrt, TrueNAS, Proxmox, ESXi
+
+**Utilities**: GParted, Clonezilla, Memtest86+
+
+**Other**: Catch-all for uncategorized VMs
+
+Each profile includes optimal QEMU settings for that OS (emulator, machine type, CPU model, VGA, audio, network, disk interface, and more).
 
 ### Metadata Customization
 
@@ -275,8 +363,9 @@ facts = ["Fact 1", "Fact 2"]
 
 ### Dependencies
 
-- **Runtime**: QEMU, qemu-img (for snapshots), libudev
-- **Build**: Rust 1.70+, libudev-dev
+- **Runtime**: QEMU, qemu-img, libudev
+- **Build**: Rust 1.70+, libudev-dev (Debian/Ubuntu) or systemd-libs (Arch)
+- **Optional**: OVMF/edk2 (UEFI), virt-viewer (SPICE-app), passt (networking), Looking Glass client (multi-GPU), polkit (bridge networking)
 
 ### Cross-Distribution Compatibility
 
@@ -289,7 +378,7 @@ VM Curator automatically detects OVMF/UEFI firmware paths across Linux distribut
 
 ---
 
-### 🤝 Contributing
+### Contributing
 
 Contributions are welcome! If you find a bug or have an idea for an improvement, feel free to open an issue or submit a Pull Request.
 
@@ -300,7 +389,7 @@ As a TUI application, `vm-curator` relies on visual flair to stand out. I am spe
 
 If you have a knack for terminal aesthetics, your PRs are highly appreciated!
 
-### ☕ Support & Maintenance Status
+### Support & Maintenance Status
 
 **`vm-curator`** was built to solve a specific, painful problem: getting high-performance, 3D-accelerated Linux VMs (via QEMU) without the overhead and complexity of `libvirt` or `virt-manager`.
 
