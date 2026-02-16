@@ -10,6 +10,10 @@ Please see [discussion](https://github.com/mroboff/vm-curator/discussions/11) fo
 
 ### Changelog
 
+**v0.4.2**
+- **macOS Intel VM Support**: Comprehensive overhaul of macOS Intel profiles with Apple SMC emulation, AHCI disk, OpenCore bootloader integration, version-specific CPU models (Penryn/Skylake-Client), passt networking with vmxnet3, and spice-app display with vmware-svga
+- **QEMU Profile Audit**: Review and update of 40+ QEMU profiles against current OS compatibility research — fixes critical boot failures (Bazzite, Pop!_OS, OpenWrt), corrects VGA/network/audio defaults for BSD, Windows 9x, BeOS, Plan 9, and retro OSes, and bumps resource allocations for Proxmox, Tails, and Classic Mac profiles
+
 **v0.4.1**
 - Fix Cargo.lock version mismatch that prevented AUR package from building
 

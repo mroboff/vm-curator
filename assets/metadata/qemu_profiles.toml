@@ -65,7 +65,7 @@ network_model = "e1000"
 disk_interface = "ide"
 disk_size_gb = 64
 enable_kvm = true
-uefi = false
+uefi = true
 tpm = false
 rtc_localtime = true
 usb_tablet = true
@@ -93,6 +93,7 @@ rtc_localtime = true
 usb_tablet = true
 display = "gtk"
 extra_args = []
+notes = "Supports UEFI boot. For better performance, use virtio drivers from an older virtio-win ISO (current releases dropped Win8.1 support)."
 
 [windows-8]
 display_name = "Windows 8"
@@ -114,6 +115,7 @@ rtc_localtime = true
 usb_tablet = true
 display = "gtk"
 extra_args = []
+notes = "Supports UEFI boot. For better performance, use virtio drivers from an older virtio-win ISO (current releases dropped Win8 support)."
 
 [windows-7]
 display_name = "Windows 7"
@@ -144,7 +146,7 @@ emulator = "qemu-system-x86_64"
 memory_mb = 2048
 cpu_cores = 2
 cpu_model = "host"
-machine = "pc"
+machine = "q35"
 vga = "qxl"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "e1000"
@@ -204,6 +206,7 @@ rtc_localtime = true
 usb_tablet = true
 display = "gtk"
 extra_args = []
+notes = "During installation, if the installer fails with a disk-full error, the QEMU -win2k-hack option (added to extra_args) may be needed."
 
 [windows-nt]
 display_name = "Windows NT 4.0"
@@ -239,9 +242,9 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium2"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["sb16"]
-network_model = "rtl8139"
+network_model = "pcnet"
 disk_interface = "ide"
 disk_size_gb = 8
 enable_kvm = false
@@ -261,9 +264,9 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium2"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["sb16"]
-network_model = "rtl8139"
+network_model = "pcnet"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = false
@@ -283,9 +286,9 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium2"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["sb16"]
-network_model = "rtl8139"
+network_model = "pcnet"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = false
@@ -305,7 +308,7 @@ memory_mb = 128
 cpu_cores = 1
 cpu_model = "pentium"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["sb16"]
 network_model = "ne2k_pci"
 disk_interface = "ide"
@@ -568,13 +571,14 @@ network_model = "virtio"
 disk_interface = "virtio"
 disk_size_gb = 40
 enable_kvm = true
-uefi = false
+uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://pop.system76.com/"
+notes = "Pop!_OS uses systemd-boot which requires UEFI. Secure Boot must be disabled."
 
 [linux-zorin]
 display_name = "Zorin OS"
@@ -645,12 +649,12 @@ iso_url = "https://mxlinux.org/download-links/"
 [linux-antix]
 display_name = "antiX Linux"
 category = "linux"
-emulator = "qemu-system-i386"
+emulator = "qemu-system-x86_64"
 memory_mb = 512
 cpu_cores = 1
 cpu_model = "host"
-machine = "pc"
-vga = "std"
+machine = "q35"
+vga = "virtio"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "virtio"
 disk_interface = "virtio"
@@ -714,7 +718,7 @@ iso_url = "https://parrotsec.org/download/"
 display_name = "Tails"
 category = "linux"
 emulator = "qemu-system-x86_64"
-memory_mb = 2048
+memory_mb = 4096
 cpu_cores = 2
 cpu_model = "host"
 machine = "q35"
@@ -731,7 +735,7 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://tails.net/install/"
-notes = "Live OS designed for privacy. Persistent storage optional."
+notes = "Live OS designed for privacy. Tails 7.0+ requires 3GB RAM minimum (4GB recommended). Persistent storage optional."
 
 # =============================================================================
 # Linux - Red Hat-based (x86_64)
@@ -1082,14 +1086,14 @@ iso_url = "https://www.pclinuxos.com/get-pclinuxos/"
 [linux-puppy]
 display_name = "Puppy Linux"
 category = "linux"
-emulator = "qemu-system-i386"
-memory_mb = 512
-cpu_cores = 1
+emulator = "qemu-system-x86_64"
+memory_mb = 1024
+cpu_cores = 2
 cpu_model = "host"
-machine = "pc"
-vga = "std"
-audio = ["ac97"]
-network_model = "rtl8139"
+machine = "q35"
+vga = "virtio"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "virtio"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = true
@@ -1100,7 +1104,7 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://puppylinux.com/"
-notes = "Runs entirely in RAM. Extremely lightweight."
+notes = "Runs entirely in RAM. Extremely lightweight. IDE disk kept for compatibility (virtio storage has known issues with Puppy)."
 
 [linux-deepin]
 display_name = "Deepin"
@@ -1142,14 +1146,14 @@ network_model = "virtio"
 disk_interface = "virtio"
 disk_size_gb = 128
 enable_kvm = true
-uefi = false
+uefi = true
 tpm = false
 rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://bazzite.gg/"
-notes = "Gaming-focused immutable distro. Larger disk recommended for games."
+notes = "Gaming-focused immutable distro based on Fedora Atomic. UEFI is mandatory (Legacy boot not supported). Larger disk recommended for games."
 
 # =============================================================================
 # Linux - Historic (i386)
@@ -1163,7 +1167,7 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium3"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["ac97"]
 network_model = "rtl8139"
 disk_interface = "ide"
@@ -1185,7 +1189,7 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium3"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["ac97"]
 network_model = "rtl8139"
 disk_interface = "ide"
@@ -1207,7 +1211,7 @@ memory_mb = 256
 cpu_cores = 1
 cpu_model = "pentium3"
 machine = "pc"
-vga = "std"
+vga = "cirrus"
 audio = ["ac97"]
 network_model = "rtl8139"
 disk_interface = "ide"
@@ -1233,7 +1237,7 @@ memory_mb = 2048
 cpu_cores = 2
 cpu_model = "host"
 machine = "q35"
-vga = "virtio"
+vga = "std"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "virtio"
 disk_interface = "virtio"
@@ -1246,6 +1250,7 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://www.freebsd.org/where/"
+notes = "FreeBSD virtio-gpu is WIP. Use vmware-svga via extra_args for higher resolutions."
 
 [openbsd]
 display_name = "OpenBSD"
@@ -1278,7 +1283,7 @@ memory_mb = 1024
 cpu_cores = 2
 cpu_model = "host"
 machine = "q35"
-vga = "std"
+vga = "vmware"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "virtio"
 disk_interface = "virtio"
@@ -1291,6 +1296,7 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://www.netbsd.org/releases/"
+notes = "NetBSD has a built-in VMware video driver for X11. Virtio network/disk fully supported."
 
 [dragonflybsd]
 display_name = "DragonFly BSD"
@@ -1322,7 +1328,7 @@ memory_mb = 4096
 cpu_cores = 2
 cpu_model = "host"
 machine = "q35"
-vga = "virtio"
+vga = "std"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "virtio"
 disk_interface = "virtio"
@@ -1421,7 +1427,7 @@ cpu_model = "pentium"
 machine = "pc"
 vga = "std"
 audio = ["sb16"]
-network_model = "ne2k_pci"
+network_model = "pcnet"
 disk_interface = "ide"
 disk_size_gb = 2
 enable_kvm = true
@@ -1431,7 +1437,7 @@ rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "IBM's competitor to Windows 95. Limited driver support in QEMU."
+notes = "IBM's competitor to Windows 95. Use -parallel none in extra_args to avoid SB16/parallel IRQ conflict."
 
 [os2-warp4]
 display_name = "OS/2 Warp 4"
@@ -1443,7 +1449,7 @@ cpu_model = "pentium"
 machine = "pc"
 vga = "std"
 audio = ["sb16"]
-network_model = "ne2k_pci"
+network_model = "pcnet"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = true
@@ -1453,6 +1459,7 @@ rtc_localtime = true
 usb_tablet = false
 display = "gtk"
 extra_args = []
+notes = "Use -parallel none in extra_args to avoid SB16/parallel IRQ conflict."
 
 # =============================================================================
 # Be / Haiku (x86_64/i386)
@@ -1467,8 +1474,8 @@ cpu_cores = 1
 cpu_model = "pentium3"
 machine = "pc"
 vga = "std"
-audio = ["ac97"]
-network_model = "rtl8139"
+audio = []
+network_model = "ne2k_pci"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = true
@@ -1478,7 +1485,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "BeOS requires specific QEMU settings. VESA graphics mode recommended."
+notes = "BeOS requires manual VESA config: echo 'mode 1024 768 16 > ~/settings/kernel/drivers/vesa'. Audio disabled to avoid media_addon_server freeze. NE2000 PCI network."
 
 [haiku]
 display_name = "Haiku"
@@ -1488,7 +1495,7 @@ memory_mb = 2048
 cpu_cores = 2
 cpu_model = "host"
 machine = "q35"
-vga = "std"
+vga = "virtio"
 audio = ["intel-hda", "hda-duplex"]
 network_model = "virtio"
 disk_interface = "virtio"
@@ -1548,7 +1555,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "OpenStep for x86 is easier to run than NeXTSTEP."
+notes = "OpenStep for x86. SB16 audio works. Networking may not function (OpenStep lacks a QEMU-compatible NE2000 driver)."
 
 # =============================================================================
 # Research Operating Systems (i386/x86_64)
@@ -1560,12 +1567,12 @@ category = "alternative"
 emulator = "qemu-system-i386"
 memory_mb = 256
 cpu_cores = 1
-cpu_model = "pentium3"
+cpu_model = "host"
 machine = "pc"
 vga = "std"
-audio = ["sb16"]
-network_model = "rtl8139"
-disk_interface = "ide"
+audio = ["ac97"]
+network_model = "virtio"
+disk_interface = "virtio"
 disk_size_gb = 4
 enable_kvm = true
 uefi = false
@@ -1575,7 +1582,7 @@ usb_tablet = false
 display = "gtk"
 extra_args = []
 iso_url = "https://9p.io/plan9/"
-notes = "Bell Labs distributed OS. Everything is a file."
+notes = "Bell Labs distributed OS. 9front (actively maintained fork) has full virtio support. AC97 and Intel HDA audio supported."
 
 [inferno]
 display_name = "Inferno"
@@ -1587,8 +1594,8 @@ cpu_model = "host"
 machine = "pc"
 vga = "std"
 audio = []
-network_model = "virtio"
-disk_interface = "virtio"
+network_model = "e1000"
+disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = true
 uefi = false
@@ -1598,6 +1605,7 @@ usb_tablet = true
 display = "gtk"
 extra_args = []
 iso_url = "https://bitbucket.org/inferno-os/inferno-os/downloads/"
+notes = "Inferno is typically run in hosted mode (as a userspace program) rather than natively in QEMU."
 
 # =============================================================================
 # Alternative Operating Systems (i386/x86_64)
@@ -1613,7 +1621,7 @@ cpu_model = "pentium3"
 machine = "pc"
 vga = "std"
 audio = ["ac97"]
-network_model = "rtl8139"
+network_model = "e1000"
 disk_interface = "ide"
 disk_size_gb = 8
 enable_kvm = true
@@ -1703,7 +1711,7 @@ memory_mb = 128
 cpu_cores = 1
 cpu_model = "pentium3"
 machine = "pc"
-vga = "std"
+vga = "vmware"
 audio = ["ac97"]
 network_model = "rtl8139"
 disk_interface = "ide"
@@ -1787,7 +1795,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "Requires CP/M emulator or special setup. Original was for 8080/Z80."
+notes = "CP/M was designed for 8080/Z80 which QEMU does not emulate. This profile is for CP/M-86 (the x86 port). For original CP/M, use RunCPM or Z80pack."
 
 # =============================================================================
 # Classic Macintosh (m68k/ppc) - Limited QEMU support
@@ -1825,7 +1833,7 @@ hint = "Requires a Quadra 800 ROM dump (e.g., MacROM.bin). Not included due to c
 display_name = "Macintosh System 7"
 category = "classic-mac"
 emulator = "qemu-system-m68k"
-memory_mb = 32
+memory_mb = 128
 cpu_cores = 1
 cpu_model = "m68040"
 machine = "q800"
@@ -1869,7 +1877,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "PowerPC Mac OS. QEMU support is limited. Consider SheepShaver."
+notes = "PowerPC Mac OS. The mac99 machine has very limited Mac OS 8 support (ROM compatibility issues). SheepShaver is strongly recommended instead. Screamer audio requires a special QEMU build."
 
 [mac-os8.bios_rom]
 required = false
@@ -1880,9 +1888,9 @@ hint = "Optional. QEMU uses built-in OpenBIOS for PowerPC by default."
 display_name = "Mac OS 9"
 category = "classic-mac"
 emulator = "qemu-system-ppc"
-memory_mb = 256
+memory_mb = 512
 cpu_cores = 1
-cpu_model = "g3"
+cpu_model = "g4"
 machine = "mac99"
 vga = "std"
 audio = ["screamer"]
@@ -1896,7 +1904,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "Last 'Classic' Mac OS. QEMU support limited. Use SheepShaver for better results."
+notes = "Last 'Classic' Mac OS. G4 CPU recommended for OS 9.2. Use -M mac99,via=pmu for USB support. Screamer audio requires a special QEMU build. SheepShaver may provide better results."
 
 [mac-os9.bios_rom]
 required = false
@@ -2395,9 +2403,9 @@ memory_mb = 512
 cpu_cores = 1
 cpu_model = "g4"
 machine = "mac99"
-vga = "none"
+vga = "std"
 audio = []
-network_model = "none"
+network_model = "sungem"
 disk_interface = "ide"
 disk_size_gb = 4
 enable_kvm = false
@@ -2407,7 +2415,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "PowerPC-only OS. Very limited QEMU support."
+notes = "PowerPC-only OS. Very limited QEMU support. Networking requires static IP (DHCP unreliable). Use -M mac99,via=pmu for best stability."
 
 # =============================================================================
 # Atari / Retro (m68k/i386)
@@ -2592,7 +2600,7 @@ disk_size_gb = 32
 enable_kvm = true
 uefi = true
 tpm = false
-rtc_localtime = true
+rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
@@ -2615,7 +2623,7 @@ disk_size_gb = 32
 enable_kvm = true
 uefi = true
 tpm = false
-rtc_localtime = true
+rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
@@ -2637,7 +2645,7 @@ disk_size_gb = 32
 enable_kvm = true
 uefi = true
 tpm = false
-rtc_localtime = true
+rtc_localtime = false
 usb_tablet = true
 display = "gtk"
 extra_args = []
@@ -2708,14 +2716,14 @@ network_model = "virtio"
 disk_interface = "virtio"
 disk_size_gb = 1
 enable_kvm = true
-uefi = true
+uefi = false
 tpm = false
 rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
 iso_url = "https://downloads.openwrt.org/"
-notes = "Lightweight router OS. Very low resource requirements."
+notes = "Lightweight router OS. Legacy BIOS recommended (UEFI boot has known issues with QEMU). Use the non-EFI combined image."
 
 [truenas-scale]
 display_name = "TrueNAS Scale"
@@ -2767,8 +2775,8 @@ notes = "FreeBSD-based NAS. 8GB RAM minimum. ZFS needs ECC RAM for production."
 display_name = "Proxmox VE"
 category = "infrastructure"
 emulator = "qemu-system-x86_64"
-memory_mb = 4096
-cpu_cores = 2
+memory_mb = 8192
+cpu_cores = 4
 cpu_model = "host"
 machine = "q35"
 vga = "std"
@@ -2784,7 +2792,7 @@ usb_tablet = false
 display = "gtk"
 extra_args = []
 iso_url = "https://www.proxmox.com/en/downloads"
-notes = "Debian-based virtualization platform. Nested virtualization may require additional config."
+notes = "Debian-based virtualization platform. 8GB RAM minimum for running VMs. Nested virtualization requires host KVM module support."
 
 [unraid]
 display_name = "Unraid"
@@ -2806,7 +2814,7 @@ rtc_localtime = false
 usb_tablet = false
 display = "gtk"
 extra_args = []
-notes = "NAS/VM platform. Boots from USB. Commercial license required."
+notes = "NAS/VM platform. Boots from USB (FAT32 with volume label 'UNRAID'). Use usb-storage device or pass through a physical USB drive. Commercial license required."
 
 # =============================================================================
 # Utilities / Live Systems (x86_64)

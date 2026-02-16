@@ -1,5 +1,26 @@
 # Changelog
 
+**v0.4.2**
+- **macOS Intel VM Support**: Comprehensive overhaul of macOS Intel profiles (Leopard through Tahoe) for reliable out-of-the-box virtualization
+  - Apple SMC device emulation with correct OSK for macOS guest detection
+  - AHCI (ich9-ahci) disk interface replacing plain IDE for proper macOS disk support
+  - OpenCore bootloader integration with bios_rom configuration (optional for Catalina, required for Big Sur+)
+  - Version-specific CPU models: Penryn with extended features (invtsc, vmware-cpuid-freq, AVX, AES, etc.) for Leopard–Ventura; Skylake-Client for Sonoma+
+  - passt user-mode networking with vmxnet3 adapter for reliable macOS-compatible networking
+  - spice-app display with vmware-svga device (256MB VRAM) for high-resolution output via virt-viewer
+  - USB keyboard device for macOS compatibility
+- **QEMU Profile Audit**: Comprehensive review and update of 40+ QEMU configuration profiles against current best practices and OS compatibility research
+  - Fix critical boot failures: Bazzite and Pop!_OS now correctly default to UEFI (mandatory for both), OpenWrt switched to Legacy BIOS (UEFI has known issues)
+  - Fix VGA compatibility: FreeBSD/GhostBSD switched from virtio to std (virtio-gpu is WIP), NetBSD switched to vmware (built-in X11 driver), KolibriOS switched to vmware (wiki recommendation), Haiku switched to virtio (modesetting driver added in 2024), historic Linux distros switched to cirrus (XFree86 compatibility)
+  - Fix network adapters: Windows 9x switched to pcnet (built-in drivers), BeOS switched to ne2k_pci, ReactOS switched to e1000 (documented recommendation), OS/2 switched to pcnet, Inferno switched to e1000
+  - Fix resource allocations: Proxmox bumped to 8GB RAM / 4 cores (hypervisor minimum), Tails bumped to 4GB (v7.0+ minimum), Puppy Linux bumped to 1GB / 2 cores (64-bit version), Mac OS 9 bumped to 512MB with G4 CPU, System 7 bumped to 128MB
+  - Fix RTC clock: Android-x86, LineageOS, and Bliss OS switched to UTC (Linux-based)
+  - Improve Windows defaults: Windows 10 now defaults to UEFI, Vista upgraded to q35 machine
+  - Update Plan 9 to use virtio and host CPU (9front support)
+  - Disable BeOS audio (media_addon_server freeze workaround)
+  - Add MorphOS networking (sungem) and video (std VGA)
+  - Add detailed notes for 15+ profiles with compatibility tips, workarounds, and alternative emulator recommendations
+
 **v0.4.1**
 - Fix Cargo.lock version mismatch that prevented AUR package from building (`cargo fetch --locked` failed due to stale lockfile in v0.4.0 release tarball)
 
