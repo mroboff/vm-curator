@@ -11,7 +11,23 @@ env:
 permissions: {}
 
 jobs:
+  verify-lockfile:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Cargo.lock matches Cargo.toml
+        run: cargo fetch --locked
+
   build-linux:
+    needs: [verify-lockfile]
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -29,7 +45,7 @@ jobs:
         run: cargo install cargo-deb cargo-generate-rpm
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Build DEB package
         run: cargo deb
@@ -59,6 +75,7 @@ jobs:
             dist/*.rpm
 
   build-appimage:
+    needs: [verify-lockfile]
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -73,7 +90,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Download appimagetool
         run: |
