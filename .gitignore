@@ -17,6 +17,9 @@ release/
 *~
 .DS_Store
 
+# Scripts
+scripts/
+
 # Environment and local config
 .env
 .env.local
