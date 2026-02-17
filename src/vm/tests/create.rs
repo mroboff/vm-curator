@@ -40,6 +40,7 @@ fn test_generate_launch_script() {
         false,
         &config,
         None,
+        None,
     );
 
     assert!(script.contains("#!/bin/bash"));
@@ -77,7 +78,7 @@ fn test_build_qemu_command_basic() {
         bios_path: None,
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
 
     assert!(cmd.contains("qemu-system-x86_64"));
     assert!(cmd.contains("-enable-kvm"));
@@ -93,7 +94,7 @@ fn test_build_qemu_command_basic() {
 #[test]
 fn test_build_qemu_command_with_cdrom() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::Iso(None), None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::Iso(None), None, None);
 
     assert!(cmd.contains("-drive file=\"$ISO\",media=cdrom"));
     assert!(cmd.contains("-boot d"));
@@ -140,7 +141,7 @@ fn test_build_qemu_command_with_audio() {
         ..Default::default()
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
 
     assert!(cmd.contains("-audiodev pa,id=audio0"));
     assert!(cmd.contains("-device intel-hda"));
@@ -173,7 +174,7 @@ fn test_build_qemu_command_with_bios() {
         bios_path: Some(PathBuf::from("MacROM.bin")),
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-system7"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-system7"), None);
     assert!(cmd.contains("-bios \"$ROM\""), "Should contain -bios \"$ROM\", got:\n{}", cmd);
     assert!(cmd.contains("qemu-system-m68k"), "Should contain m68k emulator");
 }
@@ -181,7 +182,7 @@ fn test_build_qemu_command_with_bios() {
 #[test]
 fn test_build_qemu_command_without_bios() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
     assert!(!cmd.contains("-bios"), "Should NOT contain -bios when no bios_path");
 }
 
@@ -200,6 +201,7 @@ fn test_generate_launch_script_with_rom() {
         false,
         &config,
         Some("mac-system7"),
+        None,
     );
 
     assert!(script.contains("ROM=\"$VM_DIR/MacROM.bin\""), "Script should contain ROM variable");
@@ -209,7 +211,7 @@ fn test_generate_launch_script_with_rom() {
 #[test]
 fn test_build_qemu_command_with_recovery_image() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(None), None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(None), None, None);
 
     assert!(cmd.contains("format=dmg"), "Should contain format=dmg for recovery image");
     assert!(cmd.contains("snapshot=on"), "Should use snapshot overlay for writability");
@@ -221,7 +223,7 @@ fn test_build_qemu_command_with_recovery_image() {
 #[test]
 fn test_build_qemu_command_with_recovery_image_custom_path() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(Some("\"$2\"")), None);
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(Some("\"$2\"")), None, None);
 
     assert!(cmd.contains("format=dmg"), "Should contain format=dmg");
     assert!(cmd.contains("\"$2\""), "Should use custom path expression");
@@ -238,6 +240,7 @@ fn test_generate_launch_script_with_recovery_image() {
         true,
         &config,
         Some("macos-tahoe"),
+        None,
     );
 
     assert!(script.contains("RECOVERY_IMG="), "Should use RECOVERY_IMG variable");
@@ -256,6 +259,7 @@ fn test_generate_launch_script_iso_unchanged() {
         Some(Path::new("/tmp/linux.iso")),
         false,
         &config,
+        None,
         None,
     );
 
@@ -325,7 +329,7 @@ fn macos_non_uefi_config() -> WizardQemuConfig {
 #[test]
 fn test_macos_includes_smc_and_smbios() {
     let config = macos_non_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"), None);
 
     assert!(cmd.contains("isa-applesmc,osk="), "Should contain Apple SMC device with quoted value");
     assert!(cmd.contains("-smbios type=2"), "Should contain SMBIOS type=2");
@@ -334,7 +338,7 @@ fn test_macos_includes_smc_and_smbios() {
 #[test]
 fn test_macos_uefi_uses_ahci() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
 
     assert!(cmd.contains("ich9-ahci,id=sata"), "Should have explicit AHCI controller");
     assert!(cmd.contains("bus=sata."), "Should use sata bus addressing");
@@ -345,7 +349,7 @@ fn test_macos_uefi_uses_ahci() {
 #[test]
 fn test_macos_uefi_with_opencore() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
 
     // OpenCore as sata.0
     assert!(cmd.contains("file=\"$ROM\",format=qcow2,if=none,id=oc"), "Should have OpenCore drive");
@@ -360,7 +364,7 @@ fn test_macos_uefi_with_opencore() {
 fn test_macos_recovery_image_qcow2_on_ahci() {
     let config = macos_uefi_config();
     let cmd = build_qemu_command_with_os(
-        &config, "disk.qcow2", &InstallMedia::RecoveryImage(None), Some("macos-sonoma")
+        &config, "disk.qcow2", &InstallMedia::RecoveryImage(None), Some("macos-sonoma"), None
     );
 
     // Recovery image on AHCI bus (no format= so QEMU auto-detects DMG vs qcow2)
@@ -373,7 +377,7 @@ fn test_macos_recovery_image_qcow2_on_ahci() {
 #[test]
 fn test_macos_spice_audio() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
 
     assert!(cmd.contains("-audiodev spice,id=audio0"), "Should use spice audio backend with spice-app display");
     assert!(!cmd.contains("-audiodev pa,id=audio0"), "Should NOT use pa audio with spice-app display");
@@ -382,7 +386,7 @@ fn test_macos_spice_audio() {
 #[test]
 fn test_macos_usb_kbd() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
 
     assert!(cmd.contains("-device usb-kbd"), "Should include USB keyboard for macOS");
     assert!(cmd.contains("-device usb-tablet"), "Should also include USB tablet");
@@ -405,7 +409,7 @@ fn test_ppc_macos_no_smc() {
         ..Default::default()
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-tiger"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-tiger"), None);
 
     assert!(!cmd.contains("applesmc"), "PPC macOS should NOT have Apple SMC");
     assert!(!cmd.contains("-smbios type=2"), "PPC macOS should NOT have SMBIOS type=2");
@@ -416,7 +420,7 @@ fn test_ppc_macos_no_smc() {
 fn test_non_macos_unchanged() {
     // Linux VM should not get any macOS-specific args
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("ubuntu-24-04"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("ubuntu-24-04"), None);
 
     assert!(!cmd.contains("applesmc"), "Linux VM should NOT have Apple SMC");
     assert!(!cmd.contains("-smbios type=2"), "Linux VM should NOT have SMBIOS type=2");
@@ -431,7 +435,7 @@ fn test_non_macos_unchanged() {
 fn test_macos_uefi_iso_no_boot_d() {
     let config = macos_uefi_config();
     let cmd = build_qemu_command_with_os(
-        &config, "disk.qcow2", &InstallMedia::Iso(None), Some("macos-sonoma")
+        &config, "disk.qcow2", &InstallMedia::Iso(None), Some("macos-sonoma"), None
     );
 
     // macOS UEFI should attach ISO on AHCI bus and NOT add -boot d
@@ -449,6 +453,7 @@ fn test_macos_opencore_bootloader_check_in_script() {
         false,
         &config,
         Some("macos-sonoma"),
+        None,
     );
 
     assert!(script.contains("Verify OpenCore bootloader exists"), "Script should verify OpenCore exists");
@@ -460,7 +465,7 @@ fn test_macos_non_uefi_uses_bios() {
     // Leopard-era macOS: non-UEFI Intel, with a bios_path should use -bios "$ROM"
     let mut config = macos_non_uefi_config();
     config.bios_path = Some(PathBuf::from("some-rom.bin"));
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"));
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"), None);
 
     assert!(cmd.contains("-bios \"$ROM\""), "Non-UEFI macOS with bios_path should use -bios");
     assert!(!cmd.contains("ich9-ahci"), "Non-UEFI macOS should NOT use explicit AHCI controller");

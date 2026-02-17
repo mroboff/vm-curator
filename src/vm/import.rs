@@ -750,6 +750,7 @@ pub fn execute_import(
         false,
         &vm.qemu_config,
         vm.detected_os_profile.as_deref(),
+        None,
     );
 
     write_launch_script(&vm_dir, &script_content)?;

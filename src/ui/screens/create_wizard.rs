@@ -1051,6 +1051,23 @@ fn render_step_select_iso(app: &App, frame: &mut Frame, area: Rect) {
         option_idx += 1;
     }
 
+    // Floppy image option (for OSes that need a boot floppy, e.g., OS/2)
+    let is_floppy_selected = state.field_focus == option_idx;
+    let floppy_style = if is_floppy_selected {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let floppy_prefix = if is_floppy_selected { "> " } else { "  " };
+    lines.push(Line::styled(format!("{}( ) Browse for boot floppy image...", floppy_prefix), floppy_style));
+    if let Some(ref floppy_path) = state.floppy_path {
+        lines.push(Line::styled(
+            format!("       Floppy: {}", floppy_path.display()),
+            Style::default().fg(Color::Green),
+        ));
+    }
+    option_idx += 1;
+
     let is_browse_selected = state.field_focus == option_idx;
     let browse_style = if is_browse_selected {
         Style::default().fg(Color::Yellow)
@@ -1112,10 +1129,11 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
         .and_then(|p| p.bios_rom.as_ref())
         .is_some();
 
-    // Compute option indices matching the render order: ROM, download, browse, recovery, skip
+    // Compute option indices matching the render order: ROM, download, floppy, browse, recovery, skip
     let mut idx = 0;
     let rom_idx = if has_bios_rom { let i = idx; idx += 1; Some(i) } else { None };
     let download_idx = if has_download { let i = idx; idx += 1; Some(i) } else { None };
+    let floppy_idx = idx; idx += 1;
     let browse_idx = idx; idx += 1;
     let recovery_browse_idx = idx; idx += 1;
     let no_iso_idx = idx; idx += 1;
@@ -1160,6 +1178,10 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
                         app.set_status("Opened download page in browser. Use 'Browse for ISO' after downloading.");
                     }
                 }
+            } else if focus == floppy_idx {
+                // Browse for floppy image - open file browser
+                app.load_file_browser(crate::app::FileBrowserMode::Floppy);
+                app.push_screen(crate::app::Screen::FileBrowser);
             } else if focus == browse_idx {
                 // Browse for ISO - open file browser
                 app.load_file_browser(crate::app::FileBrowserMode::Iso);
@@ -2587,6 +2609,12 @@ fn render_step_confirm(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled("ISO:            ", Style::default().fg(Color::Yellow)),
         Span::raw(iso_str),
     ]));
+    if let Some(ref floppy_path) = state.floppy_path {
+        lines.push(Line::from(vec![
+            Span::styled("Floppy:         ", Style::default().fg(Color::Yellow)),
+            Span::raw(floppy_path.display().to_string()),
+        ]));
+    }
     if let Some(ref rom_path) = state.bios_rom_path {
         lines.push(Line::from(vec![
             Span::styled("BIOS/ROM:       ", Style::default().fg(Color::Yellow)),

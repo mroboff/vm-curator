@@ -1,5 +1,14 @@
 # Changelog
 
+**v0.4.3**
+- **Floppy Disk Support**: Boot floppy image support for older operating systems that require a boot floppy for installation (e.g., OS/2)
+  - New "Browse for boot floppy image" option in the create wizard's install media step (Step 2)
+  - Floppy file browser filters for common floppy formats (.img, .ima, .flp, .vfd)
+  - Generated launch scripts include `FLOPPY=` variable, `-fda` QEMU argument, and `--floppy` CLI option
+  - When a floppy is paired with an ISO, boot priority automatically changes to floppy-first (`-boot a`) so the floppy bootloader can access the CD-ROM
+  - New "Boot with floppy image" option in the management screen's boot options menu
+  - Floppy path displayed in the create wizard's review/confirm step
+
 **v0.4.2**
 - **macOS Intel VM Support**: Comprehensive overhaul of macOS Intel profiles (Leopard through Tahoe) for reliable out-of-the-box virtualization
   - Apple SMC device emulation with correct OSK for macOS guest detection

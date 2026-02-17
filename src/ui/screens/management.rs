@@ -271,8 +271,8 @@ pub fn render(app: &App, frame: &mut Frame) {
 /// Render boot options submenu
 pub fn render_boot_options(app: &App, frame: &mut Frame) {
     let area = frame.area();
-    let dialog_width = 45.min(area.width.saturating_sub(4));
-    let dialog_height = 14.min(area.height.saturating_sub(4));
+    let dialog_width = 50.min(area.width.saturating_sub(4));
+    let dialog_height = 16.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -310,6 +310,7 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
         ("Install mode", "Boot from installation media"),
         ("Boot with custom ISO", "Select an ISO file to boot"),
         ("Boot with recovery DMG", "Select a DMG file as recovery image"),
+        ("Boot with floppy image", "Select a floppy image (.img, .ima) to boot"),
     ];
 
     let items: Vec<ListItem> = boot_items

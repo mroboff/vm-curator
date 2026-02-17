@@ -229,6 +229,7 @@ pub enum BootMode {
     Install,
     Cdrom(PathBuf),
     Recovery(PathBuf),
+    Floppy(PathBuf),
     Network,
 }
 

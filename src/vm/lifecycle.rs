@@ -123,6 +123,24 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
             args.push("--recovery".to_string());
             args.push(dmg_path.to_string_lossy().to_string());
         }
+        BootMode::Floppy(floppy_path) => {
+            if !floppy_path.exists() {
+                return LaunchResult {
+                    success: false,
+                    error: Some(format!("Floppy image not found: {}", floppy_path.display())),
+                    vm_name,
+                };
+            }
+            if !floppy_path.is_file() {
+                return LaunchResult {
+                    success: false,
+                    error: Some(format!("Floppy path is not a file: {}", floppy_path.display())),
+                    vm_name,
+                };
+            }
+            args.push("--floppy".to_string());
+            args.push(floppy_path.to_string_lossy().to_string());
+        }
         BootMode::Network => {
             args.push("--netboot".to_string());
         }

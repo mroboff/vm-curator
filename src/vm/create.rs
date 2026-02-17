@@ -254,6 +254,7 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
         state.is_recovery_image,
         &qemu_config,
         state.selected_os.as_deref(),
+        state.floppy_path.as_deref(),
     );
     let launch_script_path = write_launch_script(&vm_dir, &script_content)?;
 
@@ -536,6 +537,7 @@ pub fn generate_launch_script_with_os(
     is_recovery_image: bool,
     config: &WizardQemuConfig,
     os_profile: Option<&str>,
+    floppy_path: Option<&Path>,
 ) -> String {
     let mut script = String::new();
 
@@ -585,6 +587,11 @@ pub fn generate_launch_script_with_os(
         }
     }
 
+    // Floppy image variable
+    if let Some(floppy) = floppy_path {
+        script.push_str(&format!("FLOPPY={}\n", shell_escape(&floppy.display().to_string())));
+    }
+
     // BIOS/ROM file variable
     if let Some(ref bios_path) = config.bios_path {
         let filename = bios_path
@@ -632,16 +639,18 @@ fi
     script.push_str("    echo \"  --install        Boot from installation media\"\n");
     script.push_str("    echo \"  --cdrom <iso>    Boot with specified ISO as CD-ROM\"\n");
     script.push_str("    echo \"  --recovery <dmg> Boot with recovery image (DMG)\"\n");
+    script.push_str("    echo \"  --floppy <img>   Boot with specified floppy image\"\n");
     script.push_str("    echo \"  (no options)     Normal boot from hard disk\"\n");
     script.push_str("}\n\n");
 
     // Build QEMU commands with OS-awareness
-    let base_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::None, os_profile);
+    let floppy_ref = if floppy_path.is_some() { Some("\"$FLOPPY\"") } else { None };
+    let base_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::None, os_profile, floppy_ref);
 
     let install_cmd = if is_recovery_image {
-        build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(None), os_profile)
+        build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(None), os_profile, floppy_ref)
     } else {
-        build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(None), os_profile)
+        build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(None), os_profile, floppy_ref)
     };
 
     // Main script logic
@@ -684,7 +693,7 @@ fi
         script.push_str("        start_tpm\n");
     }
 
-    let cdrom_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(Some("\"$2\"")), os_profile);
+    let cdrom_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::Iso(Some("\"$2\"")), os_profile, floppy_ref);
     script.push_str(&format!("        {}\n", cdrom_cmd));
     script.push_str("        ;;\n");
 
@@ -700,8 +709,24 @@ fi
         script.push_str("        start_tpm\n");
     }
 
-    let recovery_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(Some("\"$2\"")), os_profile);
+    let recovery_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::RecoveryImage(Some("\"$2\"")), os_profile, floppy_ref);
     script.push_str(&format!("        {}\n", recovery_cmd));
+    script.push_str("        ;;\n");
+
+    // --floppy option
+    script.push_str("    --floppy)\n");
+    script.push_str("        if [[ -z \"$2\" ]] || [[ ! -f \"$2\" ]]; then\n");
+    script.push_str("            echo \"Error: Please specify a valid floppy image file\"\n");
+    script.push_str("            exit 1\n");
+    script.push_str("        fi\n");
+    script.push_str("        echo \"Booting with floppy: $2\"\n");
+
+    if needs_tpm {
+        script.push_str("        start_tpm\n");
+    }
+
+    let floppy_cmd = build_qemu_command_with_os(config, disk_filename, &InstallMedia::None, os_profile, Some("\"$2\""));
+    script.push_str(&format!("        {}\n", floppy_cmd));
     script.push_str("        ;;\n");
 
     script.push_str("    --help|-h)\n");
@@ -733,6 +758,7 @@ fn build_qemu_command_with_os(
     _disk_filename: &str,
     install_media: &InstallMedia,
     os_profile: Option<&str>,
+    floppy_path: Option<&str>,
 ) -> String {
     let mut args: Vec<String> = Vec::new();
 
@@ -908,6 +934,18 @@ fn build_qemu_command_with_os(
                 args.push(format!("-drive file={},snapshot=on,format=dmg,if=ide,index=2,media=disk", dmg_ref));
             }
             // No -boot d: OpenCore/UEFI bootloader handles boot selection
+        }
+    }
+
+    // Floppy disk image
+    if let Some(floppy_ref) = floppy_path {
+        args.push(format!("-fda {}", floppy_ref));
+        // When floppy is present with ISO, boot from floppy (which accesses CD)
+        if matches!(install_media, InstallMedia::Iso(_)) {
+            // Replace the -boot d we just added with -boot a
+            if let Some(pos) = args.iter().position(|a| a == "-boot d") {
+                args[pos] = "-boot a".to_string();
+            }
         }
     }
 

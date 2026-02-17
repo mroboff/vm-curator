@@ -112,6 +112,7 @@ pub enum FileBrowserMode {
     Directory,
     ImportConfig,
     Bios,
+    Floppy,
 }
 
 /// Action to take with an existing disk when using it for a new VM
@@ -354,6 +355,8 @@ pub struct CreateWizardState {
     pub existing_disk_action: DiskAction,
     /// BIOS/ROM file path (for classic Mac and other systems needing custom firmware)
     pub bios_rom_path: Option<PathBuf>,
+    /// Floppy disk image path (for OSes that need a boot floppy, e.g., OS/2)
+    pub floppy_path: Option<PathBuf>,
     /// QEMU configuration
     pub qemu_config: WizardQemuConfig,
     /// Auto-launch VM after creation
@@ -413,6 +416,7 @@ impl Default for CreateWizardState {
             existing_disk_path: None,
             existing_disk_action: DiskAction::Copy,
             bios_rom_path: None,
+            floppy_path: None,
             qemu_config: WizardQemuConfig::default(),
             auto_launch: true,
             field_focus: 0,
@@ -1431,6 +1435,7 @@ impl App {
             FileBrowserMode::Directory => &[],
             FileBrowserMode::ImportConfig => &[".xml", ".XML", ".conf"],
             FileBrowserMode::Bios => &[".bin", ".BIN", ".rom", ".ROM", ".qcow2", ".QCOW2", ".fd", ".FD"],
+            FileBrowserMode::Floppy => &[".img", ".IMG", ".ima", ".IMA", ".flp", ".FLP", ".vfd", ".VFD"],
         };
 
         // For Directory mode, add a [Select This Directory] sentinel entry first

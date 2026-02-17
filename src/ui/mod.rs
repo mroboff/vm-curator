@@ -1208,14 +1208,15 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
 
     match key.code {
         KeyCode::Esc => app.pop_screen(),
-        KeyCode::Char('j') | KeyCode::Down => app.menu_next(4),
+        KeyCode::Char('j') | KeyCode::Down => app.menu_next(5),
         KeyCode::Char('k') | KeyCode::Up => app.menu_prev(),
-        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
+        KeyCode::Enter | KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') => {
             let item = match key.code {
                 KeyCode::Char('1') => 0,
                 KeyCode::Char('2') => 1,
                 KeyCode::Char('3') => 2,
                 KeyCode::Char('4') => 3,
+                KeyCode::Char('5') => 4,
                 _ => app.selected_menu_item,
             };
 
@@ -1238,6 +1239,11 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
                 3 => {
                     // Open file browser for recovery image (DMG) selection
                     app.load_file_browser(FileBrowserMode::RecoveryImage);
+                    app.push_screen(Screen::FileBrowser);
+                }
+                4 => {
+                    // Open file browser for floppy image selection
+                    app.load_file_browser(FileBrowserMode::Floppy);
                     app.push_screen(Screen::FileBrowser);
                 }
                 _ => {}
@@ -1689,6 +1695,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         FileBrowserMode::Directory => "Select Directory",
         FileBrowserMode::ImportConfig => "Select Config File",
         FileBrowserMode::Bios => "Select BIOS/ROM File",
+        FileBrowserMode::Floppy => "Select Floppy Image",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -1729,6 +1736,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
             FileBrowserMode::Directory => "No subdirectories in this directory.",
             FileBrowserMode::ImportConfig => "No config files (.xml, .conf) found in this directory.",
             FileBrowserMode::Bios => "No firmware files (.bin, .rom, .qcow2, .fd) found in this directory.",
+            FileBrowserMode::Floppy => "No floppy images (.img, .ima, .flp, .vfd) found in this directory.",
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
             .style(Style::default().fg(Color::DarkGray))
@@ -1825,6 +1833,20 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                             state.qemu_config.bios_path = Some(selected_path);
                         }
                         app.pop_screen(); // Close file browser, return to ISO step
+                    }
+                    FileBrowserMode::Floppy => {
+                        if app.wizard_state.is_some() {
+                            if let Some(ref mut state) = app.wizard_state {
+                                state.floppy_path = Some(selected_path);
+                            }
+                            app.pop_screen(); // Close file browser, return to ISO step (don't advance)
+                        } else {
+                            // Boot options mode
+                            app.boot_mode = BootMode::Floppy(selected_path);
+                            app.pop_screen(); // Close file browser
+                            app.pop_screen(); // Close boot options
+                            app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
+                        }
                     }
                     FileBrowserMode::Directory => {
                         // Directory selected (from [Select This Directory] entry)
