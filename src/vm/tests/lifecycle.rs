@@ -195,3 +195,44 @@ fn test_detect_qemu_processes_parsing() {
     assert_eq!(pids[1], 67890);
     assert!(cmdlines[1].contains("test.img"));
 }
+
+#[test]
+fn test_parse_pci_section_empty() {
+    let content = "#!/bin/bash\nqemu-system-x86_64 -m 2048\n";
+    let args = parse_pci_section(content);
+    assert!(args.is_empty());
+}
+
+#[test]
+fn test_parse_pci_section_single_device() {
+    let content = format!(
+        "#!/bin/bash\n{}\nPCI_PASSTHROUGH_ARGS=\"-device vfio-pci,host=0000:01:00.0\"\n{}\nqemu-system-x86_64 $PCI_PASSTHROUGH_ARGS\n",
+        PCI_MARKER_START, PCI_MARKER_END
+    );
+    let args = parse_pci_section(&content);
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0], "-device vfio-pci,host=0000:01:00.0");
+}
+
+#[test]
+fn test_parse_pci_section_multiple_devices() {
+    let content = format!(
+        "#!/bin/bash\n{}\nPCI_PASSTHROUGH_ARGS=\"-device vfio-pci,host=0000:01:00.0 -device vfio-pci,host=0000:01:00.1\"\n{}\nqemu-system-x86_64 $PCI_PASSTHROUGH_ARGS\n",
+        PCI_MARKER_START, PCI_MARKER_END
+    );
+    let args = parse_pci_section(&content);
+    assert_eq!(args.len(), 2);
+    assert_eq!(args[0], "-device vfio-pci,host=0000:01:00.0");
+    assert_eq!(args[1], "-device vfio-pci,host=0000:01:00.1");
+}
+
+#[test]
+fn test_parse_pci_section_with_multifunction() {
+    let content = format!(
+        "#!/bin/bash\n{}\nPCI_PASSTHROUGH_ARGS=\"-device vfio-pci,host=0000:01:00.0,multifunction=on\"\n{}\n",
+        PCI_MARKER_START, PCI_MARKER_END
+    );
+    let args = parse_pci_section(&content);
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0], "-device vfio-pci,host=0000:01:00.0,multifunction=on");
+}

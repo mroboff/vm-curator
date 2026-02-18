@@ -237,7 +237,9 @@ pub fn handle_input(app: &mut App, key: KeyEvent) -> anyhow::Result<()> {
             app.pop_screen();
         }
         KeyCode::Char('p') | KeyCode::Char('P') => {
-            // Go to PCI Passthrough screen
+            app.load_pci_devices()?;
+            app.restore_pci_selections();
+            app.selected_menu_item = 0;
             app.push_screen(Screen::PciPassthrough);
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {

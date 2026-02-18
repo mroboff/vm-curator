@@ -1180,6 +1180,30 @@ impl App {
         Ok(())
     }
 
+    /// Restore PCI device selections from the VM's saved launch.sh config
+    pub fn restore_pci_selections(&mut self) {
+        let saved_args = match self.selected_vm() {
+            Some(vm) => crate::vm::load_pci_passthrough(vm),
+            None => return,
+        };
+        self.selected_pci_devices.clear();
+        for arg in &saved_args {
+            if let Some(host_start) = arg.find("host=") {
+                let addr_start = host_start + 5;
+                let addr = arg[addr_start..]
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("");
+                for (i, dev) in self.pci_devices.iter().enumerate() {
+                    if dev.address == addr {
+                        self.selected_pci_devices.push(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     /// Load shared folders for the current VM
     pub fn load_shared_folders(&mut self) {
         self.shared_folders.clear();

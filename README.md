@@ -4,6 +4,9 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v0.4.5**
+- **Fix Multi-GPU Passthrough State**: Multi-GPU Passthrough screen now correctly shows previously selected GPUs. Pressing 'p' from Multi-GPU to enter PCI Passthrough also loads saved selections.
+
 **v0.4.3**
 - **Floppy Disk Support**: Boot floppy image support for OSes that require a boot floppy for installation (e.g., OS/2). Browse for floppy images (.img, .ima, .flp, .vfd) in the create wizard and boot from floppy in the management screen.
 

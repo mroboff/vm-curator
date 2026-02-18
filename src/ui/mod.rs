@@ -668,28 +668,7 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                         MenuAction::PciPassthrough => {
                             app.load_pci_devices()?;
-                            // Load saved PCI passthrough config and pre-select matching devices
-                            if let Some(vm) = app.selected_vm() {
-                                let saved_args = crate::vm::load_pci_passthrough(vm);
-                                app.selected_pci_devices.clear();
-                                for arg in &saved_args {
-                                    // Extract address from "-device vfio-pci,host=0000:01:00.0"
-                                    if let Some(host_start) = arg.find("host=") {
-                                        let addr_start = host_start + 5;
-                                        let addr = arg[addr_start..]
-                                            .split(|c: char| c == ',' || c.is_whitespace())
-                                            .next()
-                                            .unwrap_or("");
-                                        // Find matching device by address
-                                        for (i, dev) in app.pci_devices.iter().enumerate() {
-                                            if dev.address == addr {
-                                                app.selected_pci_devices.push(i);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            app.restore_pci_selections();
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::PciPassthrough);
                         }
@@ -727,8 +706,8 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                             }
                         }
                         MenuAction::MultiGpuPassthrough => {
-                            // Load PCI devices for multi-GPU setup
                             app.load_pci_devices()?;
+                            app.restore_pci_selections();
                             app.push_screen(Screen::MultiGpuSetup);
                         }
                         MenuAction::SingleGpuPassthrough => {

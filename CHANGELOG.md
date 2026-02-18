@@ -1,5 +1,14 @@
 # Changelog
 
+**v0.4.5**
+- **Fix Multi-GPU Passthrough State**: Multi-GPU Passthrough screen now correctly shows previously selected GPUs instead of always displaying "No GPU Selected"
+  - Saved PCI device selections from launch.sh are restored when entering the Multi-GPU Passthrough screen
+  - Pressing 'p' from Multi-GPU to enter PCI Passthrough now loads saved selections
+  - Extracted reusable `restore_pci_selections()` method to eliminate duplicated selection restoration logic
+
+**v0.4.4**
+- Fix Cargo.lock mismatch for source builds
+
 **v0.4.3**
 - **Floppy Disk Support**: Boot floppy image support for older operating systems that require a boot floppy for installation (e.g., OS/2)
   - New "Browse for boot floppy image" option in the create wizard's install media step (Step 2)
