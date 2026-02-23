@@ -236,3 +236,30 @@ fn test_parse_pci_section_with_multifunction() {
     assert_eq!(args.len(), 1);
     assert_eq!(args[0], "-device vfio-pci,host=0000:01:00.0,multifunction=on");
 }
+
+#[test]
+fn test_parse_pci_section_with_vfio_bind_functions() {
+    // The new PCI section format includes VFIO bind/unbind functions alongside
+    // PCI_PASSTHROUGH_ARGS. The parser should still extract only the QEMU args.
+    let content = format!(
+        "#!/bin/bash\n\
+        {}\n\
+        PCI_PASSTHROUGH_ARGS=\"-device vfio-pci,host=0000:10:00.0,multifunction=on -device vfio-pci,host=0000:10:00.1\"\n\
+        PCI_DEVICES=(\"0000:10:00.0\" \"0000:10:00.1\")\n\
+        declare -A PCI_ORIG_DRIVERS\n\
+        \n\
+        bind_vfio() {{\n\
+            echo \"binding\"\n\
+        }}\n\
+        restore_pci() {{\n\
+            echo \"restoring\"\n\
+        }}\n\
+        bind_vfio || exit 1\n\
+        {}\n",
+        PCI_MARKER_START, PCI_MARKER_END
+    );
+    let args = parse_pci_section(&content);
+    assert_eq!(args.len(), 2);
+    assert_eq!(args[0], "-device vfio-pci,host=0000:10:00.0,multifunction=on");
+    assert_eq!(args[1], "-device vfio-pci,host=0000:10:00.1");
+}

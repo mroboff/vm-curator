@@ -1,5 +1,13 @@
 # Changelog
 
+**v0.4.6**
+- **Fix Multi-GPU Passthrough VFIO Binding**: Launch scripts now automatically bind PCI devices to the `vfio-pci` driver before starting QEMU, and restore original drivers on VM exit
+  - Fixes `Could not open '/dev/vfio/N': No such file or directory` error when launching VMs with GPU passthrough
+  - Uses `pkexec` (polkit) for graphical authentication, with `sudo` fallback — only prompts when devices need rebinding
+  - Skips binding entirely if devices are already on `vfio-pci` (e.g., persistent kernel parameter setup)
+  - Original drivers are restored on VM exit via cached sudo credentials or pkexec
+  - Prerequisites dialog updated with VFIO binding info and permission requirements
+
 **v0.4.5**
 - **Fix Multi-GPU Passthrough State**: Multi-GPU Passthrough screen now correctly shows previously selected GPUs instead of always displaying "No GPU Selected"
   - Saved PCI device selections from launch.sh are restored when entering the Multi-GPU Passthrough screen

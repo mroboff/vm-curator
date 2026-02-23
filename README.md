@@ -4,6 +4,9 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v0.4.6**
+- **Fix Multi-GPU Passthrough VFIO Binding**: Launch scripts now automatically bind PCI devices to `vfio-pci` before QEMU and restore original drivers on exit. Fixes `Could not open '/dev/vfio/N'` errors. Uses `pkexec`/`sudo` for authentication — only prompts when devices need rebinding.
+
 **v0.4.5**
 - **Fix Multi-GPU Passthrough State**: Multi-GPU Passthrough screen now correctly shows previously selected GPUs. Pressing 'p' from Multi-GPU to enter PCI Passthrough also loads saved selections.
 

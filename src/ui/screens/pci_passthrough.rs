@@ -289,7 +289,7 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
     let dialog_width = 70.min(area.width.saturating_sub(4));
-    let dialog_height = 22.min(area.height.saturating_sub(4));
+    let dialog_height = 26.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -381,6 +381,19 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
                 lines.push(Line::styled(format!("  - {}", warning), Style::default().fg(Color::Yellow)));
             }
         }
+
+        // VFIO binding info
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            "VFIO Driver Binding:",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::raw("  Devices are automatically bound to vfio-pci at launch"));
+        lines.push(Line::raw("  and restored to their original driver on VM exit."));
+        lines.push(Line::styled(
+            "  Requires authentication via pkexec (polkit) or sudo.",
+            Style::default().fg(Color::Yellow),
+        ));
 
         // Looking Glass info
         lines.push(Line::raw(""));
@@ -505,7 +518,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             match save_result {
                 Ok(count) => {
                     let mut status_msg = if count > 0 {
-                        format!("Saved {} PCI device(s) to launch.sh", count)
+                        format!("Saved {} PCI device(s) to launch.sh (will use pkexec/sudo for VFIO binding)", count)
                     } else {
                         "Cleared PCI passthrough from launch.sh".to_string()
                     };
@@ -639,6 +652,108 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
     section.push_str("PCI_PASSTHROUGH_ARGS=\"");
     section.push_str(&args.join(" "));
     section.push_str("\"\n");
+
+    // Generate PCI device list for VFIO binding
+    section.push_str("PCI_DEVICES=(");
+    for (i, dev) in devices.iter().enumerate() {
+        if i > 0 {
+            section.push(' ');
+        }
+        section.push_str(&format!("\"{}\"", dev.address));
+    }
+    section.push_str(")\n");
+    section.push_str("declare -A PCI_ORIG_DRIVERS\n");
+    section.push('\n');
+
+    // Helper to run sysfs commands with privilege escalation
+    section.push_str(r#"# Run a command with elevated privileges if needed
+_pci_elevated() {
+    if [[ $EUID -eq 0 ]]; then
+        sh -c "$1"
+    elif command -v pkexec >/dev/null 2>&1; then
+        pkexec sh -c "$1"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo sh -c "$1"
+    else
+        echo "Error: Root privileges required to bind PCI devices to vfio-pci"
+        echo "Install polkit (pkexec) or run with sudo"
+        return 1
+    fi
+}
+"#);
+
+    // VFIO bind function: unbinds devices from current driver, binds to vfio-pci
+    section.push_str(r#"bind_vfio() {
+    local bind_cmds=""
+    for dev in "${PCI_DEVICES[@]}"; do
+        local dev_path="/sys/bus/pci/devices/$dev"
+        local driver_link="$dev_path/driver"
+        if [[ ! -d "$dev_path" ]]; then
+            echo "Warning: PCI device $dev not found, skipping"
+            continue
+        fi
+        if [[ -L "$driver_link" ]]; then
+            local current
+            current=$(basename "$(readlink "$driver_link")")
+            PCI_ORIG_DRIVERS[$dev]="$current"
+            if [[ "$current" == "vfio-pci" ]]; then
+                echo "$dev already bound to vfio-pci"
+                continue
+            fi
+            bind_cmds+="echo '$dev' > '$driver_link/unbind' 2>/dev/null; sleep 0.1; "
+        fi
+        bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
+        bind_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+    done
+    if [[ -n "$bind_cmds" ]]; then
+        echo "Binding PCI devices to vfio-pci..."
+        _pci_elevated "$bind_cmds" || return 1
+    fi
+    sleep 0.5
+}
+"#);
+
+    // VFIO restore function: rebinds devices to their original drivers after VM exit
+    section.push_str(r#"restore_pci() {
+    local restore_cmds=""
+    for dev in "${PCI_DEVICES[@]}"; do
+        local dev_path="/sys/bus/pci/devices/$dev"
+        local orig="${PCI_ORIG_DRIVERS[$dev]:-}"
+        if [[ -z "$orig" ]] || [[ "$orig" == "vfio-pci" ]]; then
+            continue
+        fi
+        echo "Restoring $dev to $orig..."
+        restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' 2>/dev/null; "
+        restore_cmds+="echo '' > '$dev_path/driver_override'; "
+        restore_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+    done
+    if [[ -n "$restore_cmds" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            sh -c "$restore_cmds"
+        elif sudo -n true 2>/dev/null; then
+            sudo sh -c "$restore_cmds"
+        elif command -v pkexec >/dev/null 2>&1; then
+            pkexec sh -c "$restore_cmds" 2>/dev/null
+        else
+            echo "Warning: Could not restore PCI devices (no cached credentials)"
+            echo "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci"
+        fi
+    fi
+}
+"#);
+
+    // Hook restore_pci into exit cleanup, then bind devices
+    // The trap/cleanup setup must happen before bind_vfio so partially-bound
+    // devices get restored if binding fails partway through
+    section.push_str(r#"if declare -f cleanup >/dev/null 2>&1; then
+    eval "$(declare -f cleanup | sed '1s/cleanup/_pci_pre_cleanup/')"
+    cleanup() { restore_pci; _pci_pre_cleanup; }
+else
+    trap 'restore_pci' EXIT
+fi
+bind_vfio || exit 1
+"#);
+
     section.push_str(PCI_MARKER_END);
     section.push('\n');
 
