@@ -640,6 +640,8 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
         return String::new();
     }
 
+    let has_gpus = devices.iter().any(|d| d.is_gpu());
+
     let mut section = String::new();
     section.push_str(PCI_MARKER_START);
     section.push('\n');
@@ -663,6 +665,10 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
     }
     section.push_str(")\n");
     section.push_str("declare -A PCI_ORIG_DRIVERS\n");
+
+    if has_gpus {
+        section.push_str("PCI_GPU_USED_RESCAN=0\n");
+    }
     section.push('\n');
 
     // Helper to run sysfs commands with privilege escalation
@@ -682,9 +688,206 @@ _pci_elevated() {
 }
 "#);
 
-    // VFIO bind function: unbinds devices from current driver, binds to vfio-pci
-    section.push_str(r#"bind_vfio() {
-    local bind_cmds=""
+    // GPU release/restore functions (only when GPUs are selected)
+    if has_gpus {
+        section.push_str(&generate_gpu_release_function());
+        section.push_str(&generate_gpu_restore_function());
+    }
+
+    // VFIO bind function
+    section.push_str(&generate_bind_vfio_function(has_gpus));
+
+    // VFIO restore function
+    section.push_str(&generate_restore_pci_function(has_gpus));
+
+    // Hook restore_pci into exit cleanup, then bind devices
+    // The trap/cleanup setup must happen before bind_vfio so partially-bound
+    // devices get restored if binding fails partway through
+    section.push_str(r#"if declare -f cleanup >/dev/null 2>&1; then
+    eval "$(declare -f cleanup | sed '1s/cleanup/_pci_pre_cleanup/')"
+    cleanup() { restore_pci; _pci_pre_cleanup; }
+else
+    trap 'restore_pci' EXIT
+fi
+bind_vfio || exit 1
+"#);
+
+    section.push_str(PCI_MARKER_END);
+    section.push('\n');
+
+    section
+}
+
+/// Generate the _release_gpu() bash function for compositor GPU release.
+///
+/// Uses a two-tier approach:
+/// - Tier 1: Send fake udev "remove" event to compositor via DRM subsystem
+/// - Tier 2: PCI remove/rescan (forceful but clean)
+fn generate_gpu_release_function() -> String {
+    r#"# Release a GPU from the compositor before VFIO binding.
+# Tier 1: Fake udev remove event (least disruptive, works with Mutter/KWin/wlroots).
+# Tier 2: PCI remove + rescan with driver_override (forceful but clean).
+_release_gpu() {
+    local dev="$1"
+    local dev_path="/sys/bus/pci/devices/$dev"
+    local driver_link="$dev_path/driver"
+
+    # Only needed if bound to a GPU driver
+    if [[ ! -L "$driver_link" ]]; then
+        return 0
+    fi
+    local current
+    current=$(basename "$(readlink "$driver_link")")
+    case "$current" in
+        nvidia|amdgpu|nouveau|radeon|i915|xe) ;;
+        *) return 0 ;;  # Not a GPU driver, standard unbind is fine
+    esac
+
+    echo "Releasing GPU $dev from compositor (driver: $current)..."
+
+    # Stop nvidia-persistenced for NVIDIA GPUs (holds device references)
+    if [[ "$current" == "nvidia" ]]; then
+        _pci_elevated "systemctl stop nvidia-persistenced 2>/dev/null || true" 2>/dev/null
+        sleep 0.5
+    fi
+
+    # Tier 1: Send fake udev "remove" event via DRM subsystem
+    local drm_card=""
+    for card in "$dev_path"/drm/card*; do
+        if [[ -d "$card" ]]; then
+            drm_card="$card"
+            break
+        fi
+    done
+
+    if [[ -n "$drm_card" ]]; then
+        echo "  Tier 1: Sending udev remove event via $(basename "$drm_card")..."
+        _pci_elevated "echo 'remove' > '$drm_card/uevent'" 2>/dev/null
+        sleep 2
+
+        # Try standard unbind now that compositor should have released
+        _pci_elevated "echo '$dev' > '$driver_link/unbind'" 2>/dev/null
+        sleep 0.5
+
+        # Check if unbind succeeded
+        if [[ ! -L "$driver_link" ]]; then
+            echo "  GPU $dev released successfully (Tier 1)"
+            return 0
+        fi
+        echo "  Tier 1 did not release GPU, trying Tier 2..."
+    fi
+
+    # Tier 2: PCI remove + rescan with driver_override
+    echo "  Tier 2: PCI remove/rescan for $dev..."
+    _pci_elevated "echo 'vfio-pci' > '$dev_path/driver_override'; echo 1 > '$dev_path/remove'" 2>/dev/null
+    sleep 2
+
+    # Rescan PCI bus - device will bind to vfio-pci due to driver_override
+    _pci_elevated "echo 1 > /sys/bus/pci/rescan" 2>/dev/null
+    sleep 2
+
+    # Verify the device came back and bound to vfio-pci
+    if [[ -L "$dev_path/driver" ]]; then
+        local new_driver
+        new_driver=$(basename "$(readlink "$dev_path/driver")")
+        if [[ "$new_driver" == "vfio-pci" ]]; then
+            echo "  GPU $dev bound to vfio-pci (Tier 2)"
+            PCI_GPU_USED_RESCAN=1
+            return 0
+        fi
+    fi
+
+    # Both tiers failed
+    echo ""
+    echo "ERROR: Could not release GPU $dev from the compositor."
+    echo ""
+    echo "The Wayland compositor is holding the GPU. Options:"
+    echo "  1. Add 'vfio-pci.ids=$(cat "$dev_path/vendor" | sed 's/0x//'):$(cat "$dev_path/device" | sed 's/0x//')' to kernel parameters for boot-time binding"
+    echo "  2. Use the Single GPU Passthrough workflow (stops the display manager)"
+    echo ""
+    return 1
+}
+"#.to_string()
+}
+
+/// Generate the _restore_gpu() bash function for GPU restoration after VM exit.
+///
+/// Reverses the GPU release: unbinds from vfio-pci, rescans to reclaim with
+/// original driver, notifies compositor, restarts services.
+fn generate_gpu_restore_function() -> String {
+    r#"# Restore a GPU after VM exit: rebind to original driver and notify compositor.
+_restore_gpu() {
+    local dev="$1"
+    local orig="$2"
+    local dev_path="/sys/bus/pci/devices/$dev"
+
+    echo "Restoring GPU $dev to $orig..."
+
+    # Unbind from vfio-pci and clear driver_override
+    local restore_cmds=""
+    restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' 2>/dev/null; "
+    restore_cmds+="echo '' > '$dev_path/driver_override'; "
+
+    # Use PCI remove/rescan for reliable driver reclaim
+    restore_cmds+="echo 1 > '$dev_path/remove' 2>/dev/null || true; "
+    restore_cmds+="sleep 2; "
+    restore_cmds+="echo 1 > /sys/bus/pci/rescan; "
+    restore_cmds+="sleep 2; "
+
+    # Send udev "add" event to notify compositor of GPU return
+    restore_cmds+="for card in /sys/bus/pci/devices/$dev/drm/card*; do "
+    restore_cmds+="  if [[ -d \"\\\$card\" ]]; then "
+    restore_cmds+="    echo 'add' > \"\\\$card/uevent\" 2>/dev/null; "
+    restore_cmds+="  fi; "
+    restore_cmds+="done; "
+
+    # Restart nvidia-persistenced for NVIDIA GPUs
+    if [[ "$orig" == "nvidia" ]]; then
+        restore_cmds+="systemctl start nvidia-persistenced 2>/dev/null || true; "
+    fi
+
+    if [[ $EUID -eq 0 ]]; then
+        sh -c "$restore_cmds"
+    elif sudo -n true 2>/dev/null; then
+        sudo sh -c "$restore_cmds"
+    elif command -v pkexec >/dev/null 2>&1; then
+        pkexec sh -c "$restore_cmds" 2>/dev/null
+    else
+        echo "Warning: Could not restore GPU $dev (no cached credentials)"
+    fi
+}
+"#.to_string()
+}
+
+/// Generate the bind_vfio() bash function.
+/// When `has_gpus` is true, calls `_release_gpu()` per-device before batched unbind.
+fn generate_bind_vfio_function(has_gpus: bool) -> String {
+    let mut f = String::new();
+    f.push_str("bind_vfio() {\n");
+
+    if has_gpus {
+        // First pass: release GPUs from compositor (per-device, before batched unbind)
+        f.push_str(r#"    # Release GPUs from compositor first
+    for dev in "${PCI_DEVICES[@]}"; do
+        local dev_path="/sys/bus/pci/devices/$dev"
+        if [[ ! -d "$dev_path" ]]; then
+            continue
+        fi
+        if [[ -L "$dev_path/driver" ]]; then
+            local current
+            current=$(basename "$(readlink "$dev_path/driver")")
+            PCI_ORIG_DRIVERS[$dev]="$current"
+            if [[ "$current" == "vfio-pci" ]]; then
+                continue
+            fi
+        fi
+        _release_gpu "$dev" || return 1
+    done
+"#);
+    }
+
+    // Standard bind pass: unbind remaining non-GPU devices and bind all to vfio-pci
+    f.push_str(r#"    local bind_cmds=""
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
         local driver_link="$dev_path/driver"
@@ -695,8 +898,18 @@ _pci_elevated() {
         if [[ -L "$driver_link" ]]; then
             local current
             current=$(basename "$(readlink "$driver_link")")
-            PCI_ORIG_DRIVERS[$dev]="$current"
-            if [[ "$current" == "vfio-pci" ]]; then
+"#);
+
+    if has_gpus {
+        // Record driver if not already recorded in GPU release pass
+        f.push_str(r#"            [[ -z "${PCI_ORIG_DRIVERS[$dev]:-}" ]] && PCI_ORIG_DRIVERS[$dev]="$current"
+"#);
+    } else {
+        f.push_str(r#"            PCI_ORIG_DRIVERS[$dev]="$current"
+"#);
+    }
+
+    f.push_str(r#"            if [[ "$current" == "vfio-pci" ]]; then
                 echo "$dev already bound to vfio-pci"
                 continue
             fi
@@ -713,8 +926,51 @@ _pci_elevated() {
 }
 "#);
 
-    // VFIO restore function: rebinds devices to their original drivers after VM exit
-    section.push_str(r#"restore_pci() {
+    f
+}
+
+/// Generate the restore_pci() bash function.
+/// When `has_gpus` is true, uses `_restore_gpu()` for GPU devices.
+fn generate_restore_pci_function(has_gpus: bool) -> String {
+    let mut f = String::new();
+
+    if has_gpus {
+        f.push_str(r#"restore_pci() {
+    local restore_cmds=""
+    for dev in "${PCI_DEVICES[@]}"; do
+        local dev_path="/sys/bus/pci/devices/$dev"
+        local orig="${PCI_ORIG_DRIVERS[$dev]:-}"
+        if [[ -z "$orig" ]] || [[ "$orig" == "vfio-pci" ]]; then
+            continue
+        fi
+        # Check if original driver was a GPU driver
+        case "$orig" in
+            nvidia|amdgpu|nouveau|radeon|i915|xe)
+                _restore_gpu "$dev" "$orig"
+                continue
+                ;;
+        esac
+        echo "Restoring $dev to $orig..."
+        restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' 2>/dev/null; "
+        restore_cmds+="echo '' > '$dev_path/driver_override'; "
+        restore_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+    done
+    if [[ -n "$restore_cmds" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            sh -c "$restore_cmds"
+        elif sudo -n true 2>/dev/null; then
+            sudo sh -c "$restore_cmds"
+        elif command -v pkexec >/dev/null 2>&1; then
+            pkexec sh -c "$restore_cmds" 2>/dev/null
+        else
+            echo "Warning: Could not restore PCI devices (no cached credentials)"
+            echo "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci"
+        fi
+    fi
+}
+"#);
+    } else {
+        f.push_str(r#"restore_pci() {
     local restore_cmds=""
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
@@ -741,23 +997,9 @@ _pci_elevated() {
     fi
 }
 "#);
+    }
 
-    // Hook restore_pci into exit cleanup, then bind devices
-    // The trap/cleanup setup must happen before bind_vfio so partially-bound
-    // devices get restored if binding fails partway through
-    section.push_str(r#"if declare -f cleanup >/dev/null 2>&1; then
-    eval "$(declare -f cleanup | sed '1s/cleanup/_pci_pre_cleanup/')"
-    cleanup() { restore_pci; _pci_pre_cleanup; }
-else
-    trap 'restore_pci' EXIT
-fi
-bind_vfio || exit 1
-"#);
-
-    section.push_str(PCI_MARKER_END);
-    section.push('\n');
-
-    section
+    f
 }
 
 fn insert_pci_section(content: &str, pci_section: &str) -> String {
