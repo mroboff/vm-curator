@@ -4,6 +4,9 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v0.4.7**
+- **Windows Server Profiles**: Add 9 Windows Server OS profiles (2003, 2008, 2008 R2, 2012, 2012 R2, 2016, 2019, 2022, 2025) with QEMU configurations, metadata, and a new "Windows Server" subcategory under the Microsoft family
+
 **v0.4.6**
 - **Fix Multi-GPU Passthrough VFIO Binding**: Launch scripts now automatically bind PCI devices to `vfio-pci` before QEMU and restore original drivers on exit. Fixes `Could not open '/dev/vfio/N'` errors. Uses `pkexec`/`sudo` for authentication — only prompts when devices need rebinding.
 

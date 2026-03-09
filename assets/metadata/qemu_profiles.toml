@@ -323,6 +323,208 @@ extra_args = []
 notes = "KVM disabled - Win9x timing issues. Keep RAM at 128MB to avoid memory detection issues."
 
 # =============================================================================
+# Microsoft Windows Server (x86_64)
+# =============================================================================
+
+[windows-server-2003]
+display_name = "Windows Server 2003"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 1024
+cpu_cores = 2
+cpu_model = "pentium3"
+machine = "pc"
+vga = "std"
+audio = ["ac97"]
+network_model = "rtl8139"
+disk_interface = "ide"
+disk_size_gb = 24
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 5.2 kernel (XP family). First server OS with 64-bit x86 support. Uses legacy hardware for compatibility."
+
+[windows-server-2008]
+display_name = "Windows Server 2008"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 2048
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 40
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 6.0 kernel (Vista family). Introduced Server Core and Hyper-V. Use e1000 for out-of-box network support."
+
+[windows-server-2008r2]
+display_name = "Windows Server 2008 R2"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 40
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 6.1 kernel (Windows 7 family). First 64-bit-only Windows Server. Introduced PowerShell 2.0 and improved Hyper-V."
+
+[windows-server-2012]
+display_name = "Windows Server 2012"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 60
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 6.2 kernel (Windows 8 family). Introduced ReFS, Storage Spaces, and the Metro-style Server Manager."
+
+[windows-server-2012r2]
+display_name = "Windows Server 2012 R2"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 2
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 60
+enable_kvm = true
+uefi = false
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 6.3 kernel (Windows 8.1 family). Improved storage tiering and Desired State Configuration (DSC)."
+
+[windows-server-2016]
+display_name = "Windows Server 2016"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 64
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 10.0 kernel. First server OS with native Docker container support. UEFI recommended."
+
+[windows-server-2019]
+display_name = "Windows Server 2019"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 64
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 10.0 kernel. LTSC release with Kubernetes support and Windows Admin Center."
+
+[windows-server-2022]
+display_name = "Windows Server 2022"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 4096
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 64
+enable_kvm = true
+uefi = true
+tpm = false
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 10.0 kernel. Introduced Secured-core server, SMB over QUIC, and Azure Arc integration."
+
+[windows-server-2025]
+display_name = "Windows Server 2025"
+category = "windows"
+emulator = "qemu-system-x86_64"
+memory_mb = 8192
+cpu_cores = 4
+cpu_model = "host"
+machine = "q35"
+vga = "qxl"
+audio = ["intel-hda", "hda-duplex"]
+network_model = "e1000"
+disk_interface = "ide"
+disk_size_gb = 64
+enable_kvm = true
+uefi = true
+tpm = true
+rtc_localtime = true
+usb_tablet = true
+display = "gtk"
+extra_args = []
+notes = "Based on NT 10.0 kernel (Windows 11 family). Requires TPM 2.0 and Secure Boot. Features hotpatching and DFS improvements."
+
+# =============================================================================
 # Microsoft DOS / Windows 3.x (i386)
 # =============================================================================
 

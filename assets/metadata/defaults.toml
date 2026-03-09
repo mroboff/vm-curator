@@ -322,6 +322,181 @@ Windows 11 introduced a centered Start Menu, rounded corners, and deeper Teams i
 Native Android app support through the Windows Subsystem for Android brought mobile apps to the desktop."""
 
 # =============================================================================
+# Microsoft Windows Server
+# =============================================================================
+
+[windows-server-2003]
+display_name = "Microsoft® Windows Server 2003"
+name = "Windows Server 2003"
+publisher = "Microsoft Corporation"
+release_date = "2003-04-24"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2003 was the first Windows Server to ship with a 64-bit edition for x86",
+    "It was originally going to be called Windows .NET Server before the branding change",
+    "Server 2003 R2 was one of the most widely deployed server operating systems in history"
+]
+
+[windows-server-2003.blurb]
+short = "Microsoft's enterprise server OS built on the NT 5.2 kernel alongside Windows XP."
+long = """
+Windows Server 2003 brought significant security and reliability improvements over Windows 2000 Server. Built on the same NT 5.2 kernel as Windows XP 64-bit, it introduced Internet Information Services 6.0 with a new process isolation model.
+
+Active Directory received major updates, and the OS became the backbone of enterprise infrastructure for nearly a decade, with extended support lasting until 2015."""
+
+[windows-server-2008]
+display_name = "Microsoft® Windows Server 2008"
+name = "Windows Server 2008"
+publisher = "Microsoft Corporation"
+release_date = "2008-02-27"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2008 was the first Windows Server to include the Hyper-V hypervisor",
+    "It introduced Server Core, a minimal installation with no GUI",
+    "The Server Manager console replaced over 20 separate management tools"
+]
+
+[windows-server-2008.blurb]
+short = "The first Windows Server with built-in Hyper-V virtualization and Server Core."
+long = """
+Windows Server 2008, based on the NT 6.0 kernel shared with Vista, was a transformative release. It introduced Hyper-V as a native Type-1 hypervisor, Server Core for minimal-footprint deployments, and a completely rewritten networking stack.
+
+PowerShell 1.0 was included out of the box, beginning the shift toward scriptable server management that would define future releases."""
+
+[windows-server-2008r2]
+display_name = "Microsoft® Windows Server 2008 R2"
+name = "Windows Server 2008 R2"
+publisher = "Microsoft Corporation"
+release_date = "2009-10-22"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2008 R2 was the first Windows Server available only in 64-bit",
+    "It introduced RemoteFX for GPU-accelerated remote desktop sessions",
+    "Active Directory Recycle Bin let admins restore deleted objects without downtime"
+]
+
+[windows-server-2008r2.blurb]
+short = "The first 64-bit-only Windows Server, built on the Windows 7 kernel."
+long = """
+Windows Server 2008 R2 dropped 32-bit support entirely, marking a clean break for the server platform. Built on the NT 6.1 kernel shared with Windows 7, it delivered improved Hyper-V with live migration, PowerShell 2.0 with remoting, and DirectAccess for seamless VPN-less remote connectivity.
+
+It became one of the most stable and widely adopted Windows Server releases in enterprise environments."""
+
+[windows-server-2012]
+display_name = "Microsoft® Windows Server 2012"
+name = "Windows Server 2012"
+publisher = "Microsoft Corporation"
+release_date = "2012-09-04"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2012 introduced ReFS (Resilient File System) as a next-generation alternative to NTFS",
+    "It supported up to 4 TB of RAM and 640 logical processors",
+    "The Start screen from Windows 8 was controversially included in the server OS"
+]
+
+[windows-server-2012.blurb]
+short = "A cloud-ready server OS with Storage Spaces, ReFS, and the new Server Manager."
+long = """
+Windows Server 2012, based on the Windows 8 kernel, was designed from the ground up for cloud computing. It introduced Storage Spaces for software-defined storage, a completely redesigned Server Manager, and dramatically improved Hyper-V with shared-nothing live migration.
+
+The new IP Address Management (IPAM) and overhauled DHCP and DNS management tools modernized network infrastructure administration."""
+
+[windows-server-2012r2]
+display_name = "Microsoft® Windows Server 2012 R2"
+name = "Windows Server 2012 R2"
+publisher = "Microsoft Corporation"
+release_date = "2013-10-18"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2012 R2 introduced Desired State Configuration (DSC) for infrastructure as code",
+    "Storage tiering automatically moved hot data to faster disks",
+    "It was the last server OS to include a Start screen instead of a Start Menu"
+]
+
+[windows-server-2012r2.blurb]
+short = "Enhanced cloud and storage features with Desired State Configuration and storage tiering."
+long = """
+Windows Server 2012 R2 refined the cloud-first platform with significant storage improvements including tiered storage and write-back caching. Desired State Configuration (DSC) brought declarative infrastructure management through PowerShell.
+
+Workplace Join enabled BYOD scenarios, and Web Application Proxy replaced the need for TMG/UAG in many reverse proxy deployments."""
+
+[windows-server-2016]
+display_name = "Microsoft® Windows Server 2016"
+name = "Windows Server 2016"
+publisher = "Microsoft Corporation"
+release_date = "2016-10-12"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2016 was the first Windows Server with native Docker container support",
+    "It introduced Nano Server, a headless deployment option smaller than Server Core",
+    "Shielded VMs used TPM-based encryption to protect virtual machines from compromised fabric"
+]
+
+[windows-server-2016.blurb]
+short = "The first Windows Server with native Docker containers and Nano Server."
+long = """
+Windows Server 2016 brought containers to Windows with native Docker support, offering both Windows Server Containers and Hyper-V Containers for different isolation levels. Nano Server provided a minimal footprint for cloud-native workloads.
+
+Shielded Virtual Machines protected tenant workloads even from compromised hosting administrators, and Storage Spaces Direct enabled hyper-converged infrastructure."""
+
+[windows-server-2019]
+display_name = "Microsoft® Windows Server 2019"
+name = "Windows Server 2019"
+publisher = "Microsoft Corporation"
+release_date = "2018-10-02"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2019 was briefly pulled from release due to a data-loss bug in the October 2018 update",
+    "It added Kubernetes support alongside Docker for container orchestration",
+    "Windows Admin Center replaced the aging RSAT tools with a web-based management interface"
+]
+
+[windows-server-2019.blurb]
+short = "LTSC server release with Kubernetes support and Windows Admin Center."
+long = """
+Windows Server 2019 was an LTSC (Long-Term Servicing Channel) release that doubled down on hybrid cloud scenarios. It added Kubernetes support, improved Storage Spaces Direct performance, and introduced the web-based Windows Admin Center.
+
+System Insights used machine learning for predictive analytics on server health, and Storage Migration Service simplified moving file servers to newer hardware or Azure."""
+
+[windows-server-2022]
+display_name = "Microsoft® Windows Server 2022"
+name = "Windows Server 2022"
+publisher = "Microsoft Corporation"
+release_date = "2021-08-18"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2022 introduced Secured-core server with hardware-rooted security features",
+    "SMB over QUIC enabled secure file access without VPN over the internet",
+    "It was the first Windows Server to support TLS 1.3 by default"
+]
+
+[windows-server-2022.blurb]
+short = "Security-focused server OS with Secured-core, SMB over QUIC, and Azure Arc."
+long = """
+Windows Server 2022 focused heavily on security with Secured-core server capabilities including hardware root-of-trust, firmware protection, and virtualization-based security. SMB over QUIC enabled secure file sharing over the internet without VPN.
+
+Deeper Azure Arc integration allowed managing on-premises servers through Azure's control plane, bridging the gap between on-premises and cloud infrastructure."""
+
+[windows-server-2025]
+display_name = "Microsoft® Windows Server 2025"
+name = "Windows Server 2025"
+publisher = "Microsoft Corporation"
+release_date = "2024-11-01"
+architecture = "x86_64"
+fun_facts = [
+    "Server 2025 requires TPM 2.0 and Secure Boot, mirroring Windows 11's requirements",
+    "It introduced hotpatching, allowing security updates without rebooting",
+    "Active Directory received its largest update in over a decade with 32K database page size"
+]
+
+[windows-server-2025.blurb]
+short = "The latest Windows Server with hotpatching, improved AD, and mandatory Secure Boot."
+long = """
+Windows Server 2025, built on the Windows 11 kernel, introduced hotpatching for applying security updates without restarting, dramatically reducing maintenance windows. Active Directory received its most significant update in years with 32K database pages and improved replication.
+
+DFS Namespaces and Replication were modernized, and storage improvements included NVMe over Fabrics and block cloning on ReFS for faster VM operations."""
+
+# =============================================================================
 # Apple Classic Mac OS
 # =============================================================================
 

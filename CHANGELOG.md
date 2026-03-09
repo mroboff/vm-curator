@@ -1,5 +1,13 @@
 # Changelog
 
+**v0.4.7**
+- **Windows Server Profiles**: Add 9 Windows Server OS profiles spanning two decades of Microsoft's server platform
+  - Versions: 2003, 2008, 2008 R2, 2012, 2012 R2, 2016, 2019, 2022, 2025
+  - QEMU configurations mirror each version's desktop kernel counterpart (XP through Windows 11) with server-appropriate resources
+  - New "Windows Server" subcategory under the Microsoft family in the hierarchy
+  - Full metadata with descriptions, release dates, and fun facts for each version
+  - ASCII art automatically uses the Windows fallback logo
+
 **v0.4.6**
 - **Fix Multi-GPU Passthrough VFIO Binding**: Launch scripts now automatically bind PCI devices to the `vfio-pci` driver before starting QEMU, and restore original drivers on VM exit
   - Fixes `Could not open '/dev/vfio/N': No such file or directory` error when launching VMs with GPU passthrough

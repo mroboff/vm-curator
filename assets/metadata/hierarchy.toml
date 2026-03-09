@@ -124,7 +124,7 @@ name = "Windows NT"
 family = "microsoft"
 order = 4
 sort_by = "date"
-patterns = ["^windows-(nt|2000|2k|xp|vista|server)"]
+patterns = ["^windows-(nt|2000|2k|xp|vista)$"]
 
 [subcategories.windows_modern]
 name = "Windows Modern"
@@ -132,6 +132,13 @@ family = "microsoft"
 order = 5
 sort_by = "date"
 patterns = ["^windows-(7|8|81|8-1|10|11)$"]
+
+[subcategories.windows_server]
+name = "Windows Server"
+family = "microsoft"
+order = 6
+sort_by = "date"
+patterns = ["^windows-server-"]
 
 # -----------------------------------------------------------------------------
 # IBM subcategories
