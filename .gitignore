@@ -24,3 +24,8 @@ scripts/
 .env
 .env.local
 *.local.toml
+
+# Nix build artifacts
+result
+result-*
+*.nix-tmp
