@@ -724,10 +724,19 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                         MenuAction::PciPassthrough => {
                             app.load_pci_devices()?;
-                            app.restore_pci_selections();
-                            app.snapshot_pci_baseline();
+                            // restore_pci_selections snapshots the baseline
+                            // itself (before sibling auto-add) so auto-added
+                            // devices count as unsaved changes (#52).
+                            let auto_added = app.restore_pci_selections();
                             app.selected_menu_item = 0;
                             app.push_screen(Screen::PciPassthrough);
+                            if auto_added > 0 {
+                                app.set_status(format!(
+                                    "Auto-included {} IOMMU group sibling{} from saved selection",
+                                    auto_added,
+                                    if auto_added == 1 { "" } else { "s" }
+                                ));
+                            }
                         }
                         MenuAction::SharedFolders => {
                             app.load_shared_folders();

@@ -43,6 +43,29 @@ fn test_pci_device_boot_vga_cannot_passthrough() {
 }
 
 #[test]
+fn test_pci_bridge_is_infrastructure() {
+    // IOMMU group sibling auto-inclusion (issue #25 fix) skips infrastructure
+    // devices like PCI bridges. Lock that contract: PCI-to-PCI bridges (class
+    // 0x060400) and host bridges (0x060000) must be classified as infrastructure
+    // so they don't get added to PCI_DEVICES, which would fail vfio-pci binding.
+    let pci_bridge = PciDevice {
+        address: "0000:00:01.0".to_string(),
+        vendor_id: 0x8086,
+        device_id: 0x1901,
+        class_code: 0x060400,
+        vendor_name: "Intel".to_string(),
+        device_name: "PCI Express Root Port".to_string(),
+        driver: Some("pcieport".to_string()),
+        iommu_group: Some(14),
+        is_boot_vga: false,
+        subsystem_vendor_id: 0,
+        subsystem_device_id: 0,
+    };
+    assert!(pci_bridge.is_infrastructure());
+    assert!(!pci_bridge.is_passthrough_candidate());
+}
+
+#[test]
 fn test_generate_passthrough_args() {
     let devices = vec![
         PciDevice {
