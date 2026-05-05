@@ -79,9 +79,9 @@ pub fn render(app: &App, frame: &mut Frame) {
 
     // Help text - show GPU options only when multi-GPU passthrough is enabled (not single GPU)
     let help_text = if app.config.enable_multi_gpu_passthrough && !app.config.single_gpu_enabled {
-        "[Space/Enter] Toggle  [g] Auto-select GPU  [s] Save  [p] Prerequisites  [Esc] Back"
+        "[Space/Enter] Toggle  [g] Auto-select GPU  [a] Add IOMMU siblings  [s] Save  [p] Prereqs  [Esc] Back"
     } else {
-        "[Space/Enter] Toggle  [s] Save  [Esc] Back"
+        "[Space/Enter] Toggle  [a] Add IOMMU siblings  [s] Save  [Esc] Back"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -502,7 +502,18 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             }
         }
         KeyCode::Char(' ') | KeyCode::Enter => {
-            app.toggle_pci_device(app.selected_menu_item);
+            let added_siblings = app.toggle_pci_device(app.selected_menu_item);
+            if !added_siblings.is_empty() {
+                let addrs: Vec<String> = added_siblings
+                    .iter()
+                    .filter_map(|&i| app.pci_devices.get(i).map(|d| d.address.clone()))
+                    .collect();
+                app.set_status(format!(
+                    "Auto-included IOMMU group sibling{}: {}",
+                    if addrs.len() == 1 { "" } else { "s" },
+                    addrs.join(", ")
+                ));
+            }
         }
         KeyCode::Char('g') | KeyCode::Char('G') if gpu_enabled => {
             // Auto-select current GPU and its audio pair
@@ -512,7 +523,42 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                 }
             }
         }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            // Auto-include any IOMMU group siblings missing from the current selection.
+            // Useful when restoring a partial selection saved by an older build, or
+            // when the user deselected a sibling and wants to undo it.
+            let mut total_added = 0;
+            let current: Vec<usize> = app.selected_pci_devices.clone();
+            for idx in current {
+                total_added += app.auto_include_iommu_siblings(idx).len();
+            }
+            if total_added > 0 {
+                app.set_status(format!(
+                    "Auto-included {} IOMMU group sibling{}",
+                    total_added,
+                    if total_added == 1 { "" } else { "s" }
+                ));
+            } else {
+                app.set_status("Selection is already IOMMU-group complete".to_string());
+            }
+        }
         KeyCode::Char('s') | KeyCode::Char('S') => {
+            // Pre-launch viability check: if any selected device's IOMMU group has
+            // unselected non-infrastructure siblings, QEMU will refuse to start with
+            // "Group N is not viable." Refuse to save and tell the user how to fix it.
+            let gaps = app.pci_viability_gaps();
+            if !gaps.is_empty() {
+                let summary: Vec<String> = gaps
+                    .iter()
+                    .map(|(addr, missing)| format!("{} needs [{}]", addr, missing.join(", ")))
+                    .collect();
+                app.set_status(format!(
+                    "IOMMU group not viable — press 'a' to auto-include siblings, or select manually. {}",
+                    summary.join("; ")
+                ));
+                return Ok(());
+            }
+
             // Save PCI passthrough configuration
             let save_result = save_pci_passthrough(app);
             match save_result {
@@ -665,9 +711,19 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
     section.push_str("declare -A PCI_ORIG_DRIVERS\n");
     section.push('\n');
 
-    // Helper to run sysfs commands with privilege escalation
-    section.push_str(r#"# Run a command with elevated privileges if needed
-_pci_elevated() {
+    // Verbose mode: rerun with VM_CURATOR_DEBUG=1 ./launch.sh to trace every
+    // sysfs write. Useful for diagnosing binding hangs.
+    section.push_str(r#"# Set VM_CURATOR_DEBUG=1 to trace every sysfs write done during VFIO binding.
+if [[ "${VM_CURATOR_DEBUG:-0}" == "1" ]]; then
+    set -x
+fi
+"#);
+    section.push('\n');
+
+    // Helper to run sysfs commands with privilege escalation. Stderr is intentionally
+    // not redirected so kernel-level errors (e.g., "Device or resource busy" from
+    // unbind) reach the user.
+    section.push_str(r#"_pci_elevated() {
     if [[ $EUID -eq 0 ]]; then
         sh -c "$1"
     elif command -v pkexec >/dev/null 2>&1; then
@@ -675,45 +731,87 @@ _pci_elevated() {
     elif command -v sudo >/dev/null 2>&1; then
         sudo sh -c "$1"
     else
-        echo "Error: Root privileges required to bind PCI devices to vfio-pci"
-        echo "Install polkit (pkexec) or run with sudo"
+        echo "Error: Root privileges required to bind PCI devices to vfio-pci" >&2
+        echo "Install polkit (pkexec) or run with sudo" >&2
         return 1
     fi
 }
 "#);
 
-    // VFIO bind function: unbinds devices from current driver, binds to vfio-pci
+    // Wait for a device to land at the expected driver. The original "sleep 0.5"
+    // was a guess; this polls /sys until we see vfio-pci (or a 5s timeout).
+    section.push_str(r#"_wait_driver() {
+    local dev="$1"
+    local target="$2"
+    local timeout_tenths="${3:-50}"
+    local i=0
+    while (( i < timeout_tenths )); do
+        local link="/sys/bus/pci/devices/$dev/driver"
+        if [[ -L "$link" ]] && [[ "$(basename "$(readlink "$link")")" == "$target" ]]; then
+            return 0
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+"#);
+
+    // VFIO bind: per-device echos run inside the elevated shell so each step is
+    // visible in real time. If the kernel hangs unbinding device N, the prior
+    // "Unbinding 0000:NN..." line tells the user exactly which device hung.
+    // The bind commands are still concatenated into one elevated invocation so
+    // there is only a single auth prompt.
     section.push_str(r#"bind_vfio() {
     local bind_cmds=""
+    local need_bind=0
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
         local driver_link="$dev_path/driver"
         if [[ ! -d "$dev_path" ]]; then
-            echo "Warning: PCI device $dev not found, skipping"
+            echo "Warning: PCI device $dev not found, skipping" >&2
             continue
         fi
+        local current=""
         if [[ -L "$driver_link" ]]; then
-            local current
             current=$(basename "$(readlink "$driver_link")")
             PCI_ORIG_DRIVERS[$dev]="$current"
             if [[ "$current" == "vfio-pci" ]]; then
                 echo "$dev already bound to vfio-pci"
                 continue
             fi
-            bind_cmds+="echo '$dev' > '$driver_link/unbind' 2>/dev/null; sleep 0.1; "
+        fi
+        need_bind=1
+        if [[ -n "$current" ]]; then
+            bind_cmds+="echo 'Unbinding $dev from $current...' >&2; "
+            bind_cmds+="echo '$dev' > '$driver_link/unbind'; "
+        else
+            bind_cmds+="echo 'Binding $dev to vfio-pci (no current driver)...' >&2; "
         fi
         bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
         bind_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
     done
-    if [[ -n "$bind_cmds" ]]; then
-        echo "Binding PCI devices to vfio-pci..."
+    if (( need_bind )); then
+        echo "Binding PCI devices to vfio-pci (will require auth)..."
         _pci_elevated "$bind_cmds" || return 1
+        # Confirm each device actually landed at vfio-pci. A failure here usually
+        # means the IOMMU group has unbound siblings, or another driver is racing.
+        for dev in "${PCI_DEVICES[@]}"; do
+            if [[ "${PCI_ORIG_DRIVERS[$dev]:-}" == "vfio-pci" ]]; then
+                continue
+            fi
+            if ! _wait_driver "$dev" "vfio-pci" 50; then
+                echo "Warning: $dev did not bind to vfio-pci within 5s" >&2
+                echo "  Current driver: $(basename "$(readlink /sys/bus/pci/devices/$dev/driver 2>/dev/null)" 2>/dev/null || echo 'none')" >&2
+            fi
+        done
     fi
-    sleep 0.5
 }
 "#);
 
-    // VFIO restore function: rebinds devices to their original drivers after VM exit
+    // VFIO restore: drop the silent stderr redirect so cleanup failures surface.
+    // The "|| true" on unbind keeps a benign "device already unbound" from
+    // killing the rest of the restore.
     section.push_str(r#"restore_pci() {
     local restore_cmds=""
     for dev in "${PCI_DEVICES[@]}"; do
@@ -723,7 +821,7 @@ _pci_elevated() {
             continue
         fi
         echo "Restoring $dev to $orig..."
-        restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' 2>/dev/null; "
+        restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' || true; "
         restore_cmds+="echo '' > '$dev_path/driver_override'; "
         restore_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
     done
@@ -733,10 +831,10 @@ _pci_elevated() {
         elif sudo -n true 2>/dev/null; then
             sudo sh -c "$restore_cmds"
         elif command -v pkexec >/dev/null 2>&1; then
-            pkexec sh -c "$restore_cmds" 2>/dev/null
+            pkexec sh -c "$restore_cmds"
         else
-            echo "Warning: Could not restore PCI devices (no cached credentials)"
-            echo "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci"
+            echo "Warning: Could not restore PCI devices (no cached credentials)" >&2
+            echo "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci" >&2
         fi
     fi
 }
@@ -763,3 +861,7 @@ bind_vfio || exit 1
 fn insert_pci_section(content: &str, pci_section: &str) -> String {
     crate::vm::lifecycle::insert_args_section(content, pci_section, "$PCI_PASSTHROUGH_ARGS")
 }
+
+#[cfg(test)]
+#[path = "tests/pci_passthrough.rs"]
+mod tests;

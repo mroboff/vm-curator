@@ -390,7 +390,28 @@ VM Curator automatically detects OVMF/UEFI firmware paths across Linux distribut
 
 ---
 
-### Contributing
+### Troubleshooting
+
+**`launch.sh` hangs at "Binding PCI devices to vfio-pci..."**
+
+Re-run with verbose output to see exactly which device hangs:
+
+```bash
+VM_CURATOR_DEBUG=1 ./launch.sh
+```
+
+The most common causes:
+
+1. **Active host driver on the GPU.** On hybrid laptops with a MUX switch, leaving both GPUs enabled means the host's `nvidia` driver is actively using the discrete GPU. Unbinding it then blocks in the kernel until the driver releases. Fix: disable the discrete GPU on the host (MUX off, or blacklist `nvidia`/`nouveau`, or early-bind via kernel cmdline `vfio-pci.ids=<vendor:device>`) before launching the VM.
+2. **IOMMU group has unbound siblings.** If the GPU and its audio function (or any other non-bridge device) share an IOMMU group, all of them must be passed through together. Open the PCI Passthrough screen (`p` from the VM management menu), select the GPU, and press `a` to auto-include every group sibling. vm-curator now does this automatically when you toggle a device, but VMs created with older builds may need the `a` keybinding once.
+
+To inspect your IOMMU group layout:
+
+```bash
+ls /sys/kernel/iommu_groups/*/devices
+```
+
+
 
 Contributions are welcome! If you find a bug or have an idea for an improvement, feel free to open an issue or submit a Pull Request.
 

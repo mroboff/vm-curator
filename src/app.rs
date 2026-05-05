@@ -1191,13 +1191,18 @@ impl App {
         Ok(())
     }
 
-    /// Restore PCI device selections from the VM's saved launch.sh config
-    pub fn restore_pci_selections(&mut self) {
+    /// Restore PCI device selections from the VM's saved launch.sh config.
+    /// Auto-includes IOMMU group siblings so VMs created with older builds (which
+    /// only saved the user's explicit picks, not the full IOMMU group) become
+    /// viable on first open. Returns the number of siblings auto-added so the
+    /// caller can surface a status message.
+    pub fn restore_pci_selections(&mut self) -> usize {
         let saved_args = match self.selected_vm() {
             Some(vm) => crate::vm::load_pci_passthrough(vm),
-            None => return,
+            None => return 0,
         };
         self.selected_pci_devices.clear();
+        let mut originally_saved = Vec::new();
         for arg in &saved_args {
             if let Some(host_start) = arg.find("host=") {
                 let addr_start = host_start + 5;
@@ -1208,11 +1213,56 @@ impl App {
                 for (i, dev) in self.pci_devices.iter().enumerate() {
                     if dev.address == addr {
                         self.selected_pci_devices.push(i);
+                        originally_saved.push(i);
                         break;
                     }
                 }
             }
         }
+        let mut auto_added = 0;
+        for idx in originally_saved {
+            auto_added += self.auto_include_iommu_siblings(idx).len();
+        }
+        auto_added
+    }
+
+    /// Identify selected devices whose IOMMU group has unselected, non-infrastructure,
+    /// non-boot-VGA siblings — these would make the group non-viable for QEMU. Returns
+    /// pairs of (selected device address, missing sibling addresses).
+    pub fn pci_viability_gaps(&self) -> Vec<(String, Vec<String>)> {
+        let mut gaps = Vec::new();
+        let selected_addrs: std::collections::HashSet<&str> = self
+            .selected_pci_devices
+            .iter()
+            .filter_map(|&i| self.pci_devices.get(i))
+            .map(|d| d.address.as_str())
+            .collect();
+
+        let mut seen_groups = std::collections::HashSet::new();
+        for &i in &self.selected_pci_devices {
+            let Some(dev) = self.pci_devices.get(i) else { continue };
+            let Some(group) = dev.iommu_group else { continue };
+            if !seen_groups.insert(group) {
+                continue;
+            }
+            let siblings = crate::hardware::find_iommu_group_devices(dev);
+            let mut missing = Vec::new();
+            for sib in siblings {
+                if sib.address == dev.address {
+                    continue;
+                }
+                if sib.is_infrastructure() || sib.is_boot_vga {
+                    continue;
+                }
+                if !selected_addrs.contains(sib.address.as_str()) {
+                    missing.push(sib.address);
+                }
+            }
+            if !missing.is_empty() {
+                gaps.push((dev.address.clone(), missing));
+            }
+        }
+        gaps
     }
 
     /// Load shared folders for the current VM
@@ -1261,20 +1311,63 @@ impl App {
         }
     }
 
-    /// Toggle PCI device selection
-    pub fn toggle_pci_device(&mut self, index: usize) {
+    /// Toggle PCI device selection. Returns the indices of any IOMMU-group siblings
+    /// that were auto-included (empty on remove, boot-VGA, or when nothing else
+    /// shares the group).
+    pub fn toggle_pci_device(&mut self, index: usize) -> Vec<usize> {
         // Don't allow selecting boot VGA
         if let Some(device) = self.pci_devices.get(index) {
             if device.is_boot_vga {
-                return;
+                return Vec::new();
             }
         }
 
         if let Some(pos) = self.selected_pci_devices.iter().position(|&i| i == index) {
             self.selected_pci_devices.remove(pos);
+            Vec::new()
         } else {
             self.selected_pci_devices.push(index);
+            self.auto_include_iommu_siblings(index)
         }
+    }
+
+    /// Add every non-infrastructure, non-boot-VGA device that shares an IOMMU group
+    /// with the device at `index` to `selected_pci_devices`. Returns the indices that
+    /// were newly added (so callers can surface a status message).
+    ///
+    /// Bridges and other infrastructure devices are skipped (they don't need vfio
+    /// binding). Boot VGA siblings are skipped (selecting the host's primary display
+    /// would freeze the desktop). Devices already selected are not re-added.
+    pub fn auto_include_iommu_siblings(&mut self, index: usize) -> Vec<usize> {
+        let device = match self.pci_devices.get(index) {
+            Some(d) => d.clone(),
+            None => return Vec::new(),
+        };
+        if device.iommu_group.is_none() {
+            return Vec::new();
+        }
+
+        let siblings = crate::hardware::find_iommu_group_devices(&device);
+        let mut added = Vec::new();
+        for sib in siblings {
+            if sib.address == device.address {
+                continue;
+            }
+            if sib.is_infrastructure() || sib.is_boot_vga {
+                continue;
+            }
+            if let Some(sib_idx) = self
+                .pci_devices
+                .iter()
+                .position(|d| d.address == sib.address)
+            {
+                if !self.selected_pci_devices.contains(&sib_idx) {
+                    self.selected_pci_devices.push(sib_idx);
+                    added.push(sib_idx);
+                }
+            }
+        }
+        added
     }
 
     /// Auto-select a GPU and its paired audio device
