@@ -69,21 +69,57 @@ pub fn get_supported_displays(emulator: &str) -> Vec<String> {
         String::from_utf8_lossy(&output.stdout).to_string()
     };
 
+    parse_display_help(&text)
+}
+
+/// Parse the output of `<emulator> -display help`.
+///
+/// QEMU prints a header line ending in ":", a list of backend names (one per
+/// line), a blank line, and then a usage paragraph. Only the names between the
+/// header and the blank line are real backends, and each name is a single
+/// lowercase token like `gtk` or `spice-app`.
+fn parse_display_help(text: &str) -> Vec<String> {
     let mut displays = Vec::new();
+    let mut found_header = false;
     for line in text.lines() {
         let trimmed = line.trim();
-        // Skip empty lines and header lines
-        if trimmed.is_empty() || trimmed.starts_with("Available") || trimmed.contains(':') {
+
+        if !found_header {
+            // The header is the line introducing the list, e.g.
+            // "Available display backend types:".
+            if trimmed.starts_with("Available") && trimmed.ends_with(':') {
+                found_header = true;
+            }
             continue;
         }
-        // Each display backend is typically listed on its own line
-        let backend = trimmed.split_whitespace().next().unwrap_or("");
-        if !backend.is_empty() {
-            displays.push(backend.to_string());
+
+        // The list ends at the first blank line; anything after is help text.
+        if trimmed.is_empty() {
+            break;
+        }
+
+        if is_valid_display_backend(trimmed) {
+            displays.push(trimmed.to_string());
         }
     }
 
     displays
+}
+
+/// Check whether a string looks like a QEMU display backend name.
+///
+/// Backend names are lowercase identifiers, optionally containing digits or
+/// hyphens (e.g., `gtk`, `spice-app`, `egl-headless`).
+fn is_valid_display_backend(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_lowercase())
+            .unwrap_or(false)
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Check if a SPICE viewer application is available in PATH
@@ -223,4 +259,66 @@ fn list_system_bridges() -> Vec<String> {
         }
     }
     bridges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_display_help_extracts_only_backend_names() {
+        // Real output from `qemu-system-x86_64 -display help` on QEMU 10.x.
+        // The list is followed by a usage paragraph that previously got
+        // captured as bogus backends ("Some", "-display", "For"). See #27.
+        let raw = "\
+Available display backend types:
+none
+gtk
+sdl
+egl-headless
+curses
+spice-app
+dbus
+
+Some display backends support suboptions, which can be set with
+   -display backend,option=value,option=value...
+For a short list of the suboptions for each display, see the top-level -help output; more detail is in the documentation.
+";
+        let parsed = parse_display_help(raw);
+        assert_eq!(
+            parsed,
+            vec!["none", "gtk", "sdl", "egl-headless", "curses", "spice-app", "dbus"]
+        );
+    }
+
+    #[test]
+    fn parse_display_help_handles_empty_output() {
+        assert!(parse_display_help("").is_empty());
+    }
+
+    #[test]
+    fn parse_display_help_returns_empty_when_header_missing() {
+        // If QEMU output is unrecognizable, return nothing so the caller
+        // falls back to the default list.
+        let raw = "gtk\nsdl\nspice-app\n";
+        assert!(parse_display_help(raw).is_empty());
+    }
+
+    #[test]
+    fn is_valid_display_backend_accepts_known_names() {
+        assert!(is_valid_display_backend("gtk"));
+        assert!(is_valid_display_backend("spice-app"));
+        assert!(is_valid_display_backend("egl-headless"));
+        assert!(is_valid_display_backend("vnc"));
+        assert!(is_valid_display_backend("none"));
+    }
+
+    #[test]
+    fn is_valid_display_backend_rejects_help_text() {
+        assert!(!is_valid_display_backend("Some"));
+        assert!(!is_valid_display_backend("For"));
+        assert!(!is_valid_display_backend("-display"));
+        assert!(!is_valid_display_backend("display backend,option"));
+        assert!(!is_valid_display_backend(""));
+    }
 }
