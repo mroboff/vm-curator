@@ -1,5 +1,23 @@
 # Changelog
 
+**v0.4.9**
+- **Fix Port-Forward Editor Rendering**: Pressing Enter on the create wizard's "Forwards:" field activated the editor handler, but no popup was drawn — input went to an invisible target. Adds an overlay over step 4 with a rules list (plus presets) and an add-rule prompt, mirroring the existing network settings editor.
+- **Fix Display Backend Parser**: `qemu-system-* -display help` output ends with a usage paragraph after the backend list, which slipped past the old filter and contributed bogus "backends" like "Some", "-display", and "For" to the wizard's display option cycler
+  - Parse only the block between the "Available …:" header and the first blank line
+  - Validate each token looks like a backend name (lowercase letters, digits, hyphens)
+  - Unit tests added against real QEMU 10.x output
+
+**v0.4.8**
+- **MAC Address Editing**: Set an explicit MAC address on a VM's NIC, or generate a random one using QEMU's `52:54:00` OUI prefix
+  - New `vm::mac` module for generation and validation
+  - Editable in the create wizard and existing-VM network settings
+  - Parsed from `launch.sh` on import so existing VMs round-trip correctly
+- **Default ISO Path Setting**: ISO file browser now seeds to a configurable directory instead of always starting from `$HOME`
+  - Settable from the Settings screen, or via `[d]` from inside the file browser to make the current directory the default
+- **3D Acceleration Toggle**: New management menu item "3D Acceleration (non-pass-through)" on existing VMs toggles para-virtualized 3D (`virtio-vga-gl` + `gl=on`)
+  - Automatically swaps `gtk` → `sdl` display when enabling, since SDL gives better performance for `gl=on`
+  - Distinct from the GPU passthrough options to avoid confusion
+
 **v0.4.7**
 - **Windows Server Profiles**: Add 9 Windows Server OS profiles spanning two decades of Microsoft's server platform
   - Versions: 2003, 2008, 2008 R2, 2012, 2012 R2, 2016, 2019, 2022, 2025

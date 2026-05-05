@@ -4,6 +4,15 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v0.4.9**
+- **Fix Port-Forward Editor Rendering**: Create wizard's port-forward editor now actually draws a popup when activated (previously the handler was wired up but no UI was rendered)
+- **Fix Display Backend Parser**: Strip QEMU's trailing usage paragraph from `-display help` output so bogus tokens like "Some", "-display", and "For" no longer appear as selectable display backends in the wizard
+
+**v0.4.8**
+- **MAC Address Editing**: Set an explicit NIC MAC address or generate a random one (uses QEMU's `52:54:00` OUI prefix) from the create wizard and existing-VM network settings — also parsed from `launch.sh` on import
+- **Default ISO Path Setting**: ISO file browser seeds to a configurable directory instead of `$HOME`; set it from Settings or press `[d]` in the browser to use the current directory
+- **3D Acceleration Toggle**: New management menu item to toggle para-virtualized 3D (`virtio-vga-gl` + `gl=on`) on existing VMs, with automatic `gtk` → `sdl` display swap for better performance
+
 **v0.4.7**
 - **Windows Server Profiles**: Add 9 Windows Server OS profiles (2003, 2008, 2008 R2, 2012, 2012 R2, 2016, 2019, 2022, 2025) with QEMU configurations, metadata, and a new "Windows Server" subcategory under the Microsoft family
 
