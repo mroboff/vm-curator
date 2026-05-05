@@ -89,13 +89,11 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
         });
     }
 
-    let gl_state = if vm.config.has_gl_acceleration() { "ON" } else { "OFF" };
     let gl_desc: &'static str = if vm.config.has_gl_acceleration() {
-        "Disable para-virtualized 3D (currently ON)"
+        "Currently ON - toggle off"
     } else {
-        "Enable para-virtualized 3D (currently OFF)"
+        "Currently OFF - toggle on"
     };
-    let _ = gl_state; // kept in case the description copy is updated to use it
 
     items.extend([
         MenuItem {
@@ -104,7 +102,7 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             action: MenuAction::ChangeDisplay,
         },
         MenuItem {
-            name: "3D Acceleration",
+            name: "3D Acceleration (non-pass-through)",
             description: gl_desc,
             action: MenuAction::Toggle3dAccel,
         },
