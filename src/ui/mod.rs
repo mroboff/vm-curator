@@ -691,12 +691,16 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                                     }
                                 }).unwrap_or_else(|| ("user".to_string(), None));
                                 let port_forwards = net.map(|n| n.port_forwards.clone()).unwrap_or_default();
+                                let mac_address = net.and_then(|n| n.mac_address.clone());
 
                                 app.network_settings_state = Some(crate::app::NetworkSettingsState {
                                     model,
                                     backend,
                                     bridge_name,
                                     port_forwards,
+                                    mac_address: mac_address.clone(),
+                                    mac_edit_buffer: mac_address.unwrap_or_default(),
+                                    editing_mac: false,
                                     selected_field: 0,
                                     editing_port_forwards: false,
                                     pf_selected: 0,
@@ -716,6 +720,25 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                             screens::single_gpu_setup::init_single_gpu_config(app);
                             app.single_gpu_selected_field = 0;
                             app.push_screen(Screen::SingleGpuSetup);
+                        }
+                        MenuAction::Toggle3dAccel => {
+                            if let Some(vm) = app.selected_vm() {
+                                let script_path = vm.launch_script.clone();
+                                let was_on = vm.config.has_gl_acceleration();
+                                match toggle_vm_gl_acceleration(&script_path) {
+                                    Ok(result) => {
+                                        let now = if !was_on { "enabled" } else { "disabled" };
+                                        let extra = if result.display_swapped_to_sdl {
+                                            " (display switched to SDL)"
+                                        } else {
+                                            ""
+                                        };
+                                        app.set_status(format!("3D acceleration {}{}", now, extra));
+                                        app.reload_selected_vm_script();
+                                    }
+                                    Err(e) => app.set_status(format!("Failed to toggle 3D: {}", e)),
+                                }
+                            }
                         }
                         MenuAction::ChangeDisplay => {
                             app.selected_menu_item = 0;
@@ -1212,6 +1235,7 @@ fn handle_boot_options(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
                 2 => {
                     // Open file browser for ISO selection
+                    app.seed_iso_browser_dir();
                     app.load_file_browser(FileBrowserMode::Iso);
                     app.push_screen(Screen::FileBrowser);
                 }
@@ -1280,6 +1304,67 @@ fn handle_display_options(app: &mut App, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// Result of toggling 3D acceleration on an existing VM.
+struct GlToggleResult {
+    /// Whether the toggle also auto-swapped the display backend from gtk to sdl
+    /// (sdl gives noticeably better 3D performance than gtk).
+    display_swapped_to_sdl: bool,
+}
+
+/// Toggle para-virtualized 3D acceleration in a VM's launch.sh.
+///
+/// Enable: replace `-vga <X>` with `-device virtio-vga-gl`, append `,gl=on`
+///   to the `-display <X>` line, and swap gtk → sdl if necessary.
+/// Disable: replace `-device virtio-vga-gl` with `-vga virtio`, strip
+///   `,gl=on` from the display line.
+fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleResult> {
+    let content = std::fs::read_to_string(script_path)?;
+
+    let currently_on = content.contains("virtio-vga-gl") || content.contains("gl=on");
+    let mut display_swapped_to_sdl = false;
+
+    let new_content = if currently_on {
+        // === Disable 3D ===
+        // Replace `-device virtio-vga-gl` with `-vga virtio` (best Linux default
+        // when we can't recover the original VGA choice).
+        let device_re = Regex::new(r"-device\s+virtio-vga-gl(?:[,\w=-]*)?")?;
+        let after_device = device_re.replace_all(&content, "-vga virtio").to_string();
+        // Strip `,gl=on` from `-display <X>,gl=on`.
+        let display_re = Regex::new(r"(-display\s+[\w-]+),gl=on")?;
+        display_re.replace_all(&after_device, "$1").to_string()
+    } else {
+        // === Enable 3D ===
+        // Replace `-vga <X>` with `-device virtio-vga-gl`.
+        let vga_re = Regex::new(r"-vga\s+[\w-]+")?;
+        let after_vga = if vga_re.is_match(&content) {
+            vga_re.replace_all(&content, "-device virtio-vga-gl").to_string()
+        } else {
+            content.clone()
+        };
+        // Add `,gl=on` to `-display <X>` if not already there. Swap gtk → sdl
+        // for noticeably better 3D performance.
+        let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
+        let mut swapped = false;
+        let after_display = display_re
+            .replace_all(&after_vga, |caps: &regex::Captures| {
+                let backend = caps.get(1).map(|m| m.as_str()).unwrap_or("sdl");
+                let new_backend = if backend == "gtk" {
+                    swapped = true;
+                    "sdl"
+                } else {
+                    backend
+                };
+                format!("-display {},gl=on", new_backend)
+            })
+            .to_string();
+        display_swapped_to_sdl = swapped;
+        after_display
+    };
+
+    std::fs::write(script_path, new_content)?;
+    Ok(GlToggleResult { display_swapped_to_sdl })
 }
 
 /// Update the display setting in a VM's launch script
@@ -1656,13 +1741,18 @@ fn render_search(app: &App, frame: &mut Frame) {
 }
 
 fn render_file_browser(app: &App, frame: &mut Frame) {
-    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
     use ratatui::layout::{Layout, Direction, Constraint};
     use crate::app::FileBrowserMode;
 
+    let show_default_iso_checkbox =
+        app.wizard_state.is_some() && app.file_browser_mode == FileBrowserMode::Iso;
+
     let area = frame.area();
     let dialog_width = 60.min(area.width.saturating_sub(4));
-    let dialog_height = 20.min(area.height.saturating_sub(4));
+    let base_height: u16 = 20;
+    let dialog_height = (base_height + if show_default_iso_checkbox { 2 } else { 0 })
+        .min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -1696,16 +1786,40 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         ])
         .split(inner);
 
-    // Add top padding
+    // Vertical layout: top padding, content, optional checkbox footer.
+    let v_constraints: Vec<Constraint> = if show_default_iso_checkbox {
+        vec![
+            Constraint::Length(1), // Top padding
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Footer (checkbox + hint)
+        ]
+    } else {
+        vec![Constraint::Length(1), Constraint::Min(1)]
+    };
+
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),  // Top padding
-            Constraint::Min(1),     // Content
-        ])
+        .constraints(v_constraints)
         .split(h_chunks[1]);
 
     let content_area = v_chunks[1];
+
+    if show_default_iso_checkbox {
+        let footer_area = v_chunks[2];
+        let is_default = app
+            .config
+            .default_iso_path
+            .as_ref()
+            .map(|p| p == &app.file_browser_dir)
+            .unwrap_or(false);
+        let mark = if is_default { "[x]" } else { "[ ]" };
+        let line = Line::from(vec![
+            Span::styled(mark, Style::default().fg(Color::Yellow)),
+            Span::raw(" Set as Default ISO Path "),
+            Span::styled("[d] toggle", Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(line), footer_area);
+    }
 
     if app.file_browser_entries.is_empty() {
         let msg_text = match app.file_browser_mode {
@@ -1759,6 +1873,31 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => app.pop_screen(),
         KeyCode::Char('j') | KeyCode::Down => app.file_browser_next(),
         KeyCode::Char('k') | KeyCode::Up => app.file_browser_prev(),
+        KeyCode::Char('d')
+            if app.wizard_state.is_some() && app.file_browser_mode == FileBrowserMode::Iso =>
+        {
+            let already_default = app
+                .config
+                .default_iso_path
+                .as_ref()
+                .map(|p| p == &app.file_browser_dir)
+                .unwrap_or(false);
+            if already_default {
+                app.config.default_iso_path = None;
+            } else {
+                app.config.default_iso_path = Some(app.file_browser_dir.clone());
+            }
+            match app.config.save() {
+                Ok(()) => {
+                    if app.config.default_iso_path.is_some() {
+                        app.set_status("Default ISO path updated");
+                    } else {
+                        app.set_status("Default ISO path cleared");
+                    }
+                }
+                Err(e) => app.set_status(format!("Failed to save config: {}", e)),
+            }
+        }
         KeyCode::Enter => {
             if let Some(selected_path) = app.file_browser_enter() {
                 match app.file_browser_mode {

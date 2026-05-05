@@ -15,6 +15,11 @@ pub struct Config {
     /// Default snapshot name prefix
     pub snapshot_prefix: String,
 
+    /// Default directory the ISO file browser should open to.
+    /// `None` = fall back to home directory.
+    #[serde(default)]
+    pub default_iso_path: Option<PathBuf>,
+
     // === VM Creation Defaults ===
     /// Default memory for new VMs (MB)
     pub default_memory_mb: u32,
@@ -64,6 +69,7 @@ impl Default for Config {
             metadata_path: config_dir.join("metadata"),
             ascii_art_path: config_dir.join("ascii"),
             snapshot_prefix: "snapshot".to_string(),
+            default_iso_path: None,
 
             // VM Creation Defaults
             default_memory_mb: 4096,

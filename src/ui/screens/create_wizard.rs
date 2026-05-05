@@ -1184,6 +1184,7 @@ fn handle_step_select_iso(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.push_screen(crate::app::Screen::FileBrowser);
             } else if focus == browse_idx {
                 // Browse for ISO - open file browser
+                app.seed_iso_browser_dir();
                 app.load_file_browser(crate::app::FileBrowserMode::Iso);
                 app.push_screen(crate::app::Screen::FileBrowser);
             } else if focus == recovery_browse_idx {
@@ -1653,6 +1654,7 @@ enum QemuField {
     NetBackend,
     BridgeName,
     PortForwards,
+    MacAddress,
     DiskInterface,
     Display,
     Kvm,
@@ -1674,19 +1676,20 @@ impl QemuField {
             5 => Self::NetBackend,
             6 => Self::BridgeName,
             7 => Self::PortForwards,
-            8 => Self::DiskInterface,
-            9 => Self::Display,
-            10 => Self::Kvm,
-            11 => Self::GlAccel,
-            12 => Self::Uefi,
-            13 => Self::Tpm,
-            14 => Self::UsbTablet,
+            8 => Self::MacAddress,
+            9 => Self::DiskInterface,
+            10 => Self::Display,
+            11 => Self::Kvm,
+            12 => Self::GlAccel,
+            13 => Self::Uefi,
+            14 => Self::Tpm,
+            15 => Self::UsbTablet,
             _ => Self::RtcLocal,
         }
     }
 
     fn count() -> usize {
-        16
+        17
     }
 }
 
@@ -1862,10 +1865,35 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
                 "[Enter] edit",
             ));
         }
+
+        // MAC address (text input, hidden when network model is "none")
+        let mac_selected = focus == 8;
+        let mac_editing = matches!(state.editing_field, Some(WizardField::MacAddress));
+        let mac_value = if mac_editing {
+            format!("{}|", state.wizard_edit_buffer)
+        } else if let Some(mac) = config.mac_address.as_deref() {
+            mac.to_string()
+        } else {
+            "(auto)".to_string()
+        };
+        let mac_hint = if mac_editing {
+            "[Enter] Done  [Esc] Cancel"
+        } else if mac_selected {
+            "[Tab] Edit  [g] Generate  [c] Clear"
+        } else {
+            ""
+        };
+        lines.push(render_field_line(
+            "MAC:",
+            &mac_value,
+            mac_selected,
+            mac_editing,
+            mac_hint,
+        ));
     }
 
     // Disk Interface (cycle)
-    let disk_selected = focus == 8;
+    let disk_selected = focus == 9;
     lines.push(render_field_line(
         "Disk I/F:",
         &config.disk_interface,
@@ -1875,7 +1903,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // Display (cycle)
-    let disp_selected = focus == 9;
+    let disp_selected = focus == 10;
     lines.push(render_field_line(
         "Display:",
         &config.display,
@@ -1888,27 +1916,27 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     lines.push(Line::styled("  Features (toggle with Space):", Style::default().fg(Color::DarkGray)));
 
     // KVM toggle
-    let kvm_selected = focus == 10;
+    let kvm_selected = focus == 11;
     lines.push(render_toggle_line("KVM Accel:", config.enable_kvm, kvm_selected));
 
     // 3D/GL acceleration toggle
-    let gl_selected = focus == 11;
+    let gl_selected = focus == 12;
     lines.push(render_toggle_line("3D Accel:", config.gl_acceleration, gl_selected));
 
     // UEFI toggle
-    let uefi_selected = focus == 12;
+    let uefi_selected = focus == 13;
     lines.push(render_toggle_line("UEFI Boot:", config.uefi, uefi_selected));
 
     // TPM toggle
-    let tpm_selected = focus == 13;
+    let tpm_selected = focus == 14;
     lines.push(render_toggle_line("TPM 2.0:", config.tpm, tpm_selected));
 
     // USB Tablet toggle
-    let usb_selected = focus == 14;
+    let usb_selected = focus == 15;
     lines.push(render_toggle_line("USB Tablet:", config.usb_tablet, usb_selected));
 
     // RTC Local toggle
-    let rtc_selected = focus == 15;
+    let rtc_selected = focus == 16;
     lines.push(render_toggle_line("RTC Local:", config.rtc_localtime, rtc_selected));
 
     let settings = Paragraph::new(lines);
@@ -2081,6 +2109,17 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             Press Enter to edit forwarding rules.",
             os_name
         ),
+        QemuField::MacAddress => format!(
+            "MAC address for {}.\n\n\
+            Leave empty for QEMU to pick one. \
+            Set explicitly when you need a stable MAC \
+            (DHCP reservations, license-bound guests, \
+            host firewall rules).\n\n\
+            Format: aa:bb:cc:dd:ee:ff\n\
+            Press [g] to generate a random MAC \
+            with QEMU's safe 52:54:00 prefix.",
+            os_name
+        ),
         QemuField::DiskInterface => format!(
             "Disk interface for {}.\n\n\
             virtio: Best perf (needs driver)\n\
@@ -2151,6 +2190,48 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
     let editing_cpu = app.wizard_state.as_ref()
         .map(|s| matches!(s.editing_field, Some(WizardField::CpuCores)))
         .unwrap_or(false);
+    let editing_mac = app.wizard_state.as_ref()
+        .map(|s| matches!(s.editing_field, Some(WizardField::MacAddress)))
+        .unwrap_or(false);
+
+    if editing_mac {
+        let mut bad_mac: Option<String> = None;
+        if let Some(ref mut state) = app.wizard_state {
+            match key.code {
+                KeyCode::Esc => {
+                    state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    let trimmed = state.wizard_edit_buffer.trim().to_string();
+                    if trimmed.is_empty() {
+                        state.qemu_config.mac_address = None;
+                        state.editing_field = None;
+                        state.wizard_edit_buffer.clear();
+                    } else if crate::vm::mac::is_valid_mac(&trimmed) {
+                        state.qemu_config.mac_address = Some(trimmed.to_lowercase());
+                        state.editing_field = None;
+                        state.wizard_edit_buffer.clear();
+                    } else {
+                        bad_mac = Some(trimmed);
+                    }
+                }
+                KeyCode::Char(c) if c.is_ascii_hexdigit() || c == ':' => {
+                    if state.wizard_edit_buffer.len() < 17 {
+                        state.wizard_edit_buffer.push(c);
+                    }
+                }
+                KeyCode::Backspace => {
+                    state.wizard_edit_buffer.pop();
+                }
+                _ => {}
+            }
+        }
+        if let Some(bad) = bad_mac {
+            app.set_status(format!("Invalid MAC address: {}", bad));
+        }
+        return Ok(());
+    }
 
     if editing_memory || editing_cpu {
         // Text input mode for Memory or CPU
@@ -2227,7 +2308,7 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         KeyCode::Tab => {
-            // Enter edit mode for Memory or CPU fields
+            // Enter edit mode for Memory, CPU, or MAC fields
             if let Some(ref mut state) = app.wizard_state {
                 let field = QemuField::from_index(state.field_focus);
                 match field {
@@ -2239,7 +2320,31 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                         state.editing_field = Some(WizardField::CpuCores);
                         state.wizard_edit_buffer = state.qemu_config.cpu_cores.to_string();
                     }
+                    QemuField::MacAddress if state.qemu_config.network_model != "none" => {
+                        state.editing_field = Some(WizardField::MacAddress);
+                        state.wizard_edit_buffer = state
+                            .qemu_config
+                            .mac_address
+                            .clone()
+                            .unwrap_or_default();
+                    }
                     _ => {}
+                }
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(ref mut state) = app.wizard_state {
+                let field = QemuField::from_index(state.field_focus);
+                if field == QemuField::MacAddress && state.qemu_config.network_model != "none" {
+                    state.qemu_config.mac_address = Some(crate::vm::mac::generate_random_mac());
+                }
+            }
+        }
+        KeyCode::Char('c') => {
+            if let Some(ref mut state) = app.wizard_state {
+                let field = QemuField::from_index(state.field_focus);
+                if field == QemuField::MacAddress {
+                    state.qemu_config.mac_address = None;
                 }
             }
         }

@@ -10,6 +10,13 @@ description = """
 The directory where your VMs are stored. Each VM lives in its own subdirectory \
 containing a launch.sh script and disk images. You can use ~ for your home directory."""
 
+[default_iso_path]
+title = "Default ISO Path"
+description = """
+The directory the ISO file browser opens to when creating VMs or changing media. \
+The path must exist; leave empty to fall back to your home directory. \
+You can also set or clear this from the Create VM wizard's ISO step."""
+
 [default_memory]
 title = "Default Memory"
 description = """

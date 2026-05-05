@@ -226,6 +226,8 @@ pub struct WizardQemuConfig {
     pub port_forwards: Vec<PortForward>,
     /// Bridge name when backend is "bridge"
     pub bridge_name: Option<String>,
+    /// Custom MAC address for the NIC (canonical aa:bb:cc:dd:ee:ff form)
+    pub mac_address: Option<String>,
     /// Additional QEMU arguments
     pub extra_args: Vec<String>,
     /// BIOS/ROM file path (for classic Mac and other systems needing custom firmware)
@@ -254,6 +256,7 @@ impl Default for WizardQemuConfig {
             network_backend: "user".to_string(),
             port_forwards: Vec::new(),
             bridge_name: None,
+            mac_address: None,
             extra_args: Vec::new(),
             bios_path: None,
         }
@@ -288,6 +291,7 @@ impl WizardQemuConfig {
             network_backend: profile.network_backend.clone(),
             port_forwards: Vec::new(),
             bridge_name: None,
+            mac_address: None,
             extra_args: profile.extra_args.clone(),
             bios_path: None,
         }
@@ -392,6 +396,7 @@ pub enum WizardField {
     DiskSize,
     MemoryMb,
     CpuCores,
+    MacAddress,
     CustomOsId,
     CustomOsName,
     CustomOsPublisher,
@@ -574,6 +579,12 @@ pub struct NetworkSettingsState {
     pub backend: String,
     pub bridge_name: Option<String>,
     pub port_forwards: Vec<PortForward>,
+    /// Custom MAC address (canonical aa:bb:cc:dd:ee:ff form). `None` = QEMU default.
+    pub mac_address: Option<String>,
+    /// In-place editor buffer for the MAC field.
+    pub mac_edit_buffer: String,
+    /// Whether the MAC field is currently in edit mode.
+    pub editing_mac: bool,
     pub selected_field: usize,
     pub editing_port_forwards: bool,
     pub pf_selected: usize,
@@ -1443,6 +1454,20 @@ impl App {
     pub fn selected_vm_pid(&self) -> Option<u32> {
         let vm = self.selected_vm()?;
         self.running_vms.get(&vm.id).copied()
+    }
+
+    /// Seed `file_browser_dir` for ISO selection: prefer the configured
+    /// default ISO path if it still exists, else the user's home directory.
+    pub fn seed_iso_browser_dir(&mut self) {
+        let target = self
+            .config
+            .default_iso_path
+            .as_ref()
+            .filter(|p| p.is_dir())
+            .cloned()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        self.file_browser_dir = target;
     }
 
     /// Load file browser entries for current directory

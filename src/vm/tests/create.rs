@@ -74,6 +74,7 @@ fn test_build_qemu_command_basic() {
         network_backend: "user".to_string(),
         port_forwards: vec![],
         bridge_name: None,
+        mac_address: None,
         extra_args: vec![],
         bios_path: None,
     };
@@ -106,7 +107,7 @@ fn test_generate_network_args_user_with_portfwd() {
         PortForward { protocol: PortProtocol::Tcp, host_port: 2222, guest_port: 22 },
         PortForward { protocol: PortProtocol::Tcp, host_port: 8080, guest_port: 80 },
     ];
-    let args = generate_network_args("e1000", "user", None, &forwards);
+    let args = generate_network_args("e1000", "user", None, &forwards, None);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("hostfwd=tcp::2222-:22"));
     assert!(args[0].contains("hostfwd=tcp::8080-:80"));
@@ -115,7 +116,7 @@ fn test_generate_network_args_user_with_portfwd() {
 
 #[test]
 fn test_generate_network_args_passt() {
-    let args = generate_network_args("virtio", "passt", None, &[]);
+    let args = generate_network_args("virtio", "passt", None, &[], None);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("-netdev passt,id=net0"));
     assert!(args[1].contains("virtio-net-pci,netdev=net0"));
@@ -123,14 +124,40 @@ fn test_generate_network_args_passt() {
 
 #[test]
 fn test_generate_network_args_bridge() {
-    let args = generate_network_args("e1000", "bridge", Some("virbr0"), &[]);
+    let args = generate_network_args("e1000", "bridge", Some("virbr0"), &[], None);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("-netdev bridge,id=net0,br=virbr0"));
 }
 
 #[test]
+fn test_generate_network_args_with_mac_bridge() {
+    let args = generate_network_args(
+        "e1000",
+        "bridge",
+        Some("virbr0"),
+        &[],
+        Some("52:54:00:de:ad:be"),
+    );
+    assert_eq!(args.len(), 2);
+    assert!(args[1].contains("mac=52:54:00:de:ad:be"), "device line missing mac=: {}", args[1]);
+}
+
+#[test]
+fn test_generate_network_args_with_mac_user() {
+    let args = generate_network_args("virtio", "user", None, &[], Some("aa:bb:cc:dd:ee:ff"));
+    assert!(args[1].contains("virtio-net-pci,netdev=net0,mac=aa:bb:cc:dd:ee:ff"));
+}
+
+#[test]
+fn test_generate_network_args_invalid_mac_dropped() {
+    // Invalid MAC strings must not be written into the script.
+    let args = generate_network_args("e1000", "user", None, &[], Some("not-a-mac"));
+    assert!(!args.iter().any(|a| a.contains("mac=")));
+}
+
+#[test]
 fn test_generate_network_args_none() {
-    let args = generate_network_args("none", "user", None, &[]);
+    let args = generate_network_args("none", "user", None, &[], None);
     assert!(args.is_empty());
 }
 
@@ -170,6 +197,7 @@ fn test_build_qemu_command_with_bios() {
         network_backend: "user".to_string(),
         port_forwards: vec![],
         bridge_name: None,
+        mac_address: None,
         extra_args: vec![],
         bios_path: Some(PathBuf::from("MacROM.bin")),
     };
@@ -294,6 +322,7 @@ fn macos_uefi_config() -> WizardQemuConfig {
         network_backend: "passt".to_string(),
         port_forwards: vec![],
         bridge_name: None,
+        mac_address: None,
         extra_args: vec!["-device vmware-svga,vgamem_mb=256".to_string()],
         bios_path: Some(PathBuf::from("OpenCore.qcow2")),
     }
@@ -321,6 +350,7 @@ fn macos_non_uefi_config() -> WizardQemuConfig {
         network_backend: "passt".to_string(),
         port_forwards: vec![],
         bridge_name: None,
+        mac_address: None,
         extra_args: vec!["-device vmware-svga,vgamem_mb=256".to_string()],
         bios_path: None,
     }

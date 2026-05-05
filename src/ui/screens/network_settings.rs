@@ -19,7 +19,7 @@ const NETWORK_OPTIONS: &[&str] = &["virtio", "e1000", "rtl8139", "ne2k_pci", "pc
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
     let dialog_width = 72.min(area.width.saturating_sub(4));
-    let dialog_height = 30.min(area.height.saturating_sub(4));
+    let dialog_height = 32.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -44,6 +44,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
 
     let is_bridge = ns.backend == "bridge";
+    let show_mac = ns.backend != "none";
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -53,9 +54,10 @@ pub fn render(app: &App, frame: &mut Frame) {
             Constraint::Length(1),   // Spacer
             Constraint::Length(1),   // Adapter field
             Constraint::Length(1),   // Backend field
+            Constraint::Length(1),   // MAC field
             Constraint::Length(1),   // Bridge name / Port forwards field
             Constraint::Length(1),   // Spacer
-            Constraint::Min(6),      // Info area (port forward list or bridge status)
+            Constraint::Min(6),      // Info area
             Constraint::Length(2),   // Help
         ])
         .split(inner);
@@ -82,24 +84,44 @@ pub fn render(app: &App, frame: &mut Frame) {
     let backend_line = render_field_line("Backend:", &backend_display, backend_selected, "[Left/Right] cycle");
     frame.render_widget(Paragraph::new(backend_line), chunks[3]);
 
-    // Field 2: Bridge name (when bridge backend) or Port forwards (when user/passt)
+    // MAC address (hidden when backend == "none")
+    if show_mac {
+        let mac_selected = ns.selected_field == 2;
+        let mac_display = if ns.editing_mac {
+            format!("{}_", ns.mac_edit_buffer)
+        } else if let Some(mac) = ns.mac_address.as_deref() {
+            mac.to_string()
+        } else {
+            "(auto)".to_string()
+        };
+        let mac_hint = if ns.editing_mac {
+            "[Enter] save  [Esc] cancel"
+        } else if mac_selected {
+            "[Enter] edit  [r] randomize  [c] clear"
+        } else {
+            ""
+        };
+        let mac_line = render_field_line("MAC:", &mac_display, mac_selected, mac_hint);
+        frame.render_widget(Paragraph::new(mac_line), chunks[4]);
+    }
+
+    // Bridge name (when bridge backend) or Port forwards (when user/passt)
     let show_pf = ns.backend == "user" || ns.backend == "passt";
+    let bridge_pf_selected = ns.selected_field == 3;
     if is_bridge {
-        let bridge_selected = ns.selected_field == 2;
         let bridge_display = ns.bridge_name.as_deref().unwrap_or("qemubr0");
-        let bridge_line = render_field_line("Bridge:", bridge_display, bridge_selected, "[Left/Right] cycle");
-        frame.render_widget(Paragraph::new(bridge_line), chunks[4]);
+        let bridge_line = render_field_line("Bridge:", bridge_display, bridge_pf_selected, "[Left/Right] cycle");
+        frame.render_widget(Paragraph::new(bridge_line), chunks[5]);
     } else if show_pf {
-        let pf_selected = ns.selected_field == 2;
         let pf_count = ns.port_forwards.len();
         let pf_display = if pf_count == 0 {
             "none".to_string()
         } else {
             format!("{} rule(s)", pf_count)
         };
-        let pf_hint = if pf_selected { "[Enter] edit" } else { "" };
-        let pf_line = render_field_line("Forwards:", &pf_display, pf_selected, pf_hint);
-        frame.render_widget(Paragraph::new(pf_line), chunks[4]);
+        let pf_hint = if bridge_pf_selected { "[Enter] edit" } else { "" };
+        let pf_line = render_field_line("Forwards:", &pf_display, bridge_pf_selected, pf_hint);
+        frame.render_widget(Paragraph::new(pf_line), chunks[5]);
     }
 
     // Info area: bridge status (when bridge) or port forward list (when user/passt)
@@ -159,7 +181,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         }
 
         let info = Paragraph::new(lines);
-        frame.render_widget(info, chunks[6]);
+        frame.render_widget(info, chunks[7]);
     } else if show_pf && !ns.port_forwards.is_empty() {
         let mut lines = Vec::new();
         lines.push(Line::styled("  Current port forwarding rules:", Style::default().fg(Color::DarkGray)));
@@ -167,14 +189,14 @@ pub fn render(app: &App, frame: &mut Frame) {
             lines.push(Line::from(format!("    {} {} -> {}", pf.protocol, pf.host_port, pf.guest_port)));
         }
         let list = Paragraph::new(lines);
-        frame.render_widget(list, chunks[6]);
+        frame.render_widget(list, chunks[7]);
     }
 
     // Help
     let help = Paragraph::new("[Enter] Apply  [Esc] Cancel  [j/k] Navigate  [Left/Right] Change")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
-    frame.render_widget(help, chunks[7]);
+    frame.render_widget(help, chunks[8]);
 }
 
 /// Render the port forward editor overlay
@@ -394,6 +416,51 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         return Ok(());
     }
 
+    // MAC edit mode: capture text input first.
+    let editing_mac = app
+        .network_settings_state
+        .as_ref()
+        .map(|ns| ns.editing_mac)
+        .unwrap_or(false);
+    if editing_mac {
+        let mut bad_mac: Option<String> = None;
+        if let Some(ref mut ns) = app.network_settings_state {
+            match key.code {
+                KeyCode::Esc => {
+                    ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                    ns.editing_mac = false;
+                }
+                KeyCode::Enter => {
+                    let trimmed = ns.mac_edit_buffer.trim().to_string();
+                    if trimmed.is_empty() {
+                        ns.mac_address = None;
+                        ns.mac_edit_buffer.clear();
+                        ns.editing_mac = false;
+                    } else if crate::vm::mac::is_valid_mac(&trimmed) {
+                        ns.mac_address = Some(trimmed.to_lowercase());
+                        ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                        ns.editing_mac = false;
+                    } else {
+                        bad_mac = Some(trimmed);
+                    }
+                }
+                KeyCode::Backspace => {
+                    ns.mac_edit_buffer.pop();
+                }
+                KeyCode::Char(c) if c.is_ascii_hexdigit() || c == ':' => {
+                    if ns.mac_edit_buffer.len() < 17 {
+                        ns.mac_edit_buffer.push(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(bad) = bad_mac {
+            app.set_status(format!("Invalid MAC address: {}", bad));
+        }
+        return Ok(());
+    }
+
     // Normal settings mode
     let backend_options: Vec<String> = app.get_network_backend_options()
         .iter()
@@ -408,7 +475,18 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         let ns = app.network_settings_state.as_ref().unwrap();
         ns.backend == "bridge"
     };
-    let max_field = if show_pf || is_bridge { 2 } else { 1 };
+    let show_mac = {
+        let ns = app.network_settings_state.as_ref().unwrap();
+        ns.backend != "none"
+    };
+    // Field indices: 0=adapter, 1=backend, 2=mac (when show_mac), 3=bridge/forwards
+    let max_field = if !show_mac {
+        1
+    } else if show_pf || is_bridge {
+        3
+    } else {
+        2
+    };
 
     match key.code {
         KeyCode::Esc => {
@@ -426,6 +504,23 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             if let Some(ref mut ns) = app.network_settings_state {
                 if ns.selected_field > 0 {
                     ns.selected_field -= 1;
+                }
+            }
+        }
+        KeyCode::Char('r') => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                if ns.selected_field == 2 && ns.backend != "none" {
+                    let mac = crate::vm::mac::generate_random_mac();
+                    ns.mac_address = Some(mac.clone());
+                    ns.mac_edit_buffer = mac;
+                }
+            }
+        }
+        KeyCode::Char('c') => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                if ns.selected_field == 2 && ns.backend != "none" {
+                    ns.mac_address = None;
+                    ns.mac_edit_buffer.clear();
                 }
             }
         }
@@ -452,7 +547,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                                 .or_else(|| Some("qemubr0".to_string()));
                         }
                     }
-                    2 if ns.backend == "bridge" => {
+                    3 if ns.backend == "bridge" => {
                         // Cycle bridge name
                         if !system_bridges.is_empty() {
                             let current_bridge = ns.bridge_name.as_deref().unwrap_or("");
@@ -469,8 +564,17 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             }
         }
         KeyCode::Enter => {
-            let ns = app.network_settings_state.as_ref().unwrap();
-            if ns.selected_field == 2 && show_pf {
+            let (sel, backend) = {
+                let ns = app.network_settings_state.as_ref().unwrap();
+                (ns.selected_field, ns.backend.clone())
+            };
+            if sel == 2 && backend != "none" {
+                // Enter MAC edit mode
+                if let Some(ref mut ns) = app.network_settings_state {
+                    ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                    ns.editing_mac = true;
+                }
+            } else if sel == 3 && show_pf {
                 // Enter port forward editor
                 if let Some(ref mut ns) = app.network_settings_state {
                     ns.editing_port_forwards = true;
@@ -578,6 +682,7 @@ fn apply_network_settings(app: &mut App) -> anyhow::Result<()> {
             &ns.backend,
             ns.bridge_name.as_deref(),
             &ns.port_forwards,
+            ns.mac_address.as_deref(),
         )?;
 
         app.reload_selected_vm_script();

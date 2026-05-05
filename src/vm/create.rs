@@ -1002,18 +1002,25 @@ fn build_qemu_command_with_os(
             other => shell_escape(other),
         };
 
+        let mac_suffix = config
+            .mac_address
+            .as_deref()
+            .filter(|m| crate::vm::mac::is_valid_mac(m))
+            .map(|m| format!(",mac={}", m))
+            .unwrap_or_default();
+
         match config.network_backend.as_str() {
             "none" => {
                 // No networking backend (different from network_model "none")
             }
             "passt" => {
                 args.push("-netdev passt,id=net0".to_string());
-                args.push(format!("-device {},netdev=net0", net_device));
+                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
             }
             "bridge" => {
                 let br = config.bridge_name.as_deref().unwrap_or("qemubr0");
                 args.push(format!("-netdev bridge,id=net0,br={}", shell_escape(br)));
-                args.push(format!("-device {},netdev=net0", net_device));
+                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
             }
             _ => {
                 // User/SLIRP (default)
@@ -1026,7 +1033,7 @@ fn build_qemu_command_with_os(
                     netdev.push_str(&format!(",hostfwd={}::{}-:{}", proto, pf.host_port, pf.guest_port));
                 }
                 args.push(netdev);
-                args.push(format!("-device {},netdev=net0", net_device));
+                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
             }
         }
     }
@@ -1087,13 +1094,14 @@ pub fn update_network_in_script(
     backend: &str,
     bridge_name: Option<&str>,
     port_forwards: &[PortForward],
+    mac_address: Option<&str>,
 ) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
     let content = std::fs::read_to_string(&script_path)
         .with_context(|| format!("Failed to read launch script: {}", script_path.display()))?;
 
     // Build new network arguments
-    let new_net_args = generate_network_args(model, backend, bridge_name, port_forwards);
+    let new_net_args = generate_network_args(model, backend, bridge_name, port_forwards, mac_address);
 
     // Remove existing network lines and replace
     let mut new_lines = Vec::new();
@@ -1166,6 +1174,7 @@ fn generate_network_args(
     backend: &str,
     bridge_name: Option<&str>,
     port_forwards: &[PortForward],
+    mac_address: Option<&str>,
 ) -> Vec<String> {
     if model == "none" {
         return Vec::new();
@@ -1176,6 +1185,11 @@ fn generate_network_args(
         other => shell_escape(other),
     };
 
+    let mac_suffix = mac_address
+        .filter(|m| crate::vm::mac::is_valid_mac(m))
+        .map(|m| format!(",mac={}", m))
+        .unwrap_or_default();
+
     let mut args = Vec::new();
 
     match backend {
@@ -1184,12 +1198,12 @@ fn generate_network_args(
         }
         "passt" => {
             args.push("        -netdev passt,id=net0 \\".to_string());
-            args.push(format!("        -device {},netdev=net0 \\", net_device));
+            args.push(format!("        -device {},netdev=net0{} \\", net_device, mac_suffix));
         }
         "bridge" => {
             let br = bridge_name.unwrap_or("qemubr0");
             args.push(format!("        -netdev bridge,id=net0,br={} \\", shell_escape(br)));
-            args.push(format!("        -device {},netdev=net0 \\", net_device));
+            args.push(format!("        -device {},netdev=net0{} \\", net_device, mac_suffix));
         }
         _ => {
             // User/SLIRP
@@ -1203,7 +1217,7 @@ fn generate_network_args(
             }
             netdev.push_str(" \\");
             args.push(netdev);
-            args.push(format!("        -device {},netdev=net0 \\", net_device));
+            args.push(format!("        -device {},netdev=net0{} \\", net_device, mac_suffix));
         }
     }
 

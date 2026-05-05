@@ -169,6 +169,10 @@ pub struct NetworkConfig {
     #[serde(default = "default_true")]
     pub user_net: bool,
     pub bridge: Option<String>,
+    /// Custom MAC address for the NIC (canonical aa:bb:cc:dd:ee:ff form).
+    /// `None` lets QEMU pick its own.
+    #[serde(default)]
+    pub mac_address: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -183,6 +187,7 @@ impl Default for NetworkConfig {
             port_forwards: Vec::new(),
             user_net: true,
             bridge: None,
+            mac_address: None,
         }
     }
 }
@@ -288,5 +293,46 @@ impl QemuConfig {
     /// Get the primary disk for snapshot operations
     pub fn primary_disk(&self) -> Option<&DiskConfig> {
         self.disks.first()
+    }
+
+    /// Whether para-virtualized 3D acceleration is currently enabled.
+    /// Detected from the raw script (gl=on on display, virtio-vga-gl device,
+    /// or any extra_arg containing those tokens).
+    pub fn has_gl_acceleration(&self) -> bool {
+        if self
+            .extra_args
+            .iter()
+            .any(|arg| arg.contains("virtio-vga-gl") || arg.contains("gl=on"))
+        {
+            return true;
+        }
+        let s = &self.raw_script;
+        s.contains("virtio-vga-gl") || s.contains("gl=on")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_gl_acceleration_detects_device() {
+        let mut cfg = QemuConfig::default();
+        cfg.raw_script = "qemu-system-x86_64 \\\n  -device virtio-vga-gl \\\n  -display sdl,gl=on".to_string();
+        assert!(cfg.has_gl_acceleration());
+    }
+
+    #[test]
+    fn has_gl_acceleration_detects_extra_arg() {
+        let mut cfg = QemuConfig::default();
+        cfg.extra_args = vec!["-display gtk,gl=on".to_string()];
+        assert!(cfg.has_gl_acceleration());
+    }
+
+    #[test]
+    fn has_gl_acceleration_negative() {
+        let mut cfg = QemuConfig::default();
+        cfg.raw_script = "qemu-system-x86_64 \\\n  -vga std \\\n  -display gtk".to_string();
+        assert!(!cfg.has_gl_acceleration());
     }
 }
