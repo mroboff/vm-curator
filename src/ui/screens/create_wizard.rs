@@ -80,6 +80,11 @@ pub fn render(app: &App, frame: &mut Frame) {
         WizardStep::ConfigureQemu => render_step_configure_qemu(app, frame, dialog_area),
         WizardStep::Confirm => render_step_confirm(app, frame, dialog_area),
     }
+
+    // Port-forward editor draws on top of step 4 when active.
+    if app.wizard_editing_port_forwards {
+        render_wizard_port_forward_editor(app, frame, dialog_area);
+    }
 }
 
 /// Render custom OS entry form
@@ -2540,6 +2545,155 @@ fn add_wizard_preset(app: &mut App, protocol: crate::vm::qemu_config::PortProtoc
             });
         }
     }
+}
+
+/// Render the port-forward editor as a popup over the wizard dialog.
+fn render_wizard_port_forward_editor(app: &App, frame: &mut Frame, parent: Rect) {
+    let Some(state) = app.wizard_state.as_ref() else { return };
+
+    // Centered popup, sized to the parent dialog.
+    let width = parent.width.saturating_sub(8).min(64);
+    let height = parent.height.saturating_sub(6).min(16);
+    let x = parent.x + (parent.width.saturating_sub(width)) / 2;
+    let y = parent.y + (parent.height.saturating_sub(height)) / 2;
+    let area = Rect { x, y, width, height };
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Port Forwarding ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Add-rule sub-dialog takes over the whole popup when active.
+    if let Some(adding) = app.wizard_adding_pf.as_ref() {
+        render_wizard_adding_pf(adding, frame, inner);
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Min(3),       // Rules list
+            Constraint::Length(1),    // Spacer
+            Constraint::Length(1),    // Presets
+            Constraint::Length(1),    // Help
+        ])
+        .split(inner);
+
+    // Rules list
+    let pfs = &state.qemu_config.port_forwards;
+    if pfs.is_empty() {
+        let msg = Paragraph::new("  No port forwarding rules configured.")
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, chunks[0]);
+    } else {
+        let mut lines = Vec::new();
+        for (i, pf) in pfs.iter().enumerate() {
+            let is_selected = i == app.wizard_pf_selected;
+            let prefix = if is_selected { "> " } else { "  " };
+            let style = if is_selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            lines.push(Line::styled(
+                format!("{}{}  {} -> {}", prefix, pf.protocol, pf.host_port, pf.guest_port),
+                style,
+            ));
+        }
+        frame.render_widget(Paragraph::new(lines), chunks[0]);
+    }
+
+    let presets = Paragraph::new("  Presets: [1] SSH  [2] RDP  [3] HTTP  [4] HTTPS  [5] VNC")
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(presets, chunks[2]);
+
+    let help = Paragraph::new("[a] Add  [d] Delete  [1-5] Preset  [Esc] Done")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[3]);
+}
+
+/// Render the "add a port forward rule" prompt inside the editor popup.
+fn render_wizard_adding_pf(adding: &crate::app::AddingPortForward, frame: &mut Frame, area: Rect) {
+    use crate::app::AddPfStep;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(1),    // Header
+            Constraint::Length(1),    // Spacer
+            Constraint::Length(1),    // Protocol
+            Constraint::Length(1),    // Host port
+            Constraint::Length(1),    // Guest port
+            Constraint::Min(1),       // Spacer
+            Constraint::Length(1),    // Help
+        ])
+        .split(area);
+
+    let header = Paragraph::new("Add Port Forward Rule")
+        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    frame.render_widget(header, chunks[0]);
+
+    let active_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let idle_style = Style::default().fg(Color::White);
+    let hint_style = Style::default().fg(Color::DarkGray);
+
+    // Protocol
+    let proto_active = adding.step == AddPfStep::Protocol;
+    let proto_line = Line::from(vec![
+        Span::styled("  Protocol:   ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            format!("{}", adding.protocol),
+            if proto_active { active_style } else { idle_style },
+        ),
+        Span::styled(
+            if proto_active { "  [←/→] toggle" } else { "" },
+            hint_style,
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(proto_line), chunks[2]);
+
+    // Host port
+    let host_active = adding.step == AddPfStep::HostPort;
+    let host_value = if adding.host_port_input.is_empty() {
+        "_".to_string()
+    } else if host_active {
+        format!("{}|", adding.host_port_input)
+    } else {
+        adding.host_port_input.clone()
+    };
+    let host_line = Line::from(vec![
+        Span::styled("  Host Port:  ", Style::default().fg(Color::Yellow)),
+        Span::styled(host_value, if host_active { active_style } else { idle_style }),
+    ]);
+    frame.render_widget(Paragraph::new(host_line), chunks[3]);
+
+    // Guest port
+    let guest_active = adding.step == AddPfStep::GuestPort;
+    let guest_value = if adding.guest_port_input.is_empty() {
+        "_".to_string()
+    } else if guest_active {
+        format!("{}|", adding.guest_port_input)
+    } else {
+        adding.guest_port_input.clone()
+    };
+    let guest_line = Line::from(vec![
+        Span::styled("  Guest Port: ", Style::default().fg(Color::Yellow)),
+        Span::styled(guest_value, if guest_active { active_style } else { idle_style }),
+    ]);
+    frame.render_widget(Paragraph::new(guest_line), chunks[4]);
+
+    let help = Paragraph::new("[Enter] Next/Confirm  [Esc] Cancel")
+        .style(hint_style)
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[6]);
 }
 
 fn handle_qemu_field_change(app: &mut App, delta: i32) {
