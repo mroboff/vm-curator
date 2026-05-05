@@ -26,6 +26,7 @@ pub enum GpuValidationResult {
 pub enum SettingsItem {
     // General settings
     VmLibraryPath,
+    DefaultIsoPath,
     DefaultMemory,
     DefaultCpuCores,
     DefaultDiskSize,
@@ -65,6 +66,7 @@ impl SettingsItem {
     pub fn display_name(&self) -> &'static str {
         match self {
             SettingsItem::VmLibraryPath => "VM Library Path",
+            SettingsItem::DefaultIsoPath => "Default ISO Path",
             SettingsItem::DefaultMemory => "Default Memory (MB)",
             SettingsItem::DefaultCpuCores => "Default CPU Cores",
             SettingsItem::DefaultDiskSize => "Default Disk Size (GB)",
@@ -89,6 +91,11 @@ impl SettingsItem {
     pub fn get_value(&self, config: &Config) -> String {
         match self {
             SettingsItem::VmLibraryPath => config.vm_library_path.display().to_string(),
+            SettingsItem::DefaultIsoPath => config
+                .default_iso_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
             SettingsItem::DefaultMemory => config.default_memory_mb.to_string(),
             SettingsItem::DefaultCpuCores => config.default_cpu_cores.to_string(),
             SettingsItem::DefaultDiskSize => config.default_disk_size_gb.to_string(),
@@ -159,6 +166,7 @@ impl SettingsItem {
     pub fn help_key(&self) -> &'static str {
         match self {
             SettingsItem::VmLibraryPath => "vm_library_path",
+            SettingsItem::DefaultIsoPath => "default_iso_path",
             SettingsItem::DefaultMemory => "default_memory",
             SettingsItem::DefaultCpuCores => "default_cpu_cores",
             SettingsItem::DefaultDiskSize => "default_disk_size",
@@ -197,6 +205,7 @@ fn make_visible(item: SettingsItem, indent: usize) -> VisibleItem {
 fn build_visible_items(config: &Config) -> Vec<VisibleItem> {
     let mut items = vec![
         make_visible(SettingsItem::VmLibraryPath, 0),
+        make_visible(SettingsItem::DefaultIsoPath, 0),
         make_visible(SettingsItem::DefaultMemory, 0),
         make_visible(SettingsItem::DefaultCpuCores, 0),
         make_visible(SettingsItem::DefaultDiskSize, 0),
@@ -838,6 +847,29 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
             }
 
             app.config.vm_library_path = path;
+        }
+        SettingsItem::DefaultIsoPath => {
+            if value.is_empty() {
+                app.config.default_iso_path = None;
+            } else {
+                let path = std::path::PathBuf::from(value);
+                let path = if let Some(rest) = value.strip_prefix("~/") {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(rest)
+                    } else {
+                        path
+                    }
+                } else {
+                    path
+                };
+
+                if !path.is_dir() {
+                    app.set_status(format!("Path does not exist or is not a directory: {}", path.display()));
+                    return Ok(());
+                }
+
+                app.config.default_iso_path = Some(path);
+            }
         }
         SettingsItem::DefaultMemory => {
             if let Ok(mb) = value.parse::<u32>() {

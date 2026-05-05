@@ -87,6 +87,27 @@ fn test_extract_network_user_with_portfwd() {
 }
 
 #[test]
+fn test_extract_network_mac_on_device() {
+    let content = "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device virtio-net-pci,netdev=net0,mac=52:54:00:de:ad:be";
+    let config = extract_network(content).unwrap();
+    assert_eq!(config.mac_address, Some("52:54:00:de:ad:be".to_string()));
+}
+
+#[test]
+fn test_extract_network_mac_uppercase_normalized() {
+    let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0 \\\n  -device e1000,netdev=net0,mac=AA:BB:CC:DD:EE:FF";
+    let config = extract_network(content).unwrap();
+    assert_eq!(config.mac_address, Some("aa:bb:cc:dd:ee:ff".to_string()));
+}
+
+#[test]
+fn test_extract_network_no_mac() {
+    let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0 \\\n  -device e1000,netdev=net0";
+    let config = extract_network(content).unwrap();
+    assert_eq!(config.mac_address, None);
+}
+
+#[test]
 fn test_extract_bios_path_with_variable() {
     let vm_dir = Path::new("/home/user/vms/mac-system7");
     let content = r#"VM_DIR="$(dirname "$(readlink -f "$0")")"

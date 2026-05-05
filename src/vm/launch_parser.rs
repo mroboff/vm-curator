@@ -592,6 +592,24 @@ fn extract_network(content: &str) -> Option<NetworkConfig> {
                 config.bridge = Some(bridge);
             }
         }
+
+        // Extract MAC address. QEMU accepts `mac=...` on either the
+        // -device line (most common) or the -netdev line.
+        if (line.contains("-device") || line.contains("-netdev") || line.contains("-nic"))
+            && line.contains("mac=")
+        {
+            if let Some(idx) = line.find("mac=") {
+                let rest = &line[idx + 4..];
+                let mac: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_hexdigit() || *c == ':')
+                    .collect();
+                if crate::vm::mac::is_valid_mac(&mac) {
+                    config.mac_address = Some(mac.to_lowercase());
+                    has_network = true;
+                }
+            }
+        }
     }
 
     if has_network || content.contains("-net") || content.contains("-nic") {

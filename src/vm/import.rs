@@ -366,6 +366,7 @@ fn parse_libvirt_xml_str(xml: &str, config_path: &Path) -> Result<ImportableVm> 
         network_backend,
         port_forwards: Vec::new(),
         bridge_name,
+        mac_address: None,
         extra_args: Vec::new(),
         bios_path: None,
     };
@@ -541,6 +542,7 @@ fn parse_quickemu_conf_str(content: &str, config_path: &Path) -> Result<Importab
         network_backend: "user".to_string(),
         port_forwards: Vec::new(),
         bridge_name: None,
+        mac_address: None,
         extra_args: Vec::new(),
         bios_path: None,
     };

@@ -28,6 +28,7 @@ pub enum MenuAction {
     MultiGpuPassthrough,
     SingleGpuPassthrough,
     ChangeDisplay,
+    Toggle3dAccel,
     EditNotes,
     RenameVm,
     ResetVm,
@@ -88,11 +89,22 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
         });
     }
 
+    let gl_desc: &'static str = if vm.config.has_gl_acceleration() {
+        "Currently ON - toggle off"
+    } else {
+        "Currently OFF - toggle on"
+    };
+
     items.extend([
         MenuItem {
             name: "Change Display",
             description: "GTK, SDL, SPICE-app, or VNC output",
             action: MenuAction::ChangeDisplay,
+        },
+        MenuItem {
+            name: "3D Acceleration (non-pass-through)",
+            description: gl_desc,
+            action: MenuAction::Toggle3dAccel,
         },
         MenuItem {
             name: "Edit Notes",

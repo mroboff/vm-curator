@@ -3,6 +3,7 @@ pub mod discovery;
 pub mod import;
 pub mod launch_parser;
 pub mod lifecycle;
+pub mod mac;
 pub mod qemu_config;
 pub mod single_gpu_scripts;
 pub mod snapshot;
