@@ -291,8 +291,13 @@ impl QemuConfig {
     }
 
     /// Get the primary disk for snapshot operations
+    /// Returns the first disk that supports snapshots (qcow2), skipping
+    /// pflash/OVMF firmware files that are not snapshotable.
     pub fn primary_disk(&self) -> Option<&DiskConfig> {
-        self.disks.first()
+        self.disks
+            .iter()
+            .find(|d| d.format.supports_snapshots())
+            .or_else(|| self.disks.first())
     }
 
     /// Whether para-virtualized 3D acceleration is currently enabled.
