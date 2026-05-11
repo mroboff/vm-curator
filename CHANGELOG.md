@@ -1,5 +1,19 @@
 # Changelog
 
+**v0.4.10**
+- **First release with external contributions** — many thanks to [@Ibn-Hesham](https://github.com/Ibn-Hesham) and [@nextzard](https://github.com/nextzard) for the patches below!
+- **Nix Flake** (thanks @Ibn-Hesham, #32): Reproducible builds and dev shell. Adds `flake.nix` with `packages.default`, `devShells.default`, and `apps.default` outputs, plus a `flake.lock`. README updated with Nix/NixOS installation instructions. Build artifacts excluded via `.gitignore`.
+- **Fix Snapshots on UEFI VMs** (thanks @nextzard, #33 / #37): `primary_disk()` returned the first parsed `-drive` line, which on UEFI VMs is the read-only `OVMF_CODE.fd` pflash entry — `qemu-img snapshot` then failed with `Permission denied` against the firmware blob
+  - `primary_disk()` now picks the first disk whose format supports snapshots (qcow2), falling back to `disks.first()` for legacy/non-qcow2 cases
+  - Fix applies to all snapshot entry points (CLI, TUI, lifecycle)
+- **Fix Network-Settings Rewrite** (#36, #38): Editing model/backend/MAC on an existing VM via the Network Settings screen had two compounding bugs in `update_network_in_script`:
+  - Replacement args were inserted only at the first match (`--install` branch), leaving `--cdrom`, `--recovery`, `--floppy`, and normal-boot branches with no networking at all
+  - The line-strip loop consumed every backslash-continued line from `-netdev` through the next non-`\` line, sweeping up adjacent non-network args (`-usb`, `-device usb-tablet`, `-rtc base=localtime`)
+  - Rewrite now consumes only contiguous network-arg lines and inserts the replacement in every branch; regression tests cover the bug, the `model = "none"` strip path, and the originally-no-network fallback
+- **Fix Wizard Hidden-Row Navigation** (#31): In the create wizard's "Configure QEMU" step, network sub-rows are conditionally rendered based on Network / Net Backend settings, but keyboard arrows still walked the full static field range — letting users focus invisible rows and open hidden editors (Net Backend / Bridge / Forwards / MAC)
+  - Visibility rules consolidated on `QemuField::is_visible`; Up/Down navigation, Tab/Enter/`g`/`c` action handlers, Left/Right cycling, and the `r` profile-reset path all route through it
+  - 10 unit tests pin the visibility truth table, skip navigation, bound conditions, and focus snap behavior
+
 **v0.4.9**
 - **Fix Port-Forward Editor Rendering**: Pressing Enter on the create wizard's "Forwards:" field activated the editor handler, but no popup was drawn — input went to an invisible target. Adds an overlay over step 4 with a rules list (plus presets) and an add-rule prompt, mirroring the existing network settings editor.
 - **Fix Display Backend Parser**: `qemu-system-* -display help` output ends with a usage paragraph after the backend list, which slipped past the old filter and contributed bogus "backends" like "Some", "-display", and "For" to the wizard's display option cycler

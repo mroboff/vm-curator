@@ -4,6 +4,13 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v0.4.10**
+- **First release with external contributions** — many thanks to [@Ibn-Hesham](https://github.com/Ibn-Hesham) and [@nextzard](https://github.com/nextzard) for the patches below!
+- **Nix Flake** (thanks @Ibn-Hesham, #32): Reproducible builds and dev shell via `nix build` / `nix develop` — flake exposes `packages.default`, `devShells.default`, and `apps.default`
+- **Fix Snapshots on UEFI VMs** (thanks @nextzard, #33 / #37): Snapshot operations now skip OVMF pflash entries when picking the primary disk; UEFI VMs can be snapshotted again instead of failing with `Permission denied` on `OVMF_CODE.fd`
+- **Fix Network-Settings Rewrite** (#36, #38): Editing a VM's network settings (model/backend/MAC) now preserves the network device in every boot branch of `launch.sh` and stops sweeping up adjacent args like `-usb` and `-rtc base=localtime`
+- **Fix Wizard Hidden-Row Navigation** (#31): VM creation wizard's QEMU step no longer lets keyboard arrows focus invisible network rows (e.g., when Network = `none` hides Backend/Bridge/Forwards/MAC)
+
 **v0.4.9**
 - **Fix Port-Forward Editor Rendering**: Create wizard's port-forward editor now actually draws a popup when activated (previously the handler was wired up but no UI was rendered)
 - **Fix Display Backend Parser**: Strip QEMU's trailing usage paragraph from `-display help` output so bogus tokens like "Some", "-display", and "For" no longer appear as selectable display backends in the wizard
