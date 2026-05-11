@@ -500,3 +500,152 @@ fn test_macos_non_uefi_uses_bios() {
     assert!(cmd.contains("-bios \"$ROM\""), "Non-UEFI macOS with bios_path should use -bios");
     assert!(!cmd.contains("ich9-ahci"), "Non-UEFI macOS should NOT use explicit AHCI controller");
 }
+
+// ---------------------------------------------------------------------------
+// update_network_in_script — regression coverage for issue #38
+// ---------------------------------------------------------------------------
+
+struct TestVmDir(PathBuf);
+impl TestVmDir {
+    fn new(name: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("vm-curator-test-{}-{}-{}", name, std::process::id(), seq));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        TestVmDir(dir)
+    }
+    fn path(&self) -> &Path { &self.0 }
+}
+impl Drop for TestVmDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Fixture: a launch.sh whose five case branches each contain a realistic
+/// QEMU command with user-mode networking surrounded by other args (vga,
+/// display, audio before; usb after). Mirrors the actual order produced by
+/// `build_qemu_command_with_os`.
+fn fixture_launch_sh_five_branch_user_net() -> String {
+    let qemu_block = "        qemu-system-x86_64 \\\n        \
+        -enable-kvm \\\n        \
+        -m 2048M \\\n        \
+        -drive file=\"$DISK\",format=qcow2,if=virtio,index=0,media=disk \\\n        \
+        -vga virtio \\\n        \
+        -display sdl \\\n        \
+        -audiodev pa,id=audio0 \\\n        \
+        -device intel-hda \\\n        \
+        -netdev user,id=net0 \\\n        \
+        -device virtio-net-pci,netdev=net0 \\\n        \
+        -usb \\\n        \
+        -device usb-tablet";
+    format!(
+        "#!/bin/bash\n\
+         DISK=\"disk.qcow2\"\n\
+         case \"$1\" in\n    \
+             --install)\n{qemu}\n        ;;\n    \
+             --cdrom)\n{qemu}\n        ;;\n    \
+             --recovery)\n{qemu}\n        ;;\n    \
+             --floppy)\n{qemu}\n        ;;\n    \
+             \"\")\n{qemu}\n        ;;\n\
+         esac\n",
+        qemu = qemu_block,
+    )
+}
+
+#[test]
+fn test_update_network_in_script_inserts_into_all_branches() {
+    // Regression for issue #38: switching to a bridged backend with a pinned
+    // MAC must rewrite the network args in every case branch, not just the
+    // first one (--install).
+    let vm = TestVmDir::new("issue38-bridge");
+    std::fs::write(vm.path().join("launch.sh"), fixture_launch_sh_five_branch_user_net()).unwrap();
+
+    update_network_in_script(
+        vm.path(),
+        "virtio",
+        "bridge",
+        Some("nm-bridge"),
+        &[],
+        Some("52:54:00:12:34:56"),
+    )
+    .unwrap();
+
+    let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
+
+    let netdev_count = updated.matches("-netdev bridge,id=net0,br=nm-bridge").count();
+    assert_eq!(netdev_count, 5, "expected -netdev in all 5 case branches, got {netdev_count}\n---\n{updated}");
+
+    let device_count = updated
+        .matches("-device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56")
+        .count();
+    assert_eq!(device_count, 5, "expected -device with MAC in all 5 case branches, got {device_count}\n---\n{updated}");
+
+    // No stray remnants of the original user-mode backend.
+    assert!(!updated.contains("-netdev user,id=net0"), "old user-mode -netdev not stripped:\n{updated}");
+
+    // Non-network args surrounding the network block must survive the rewrite.
+    assert_eq!(updated.matches("-usb").count(), 5, "trailing -usb arg must survive in all 5 branches:\n{updated}");
+    assert_eq!(updated.matches("-device usb-tablet").count(), 5, "trailing -device usb-tablet must survive in all 5 branches:\n{updated}");
+    assert_eq!(updated.matches("-device intel-hda").count(), 5, "preceding -device intel-hda must survive in all 5 branches:\n{updated}");
+}
+
+#[test]
+fn test_update_network_in_script_strips_when_model_none() {
+    // Setting model = "none" must remove all -netdev / -device <nic> lines and
+    // leave each branch's qemu command syntactically valid (no dangling
+    // backslash-continuations that would swallow `;;`).
+    let vm = TestVmDir::new("issue38-none");
+    std::fs::write(vm.path().join("launch.sh"), fixture_launch_sh_five_branch_user_net()).unwrap();
+
+    update_network_in_script(vm.path(), "none", "user", None, &[], None).unwrap();
+
+    let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
+    assert_eq!(updated.matches("-netdev").count(), 0, "no -netdev lines should remain:\n{updated}");
+    assert_eq!(updated.matches("virtio-net-pci").count(), 0, "no -device virtio-net-pci lines should remain:\n{updated}");
+
+    // Every line that immediately precedes a `;;` terminator must end without
+    // a trailing backslash, otherwise bash would parse `;;` as a continuation.
+    let lines: Vec<&str> = updated.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == ";;" && i > 0 {
+            let prev = lines[i - 1].trim_end();
+            assert!(
+                !prev.ends_with('\\'),
+                "branch terminator `;;` preceded by backslash-continuation at line {i}: {prev:?}\n---\n{updated}",
+            );
+        }
+    }
+}
+
+#[test]
+fn test_update_network_in_script_originally_no_network_falls_back() {
+    // When the source script has no network args at all, the function should
+    // still emit replacement args via its end-of-file fallback. This pins the
+    // pre-existing fallback path so the fix above doesn't accidentally break
+    // it.
+    let vm = TestVmDir::new("issue38-fallback");
+    let stripped = fixture_launch_sh_five_branch_user_net()
+        .lines()
+        .filter(|l| !l.contains("-netdev") && !l.contains("virtio-net-pci"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(vm.path().join("launch.sh"), stripped).unwrap();
+
+    update_network_in_script(
+        vm.path(),
+        "virtio",
+        "bridge",
+        Some("qemubr0"),
+        &[],
+        None,
+    )
+    .unwrap();
+
+    let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
+    assert!(updated.contains("-netdev bridge,id=net0,br=qemubr0"), "fallback should still inject -netdev:\n{updated}");
+    assert!(updated.contains("-device virtio-net-pci,netdev=net0"), "fallback should still inject -device:\n{updated}");
+}

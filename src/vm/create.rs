@@ -1109,6 +1109,25 @@ pub fn update_network_in_script(
     let mut i = 0;
     let mut replaced = false;
 
+    // Detect whether a given trimmed line is a network arg (-netdev or a
+    // network -device). Used to identify contiguous network blocks within
+    // each branch of the case statement.
+    fn is_network_line(trimmed: &str) -> bool {
+        let is_netdev = trimmed.contains("-netdev ")
+            || trimmed.contains("-net user")
+            || trimmed.contains("-net bridge");
+        let is_net_device = (trimmed.contains("-device ") && trimmed.contains("netdev=net0"))
+            || (trimmed.contains("-device ")
+                && (trimmed.contains("e1000")
+                    || trimmed.contains("virtio-net")
+                    || trimmed.contains("rtl8139")
+                    || trimmed.contains("ne2k_pci")
+                    || trimmed.contains("pcnet"))
+                && !trimmed.contains("vga")
+                && !trimmed.contains("audio"));
+        is_netdev || is_net_device
+    }
+
     while i < lines.len() {
         let line = lines[i];
         let trimmed = line.trim();
@@ -1120,25 +1139,19 @@ pub fn update_network_in_script(
             continue;
         }
 
-        // Check if this line contains network args
-        let is_netdev = trimmed.contains("-netdev ") || trimmed.contains("-net user") || trimmed.contains("-net bridge");
-        let is_net_device = (trimmed.contains("-device ") && trimmed.contains("netdev=net0"))
-            || (trimmed.contains("-device ") && (trimmed.contains("e1000") || trimmed.contains("virtio-net") || trimmed.contains("rtl8139") || trimmed.contains("ne2k_pci") || trimmed.contains("pcnet")) && !trimmed.contains("vga") && !trimmed.contains("audio"));
-
-        if is_netdev || is_net_device {
-            // Skip this line (and continuation lines with backslash)
-            while i < lines.len() && lines[i].trim_end().ends_with('\\') {
+        if is_network_line(trimmed) {
+            // Consume the contiguous run of network-arg lines (each network
+            // arg is one physical line in the script). Issue #38: insert the
+            // replacement at every occurrence so all five case branches —
+            // --install, --cdrom, --recovery, --floppy, normal boot — keep a
+            // network device.
+            while i < lines.len() && is_network_line(lines[i].trim()) {
                 i += 1;
             }
-            i += 1; // skip the last line of this group
-
-            // Insert replacement on first network line removal
-            if !replaced {
-                for arg in &new_net_args {
-                    new_lines.push(arg.clone());
-                }
-                replaced = true;
+            for arg in &new_net_args {
+                new_lines.push(arg.clone());
             }
+            replaced = true;
         } else {
             new_lines.push(line.to_string());
             i += 1;
