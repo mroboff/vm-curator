@@ -1696,6 +1696,55 @@ impl QemuField {
     fn count() -> usize {
         17
     }
+
+    /// Whether this field is currently rendered in step 4. Mirrors the
+    /// conditional `render_step_configure_qemu` blocks so that keyboard
+    /// navigation and edit actions can avoid landing on hidden rows.
+    /// Issue #31.
+    fn is_visible(self, config: &WizardQemuConfig) -> bool {
+        use QemuField::*;
+        let net_on = config.network_model != "none";
+        match self {
+            NetBackend | MacAddress => net_on,
+            BridgeName => net_on && config.network_backend == "bridge",
+            PortForwards => net_on
+                && (config.network_backend == "user"
+                    || config.network_backend == "passt"),
+            _ => true,
+        }
+    }
+}
+
+/// Return the next currently-visible field index in the given direction,
+/// or `current` if no visible neighbour exists. Used to skip rows that
+/// `render_step_configure_qemu` is hiding.
+fn next_visible_field(current: usize, config: &WizardQemuConfig, delta: i32) -> usize {
+    let max = QemuField::count() as i32 - 1;
+    let mut idx = current as i32;
+    loop {
+        idx += delta;
+        if idx < 0 || idx > max {
+            return current;
+        }
+        if QemuField::from_index(idx as usize).is_visible(config) {
+            return idx as usize;
+        }
+    }
+}
+
+/// If `focus` lands on a hidden field, snap it to the nearest visible
+/// neighbour (preferring forward). Used after config-mutating actions
+/// (`r` reset, Left/Right cycle) so the user never observes a stranded
+/// invisible cursor.
+fn snap_focus_to_visible(focus: usize, config: &WizardQemuConfig) -> usize {
+    if QemuField::from_index(focus).is_visible(config) {
+        return focus;
+    }
+    let fwd = next_visible_field(focus, config, 1);
+    if fwd != focus {
+        return fwd;
+    }
+    next_visible_field(focus, config, -1)
 }
 
 fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
@@ -1824,7 +1873,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // Network backend (cycle) - hidden if network model is "none"
-    if config.network_model != "none" {
+    if QemuField::NetBackend.is_visible(config) {
         let backend_selected = focus == 5;
         let backend_display = match config.network_backend.as_str() {
             "user" => "user/SLIRP (NAT)".to_string(),
@@ -1842,7 +1891,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
         ));
 
         // Bridge name (only for bridge backend)
-        if config.network_backend == "bridge" {
+        if QemuField::BridgeName.is_visible(config) {
             let bridge_selected = focus == 6;
             let bridge_display = config.bridge_name.as_deref().unwrap_or("qemubr0");
             lines.push(render_field_line(
@@ -1855,7 +1904,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         // Port forwards (only for user/passt)
-        if config.network_backend == "user" || config.network_backend == "passt" {
+        if QemuField::PortForwards.is_visible(config) {
             let pf_selected = focus == 7;
             let pf_display = if config.port_forwards.is_empty() {
                 "none".to_string()
@@ -2181,8 +2230,6 @@ fn get_field_notes(app: &App, focus: usize) -> String {
 }
 
 fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
-    let field_count = QemuField::count();
-
     // Handle wizard port forward editing
     if app.wizard_editing_port_forwards {
         return handle_wizard_port_forward_editor(app, key);
@@ -2300,11 +2347,15 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             app.wizard_prev_step();
         }
         KeyCode::Enter => {
-            // Check if on PortForwards field
-            let on_pf = app.wizard_state.as_ref()
-                .map(|s| QemuField::from_index(s.field_focus) == QemuField::PortForwards)
+            // Open port-forward editor only if PortForwards is the focused
+            // *and* currently visible row. Issue #31.
+            let on_visible_pf = app.wizard_state.as_ref()
+                .map(|s| {
+                    let field = QemuField::from_index(s.field_focus);
+                    field == QemuField::PortForwards && field.is_visible(&s.qemu_config)
+                })
                 .unwrap_or(false);
-            if on_pf {
+            if on_visible_pf {
                 app.wizard_editing_port_forwards = true;
                 app.wizard_pf_selected = 0;
                 app.wizard_adding_pf = None;
@@ -2316,6 +2367,9 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             // Enter edit mode for Memory, CPU, or MAC fields
             if let Some(ref mut state) = app.wizard_state {
                 let field = QemuField::from_index(state.field_focus);
+                if !field.is_visible(&state.qemu_config) {
+                    return Ok(());
+                }
                 match field {
                     QemuField::Memory => {
                         state.editing_field = Some(WizardField::MemoryMb);
@@ -2325,7 +2379,7 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                         state.editing_field = Some(WizardField::CpuCores);
                         state.wizard_edit_buffer = state.qemu_config.cpu_cores.to_string();
                     }
-                    QemuField::MacAddress if state.qemu_config.network_model != "none" => {
+                    QemuField::MacAddress => {
                         state.editing_field = Some(WizardField::MacAddress);
                         state.wizard_edit_buffer = state
                             .qemu_config
@@ -2340,7 +2394,7 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('g') => {
             if let Some(ref mut state) = app.wizard_state {
                 let field = QemuField::from_index(state.field_focus);
-                if field == QemuField::MacAddress && state.qemu_config.network_model != "none" {
+                if field == QemuField::MacAddress && field.is_visible(&state.qemu_config) {
                     state.qemu_config.mac_address = Some(crate::vm::mac::generate_random_mac());
                 }
             }
@@ -2348,23 +2402,19 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('c') => {
             if let Some(ref mut state) = app.wizard_state {
                 let field = QemuField::from_index(state.field_focus);
-                if field == QemuField::MacAddress {
+                if field == QemuField::MacAddress && field.is_visible(&state.qemu_config) {
                     state.qemu_config.mac_address = None;
                 }
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(ref mut state) = app.wizard_state {
-                if state.field_focus < field_count - 1 {
-                    state.field_focus += 1;
-                }
+                state.field_focus = next_visible_field(state.field_focus, &state.qemu_config, 1);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             if let Some(ref mut state) = app.wizard_state {
-                if state.field_focus > 0 {
-                    state.field_focus -= 1;
-                }
+                state.field_focus = next_visible_field(state.field_focus, &state.qemu_config, -1);
             }
         }
         KeyCode::Left | KeyCode::Right => {
@@ -2411,6 +2461,9 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(profile) = app.wizard_selected_profile().cloned() {
                 if let Some(ref mut state) = app.wizard_state {
                     state.qemu_config = WizardQemuConfig::from_profile(&profile);
+                    // Profile defaults may hide the previously-focused row.
+                    state.field_focus =
+                        snap_focus_to_visible(state.field_focus, &state.qemu_config);
                 }
             }
         }
@@ -2715,6 +2768,13 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
     let Some(ref mut state) = app.wizard_state else { return };
     let field = QemuField::from_index(state.field_focus);
 
+    // Issue #31: don't mutate config when the cursor is parked on a row
+    // that the renderer is hiding. Navigation already prevents this in
+    // normal flow; this is a defence-in-depth check.
+    if !field.is_visible(&state.qemu_config) {
+        return;
+    }
+
     match field {
         QemuField::Memory => {
             let change = 256 * delta;
@@ -2771,6 +2831,14 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
         // Toggles use space, not left/right
         _ => {}
     }
+
+    // Defence-in-depth: if the just-applied cycle hid the row we were on,
+    // jump to the nearest visible neighbour rather than stranding the
+    // cursor on an invisible field. (Current visibility rules don't
+    // trigger this — focus is always on the field being mutated — but a
+    // future rule that hides a sibling could.) Issue #31.
+    let new_focus = snap_focus_to_visible(state.field_focus, &state.qemu_config);
+    state.field_focus = new_focus;
 }
 
 fn cycle_option(current: &mut String, options: &[&str], delta: i32) {
