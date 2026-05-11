@@ -159,6 +159,24 @@ cargo install vm-curator
 
 Pre-built packages (DEB, RPM, AppImage, tarball) are available from [GitHub Releases](https://github.com/mroboff/vm-curator/releases).
 
+**Nix / NixOS**
+
+```bash
+# Run directly without installing
+nix run github:mroboff/vm-curator
+
+# Build the package
+nix build .#default
+```
+
+For NixOS, add to `/etc/nixos/configuration.nix`:
+```nix
+{ pkgs, ... }:
+{
+  environment.systemPackages = [ pkgs.vm-curator ];
+}
+```
+
 **From Source**
 
 ```bash
