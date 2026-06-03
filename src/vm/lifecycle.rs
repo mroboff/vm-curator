@@ -287,6 +287,9 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
 
 /// Launch a VM synchronously (legacy function for compatibility)
 pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
+    if let Err(e) = ensure_qmp_in_script(&vm.path) {
+        log::warn!("launch_vm_sync: could not patch QMP into launch.sh: {e}");
+    }
     let result = launch_vm_with_error_check(vm, options);
 
     if result.success {
@@ -299,9 +302,15 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
 /// Launch VM with QEMU D-Bus display for GUI embedding.
 /// Rewrites the launch script in memory to replace any existing -display flag
 /// with -display dbus (session bus). Returns the child process PID on success.
+#[allow(dead_code)]
 pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
-    // Ensure QMP socket is present so pause/resume still work.
-    let _ = ensure_qmp_in_script(&vm.path);
+    let tmp = vm.path.join(".launch_dbus_tmp.sh");
+    let _ = std::fs::remove_file(&tmp);                       // stale temp script from prior crash
+    let _ = std::fs::remove_file(vm.path.join("qemu.sock")); // stale socket from unclean shutdown
+
+    if let Err(e) = ensure_qmp_in_script(&vm.path) {
+        log::warn!("launch_vm_dbus: could not patch QMP into launch.sh: {e}");
+    }
 
     let script_path = vm.path.join("launch.sh");
     let content = std::fs::read_to_string(&script_path)
@@ -309,17 +318,27 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
 
     let modified = replace_display_for_dbus(&content, "-display dbus");
 
-    let tmp = vm.path.join(".launch_dbus_tmp.sh");
     std::fs::write(&tmp, &modified).context("Failed to write temp launch script")?;
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
 
-    let child = Command::new("bash")
+    let mut child = Command::new("bash")
         .arg(&tmp)
         .current_dir(&vm.path)
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .context("Failed to spawn QEMU")?;
     let pid = child.id();
+
+    thread::sleep(Duration::from_millis(300));
+    if let Ok(Some(status)) = child.try_wait() {
+        use std::io::Read;
+        let stderr = child.stderr.take()
+            .map(|mut s| { let mut b = String::new(); s.read_to_string(&mut b).ok(); b })
+            .unwrap_or_default();
+        bail!("QEMU exited immediately ({}): {}", status, stderr.trim());
+    }
+    // child intentionally dropped — process keeps running
 
     let t = tmp.to_owned();
     thread::spawn(move || {
@@ -333,11 +352,13 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
 /// Replace every `-display <backend>` argument in a bash launch script with `replacement`.
 /// Scripts with multiple case branches each get their own replacement.
 /// Also strips SPICE-specific lines that are incompatible with dbus display.
+#[allow(dead_code)]
 fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for line in content.lines() {
         let t = line.trim();
-        let is_display = t.starts_with("-display ") || t.contains(" -display ");
+        let is_display = !t.starts_with('#')
+            && (t.starts_with("-display ") || t.contains(" -display "));
         let is_spice = t.starts_with("-spice ")
             || (t.starts_with("-device virtio-serial") && t.contains("spice"))
             || (t.starts_with("-device virtserialport") && t.contains("com.redhat.spice"))
@@ -354,7 +375,9 @@ fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
             out.push(line.to_string());
         }
     }
-    out.join("\n")
+    let mut s = out.join("\n");
+    if content.ends_with('\n') { s.push('\n'); }
+    s
 }
 
 /// Reset a VM by recreating its disk from a backing file or template
@@ -471,6 +494,7 @@ pub fn rename_vm(vm: &DiscoveredVm, new_name: &str) -> Result<()> {
 }
 
 /// Save (or clear) the notes for a VM, preserving display_name and os_profile.
+#[allow(dead_code)]
 pub fn save_notes(vm: &DiscoveredVm, notes: Option<&str>) -> Result<()> {
     let display_name = vm.display_name();
     let os_profile = vm.os_profile.as_deref().or(Some(&vm.id));
@@ -1098,6 +1122,7 @@ fn parse_pci_section(content: &str) -> Vec<String> {
     args
 }
 
+#[allow(dead_code)]
 pub fn save_pci_passthrough(
     vm: &DiscoveredVm,
     devices: &[crate::hardware::PciDevice],
@@ -1214,10 +1239,12 @@ bind_vfio || exit 1
 
 // ── QMP (QEMU Machine Protocol) ─────────────────────────────────────────────
 
+#[allow(dead_code)]
 const QMP_ARG: &str = "        -qmp unix:$VM_DIR/qemu.sock,server=on,wait=off";
 
 /// Patch an existing launch.sh to include a QMP socket if not already present.
 /// Idempotent — safe to call before every launch.
+#[allow(dead_code)]
 pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
     let content = std::fs::read_to_string(&script_path)
@@ -1265,6 +1292,7 @@ pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
 }
 
 /// Send a raw QMP command to a running VM's monitor socket.
+#[allow(dead_code)]
 fn qmp_send(vm_path: &Path, command: &str) -> Result<String> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
@@ -1293,17 +1321,20 @@ fn qmp_send(vm_path: &Path, command: &str) -> Result<String> {
 }
 
 /// Pause a running VM (suspends guest execution, state preserved in memory).
+#[allow(dead_code)]
 pub fn pause_vm(vm_path: &Path) -> Result<()> {
     qmp_send(vm_path, "stop").map(|_| ())
 }
 
 /// Resume a paused VM.
+#[allow(dead_code)]
 pub fn resume_vm(vm_path: &Path) -> Result<()> {
     qmp_send(vm_path, "cont").map(|_| ())
 }
 
 /// Returns true if the VM is currently paused (QMP `query-status` → `"paused"`).
 /// Returns false if not running, not reachable, or in any other state.
+#[allow(dead_code)]
 pub fn is_vm_paused(vm_path: &Path) -> bool {
     qmp_send(vm_path, "query-status")
         .map(|resp| resp.contains("\"paused\""))
