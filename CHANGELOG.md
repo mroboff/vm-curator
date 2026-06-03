@@ -1,8 +1,5 @@
 # Changelog
 
-**v0.4.11**
-- **Add `launch_vm_dbus`** (library): new public function that rewrites a VM's `launch.sh` in memory, replacing any `-display <backend>` flag with `-display dbus` and stripping incompatible SPICE lines, then spawns the modified script so QEMU registers on the session D-Bus. Intended for GUI consumers embedding the VM display via `qemu-display`; the TUI is unaffected. `replace_display_for_dbus` is the private helper that handles multi-branch bash scripts (case statements with `\\`-continuation lines) correctly.
-
 **v0.4.10**
 - **First release with external contributions** — many thanks to [@Ibn-Hesham](https://github.com/Ibn-Hesham) and [@nextzard](https://github.com/nextzard) for the patches below!
 - **Nix Flake** (thanks @Ibn-Hesham, #32): Reproducible builds and dev shell. Adds `flake.nix` with `packages.default`, `devShells.default`, and `apps.default` outputs, plus a `flake.lock`. README updated with Nix/NixOS installation instructions. Build artifacts excluded via `.gitignore`.

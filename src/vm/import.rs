@@ -660,6 +660,7 @@ fn get_quickemu_search_dirs() -> Vec<PathBuf> {
 }
 
 /// Scan any directory for importable VMs (libvirt .xml and quickemu .conf files).
+#[allow(dead_code)]
 pub fn discover_vms_in_dir(dir: &Path) -> Vec<ImportableVm> {
     let mut vms = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else { return vms };

@@ -10,7 +10,6 @@ use crate::hardware::{MultiGpuPassthroughStatus, PciDevice, SingleGpuConfig, Usb
 use crate::metadata::{AsciiArtStore, HierarchyConfig, MetadataStore, OsInfo, QemuProfileStore, SettingsHelpStore, SharedFoldersHelpStore};
 use crate::ui::widgets::build_visual_order;
 use crate::vm::{discover_vms, BootMode, DiscoveredVm, LaunchOptions, QemuProcess, SharedFolder, Snapshot};
-use crate::vm::qemu_config::{PortForward, PortProtocol};
 pub use crate::wizard_types::*;
 
 /// Application screens/views

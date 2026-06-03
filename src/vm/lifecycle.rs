@@ -299,6 +299,7 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
 /// Launch VM with QEMU D-Bus display for GUI embedding.
 /// Rewrites the launch script in memory to replace any existing -display flag
 /// with -display dbus (session bus). Returns the child process PID on success.
+#[allow(dead_code)]
 pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
     // Ensure QMP socket is present so pause/resume still work.
     let _ = ensure_qmp_in_script(&vm.path);
@@ -333,6 +334,7 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
 /// Replace every `-display <backend>` argument in a bash launch script with `replacement`.
 /// Scripts with multiple case branches each get their own replacement.
 /// Also strips SPICE-specific lines that are incompatible with dbus display.
+#[allow(dead_code)]
 fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for line in content.lines() {
@@ -471,6 +473,7 @@ pub fn rename_vm(vm: &DiscoveredVm, new_name: &str) -> Result<()> {
 }
 
 /// Save (or clear) the notes for a VM, preserving display_name and os_profile.
+#[allow(dead_code)]
 pub fn save_notes(vm: &DiscoveredVm, notes: Option<&str>) -> Result<()> {
     let display_name = vm.display_name();
     let os_profile = vm.os_profile.as_deref().or(Some(&vm.id));
@@ -1098,6 +1101,7 @@ fn parse_pci_section(content: &str) -> Vec<String> {
     args
 }
 
+#[allow(dead_code)]
 pub fn save_pci_passthrough(
     vm: &DiscoveredVm,
     devices: &[crate::hardware::PciDevice],
@@ -1214,10 +1218,12 @@ bind_vfio || exit 1
 
 // ── QMP (QEMU Machine Protocol) ─────────────────────────────────────────────
 
+#[allow(dead_code)]
 const QMP_ARG: &str = "        -qmp unix:$VM_DIR/qemu.sock,server=on,wait=off";
 
 /// Patch an existing launch.sh to include a QMP socket if not already present.
 /// Idempotent — safe to call before every launch.
+#[allow(dead_code)]
 pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
     let content = std::fs::read_to_string(&script_path)
@@ -1265,6 +1271,7 @@ pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
 }
 
 /// Send a raw QMP command to a running VM's monitor socket.
+#[allow(dead_code)]
 fn qmp_send(vm_path: &Path, command: &str) -> Result<String> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
@@ -1293,17 +1300,20 @@ fn qmp_send(vm_path: &Path, command: &str) -> Result<String> {
 }
 
 /// Pause a running VM (suspends guest execution, state preserved in memory).
+#[allow(dead_code)]
 pub fn pause_vm(vm_path: &Path) -> Result<()> {
     qmp_send(vm_path, "stop").map(|_| ())
 }
 
 /// Resume a paused VM.
+#[allow(dead_code)]
 pub fn resume_vm(vm_path: &Path) -> Result<()> {
     qmp_send(vm_path, "cont").map(|_| ())
 }
 
 /// Returns true if the VM is currently paused (QMP `query-status` → `"paused"`).
 /// Returns false if not running, not reachable, or in any other state.
+#[allow(dead_code)]
 pub fn is_vm_paused(vm_path: &Path) -> bool {
     qmp_send(vm_path, "query-status")
         .map(|resp| resp.contains("\"paused\""))

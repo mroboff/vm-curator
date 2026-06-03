@@ -5,18 +5,6 @@ use std::path::PathBuf;
 use anyhow::Result;
 use crate::vm::qemu_config::{PortForward, PortProtocol};
 
-/// File browser entry types (used in wizard media selection)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileBrowserEntryType {
-    Iso,
-    RecoveryImage,
-    Disk,
-    Directory,
-    ImportConfig,
-    Bios,
-    Floppy,
-}
-
 /// Action to take with an existing disk when using it for a new VM
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiskAction {
