@@ -4,6 +4,12 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v1.0.0**
+- **First stable release** — many thanks to [@indyfive11](https://github.com/indyfive11) for the library-API contributions below! Otherwise this release focuses on release-engineering and code-hardening; existing TUI behavior is unchanged.
+- **Library target for GUI consumers** (thanks @indyfive11, #39): new `[lib]` target re-exporting the business-logic modules (`commands`, `config`, `fs`, `hardware`, `metadata`, `vm`, `wizard_types`) for external front-ends, plus QMP VM control (pause/resume) and a D-Bus display launch path
+- **Detect immediate QEMU startup failures** (thanks @indyfive11, #40): `launch_vm_dbus` now catches a QEMU process that exits within milliseconds and surfaces its stderr, instead of returning a PID a GUI would wait on forever
+- **CI quality gates**: every push to `main` and PR now runs fmt, clippy (`-D warnings`), tests, and `cargo audit`; added `rust-toolchain.toml`, expanded test coverage, refactored the libvirt import parser, and added public-API docs
+
 **v0.4.10**
 - **First release with external contributions** — many thanks to [@Ibn-Hesham](https://github.com/Ibn-Hesham) and [@nextzard](https://github.com/nextzard) for the patches below!
 - **Nix Flake** (thanks @Ibn-Hesham, #32): Reproducible builds and dev shell via `nix build` / `nix develop` — flake exposes `packages.default`, `devShells.default`, and `apps.default`

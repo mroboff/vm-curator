@@ -1,8 +1,10 @@
 # Changelog
 
 **v1.0.0**
-- **First stable release.** Focus of this release is release-engineering and code-hardening rather than new features; behavior is unchanged for existing users.
-- **CI quality gates** (`.github/workflows/ci.yml`): every push and pull request now runs `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test --locked`, and `cargo audit`. Previously nothing ran tests or lints before a release tag was cut.
+- **First stable release.** Many thanks to [@indyfive11](https://github.com/indyfive11) for the library-API contributions below! Beyond those, this release focuses on release-engineering and code-hardening rather than new end-user features; existing TUI behavior is unchanged.
+- **Library target for GUI/external consumers** (thanks @indyfive11, #39): adds a `[lib]` target exposing the business-logic modules (`commands`, `config`, `fs`, `hardware`, `metadata`, `vm`, `wizard_types`) via `lib.rs`, with the `ui` (ratatui/crossterm) module intentionally excluded. Wizard/import state types were extracted into a front-end-agnostic `wizard_types` module. Also adds QMP-based VM control (pause/resume) and a D-Bus display launch path for GUI embedding.
+- **Detect immediate QEMU startup failures in D-Bus launch** (thanks @indyfive11, #40): `launch_vm_dbus` now polls `try_wait()` after 300ms (the same pattern as `launch_vm_with_error_check`) so a QEMU process that exits instantly — no session bus, an unrecognized flag, a missing shared library — surfaces an error with QEMU's stderr instead of returning a PID a GUI consumer would wait on forever.
+- **CI quality gates** (`.github/workflows/ci.yml`): every push to `main` and every pull request now runs `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test --locked`, and `cargo audit`. Previously nothing ran tests or lints before a release tag was cut.
 - **Toolchain pin**: added `rust-toolchain.toml` (stable + clippy/rustfmt) so local, contributor, and CI builds agree; dropped the unenforced "Rust 1.70+" MSRV claim from the README.
 - **Lint clean-up**: added `#![warn(clippy::all)]` and fixed all clippy findings under `-D warnings`; the whole codebase is now `cargo fmt`-clean.
 - **Expanded test coverage**: new tests for `qemu-img` disk-format JSON parsing and for `Config` load/save (round-trip, partial/malformed TOML), via new path-parameterized `Config::load_from`/`save_to` helpers.
