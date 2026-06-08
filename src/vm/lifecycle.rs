@@ -322,12 +322,25 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
 
-    let child = Command::new("bash")
+    let mut child = Command::new("bash")
         .arg(&tmp)
         .current_dir(&vm.path)
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .context("Failed to spawn QEMU")?;
     let pid = child.id();
+
+    // Brief poll to catch immediate QEMU startup failures (missing session D-Bus,
+    // bad flag, missing library) before returning Ok(pid) to the caller.
+    thread::sleep(Duration::from_millis(300));
+    if let Ok(Some(status)) = child.try_wait() {
+        use std::io::Read;
+        let stderr = child.stderr.take()
+            .map(|mut s| { let mut b = String::new(); s.read_to_string(&mut b).ok(); b })
+            .unwrap_or_default();
+        bail!("QEMU exited immediately ({}): {}", status, stderr.trim());
+    }
+    // child intentionally dropped — QEMU process continues running
 
     let t = tmp.to_owned();
     thread::spawn(move || {
