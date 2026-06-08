@@ -42,7 +42,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(2), // Left margin
-            Constraint::Min(1),   // Content
+            Constraint::Min(1),    // Content
             Constraint::Length(2), // Right margin
         ])
         .split(inner);
@@ -51,11 +51,11 @@ pub fn render(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Top padding
+            Constraint::Length(1),                       // Top padding
             Constraint::Length(folder_list_height(app)), // Folder list
-            Constraint::Length(1), // Separator
-            Constraint::Min(4),   // Mount instructions
-            Constraint::Length(2), // Help text
+            Constraint::Length(1),                       // Separator
+            Constraint::Min(4),                          // Mount instructions
+            Constraint::Length(2),                       // Help text
         ])
         .split(h_chunks[1]);
 

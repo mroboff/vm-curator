@@ -18,4 +18,6 @@ pub use single_gpu::{
 pub use pci::find_iommu_group_devices;
 #[allow(unused_imports)]
 pub use single_gpu::{DisplayManager, GpuDriver};
-pub use usb::{enumerate_usb_devices, install_udev_rules, UdevInstallResult, UsbDevice, UsbVersion};
+pub use usb::{
+    enumerate_usb_devices, install_udev_rules, UdevInstallResult, UsbDevice, UsbVersion,
+};

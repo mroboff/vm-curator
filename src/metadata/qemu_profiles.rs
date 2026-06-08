@@ -290,11 +290,8 @@ impl QemuProfileStore {
     /// Get all unique categories
     #[allow(dead_code)]
     pub fn categories(&self) -> Vec<String> {
-        let mut categories: Vec<String> = self
-            .profiles
-            .values()
-            .map(|p| p.category.clone())
-            .collect();
+        let mut categories: Vec<String> =
+            self.profiles.values().map(|p| p.category.clone()).collect();
         categories.sort();
         categories.dedup();
         categories

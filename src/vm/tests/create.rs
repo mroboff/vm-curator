@@ -19,15 +19,30 @@ fn test_shell_escape_unsafe_strings() {
     assert_eq!(shell_escape("test; echo pwned"), "'test; echo pwned'");
     assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
     assert_eq!(shell_escape("`whoami`"), "'`whoami`'");
-    assert_eq!(shell_escape("test\"; echo pwned; echo \""), "'test\"; echo pwned; echo \"'");
+    assert_eq!(
+        shell_escape("test\"; echo pwned; echo \""),
+        "'test\"; echo pwned; echo \"'"
+    );
 }
 
 #[test]
 fn test_generate_folder_name() {
-    assert_eq!(CreateWizardState::generate_folder_name("Windows 10"), "windows-10");
-    assert_eq!(CreateWizardState::generate_folder_name("Debian GNU/Linux"), "debian-gnu-linux");
-    assert_eq!(CreateWizardState::generate_folder_name("MS-DOS 6.22"), "ms-dos-6-22");
-    assert_eq!(CreateWizardState::generate_folder_name("  Spaced  Out  "), "spaced-out");
+    assert_eq!(
+        CreateWizardState::generate_folder_name("Windows 10"),
+        "windows-10"
+    );
+    assert_eq!(
+        CreateWizardState::generate_folder_name("Debian GNU/Linux"),
+        "debian-gnu-linux"
+    );
+    assert_eq!(
+        CreateWizardState::generate_folder_name("MS-DOS 6.22"),
+        "ms-dos-6-22"
+    );
+    assert_eq!(
+        CreateWizardState::generate_folder_name("  Spaced  Out  "),
+        "spaced-out"
+    );
 }
 
 #[test]
@@ -95,7 +110,8 @@ fn test_build_qemu_command_basic() {
 #[test]
 fn test_build_qemu_command_with_cdrom() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::Iso(None), None, None);
+    let cmd =
+        build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::Iso(None), None, None);
 
     assert!(cmd.contains("-drive file=\"$ISO\",media=cdrom"));
     assert!(cmd.contains("-boot d"));
@@ -104,8 +120,16 @@ fn test_build_qemu_command_with_cdrom() {
 #[test]
 fn test_generate_network_args_user_with_portfwd() {
     let forwards = vec![
-        PortForward { protocol: PortProtocol::Tcp, host_port: 2222, guest_port: 22 },
-        PortForward { protocol: PortProtocol::Tcp, host_port: 8080, guest_port: 80 },
+        PortForward {
+            protocol: PortProtocol::Tcp,
+            host_port: 2222,
+            guest_port: 22,
+        },
+        PortForward {
+            protocol: PortProtocol::Tcp,
+            host_port: 8080,
+            guest_port: 80,
+        },
     ];
     let args = generate_network_args("e1000", "user", None, &forwards, None);
     assert_eq!(args.len(), 2);
@@ -139,7 +163,11 @@ fn test_generate_network_args_with_mac_bridge() {
         Some("52:54:00:de:ad:be"),
     );
     assert_eq!(args.len(), 2);
-    assert!(args[1].contains("mac=52:54:00:de:ad:be"), "device line missing mac=: {}", args[1]);
+    assert!(
+        args[1].contains("mac=52:54:00:de:ad:be"),
+        "device line missing mac=: {}",
+        args[1]
+    );
 }
 
 #[test]
@@ -202,16 +230,32 @@ fn test_build_qemu_command_with_bios() {
         bios_path: Some(PathBuf::from("MacROM.bin")),
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-system7"), None);
-    assert!(cmd.contains("-bios \"$ROM\""), "Should contain -bios \"$ROM\", got:\n{}", cmd);
-    assert!(cmd.contains("qemu-system-m68k"), "Should contain m68k emulator");
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("mac-system7"),
+        None,
+    );
+    assert!(
+        cmd.contains("-bios \"$ROM\""),
+        "Should contain -bios \"$ROM\", got:\n{}",
+        cmd
+    );
+    assert!(
+        cmd.contains("qemu-system-m68k"),
+        "Should contain m68k emulator"
+    );
 }
 
 #[test]
 fn test_build_qemu_command_without_bios() {
     let config = WizardQemuConfig::default();
     let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
-    assert!(!cmd.contains("-bios"), "Should NOT contain -bios when no bios_path");
+    assert!(
+        !cmd.contains("-bios"),
+        "Should NOT contain -bios when no bios_path"
+    );
 }
 
 #[test]
@@ -232,26 +276,59 @@ fn test_generate_launch_script_with_rom() {
         None,
     );
 
-    assert!(script.contains("ROM=\"$VM_DIR/MacROM.bin\""), "Script should contain ROM variable");
-    assert!(script.contains("-bios \"$ROM\""), "Script should contain -bios \"$ROM\"");
+    assert!(
+        script.contains("ROM=\"$VM_DIR/MacROM.bin\""),
+        "Script should contain ROM variable"
+    );
+    assert!(
+        script.contains("-bios \"$ROM\""),
+        "Script should contain -bios \"$ROM\""
+    );
 }
 
 #[test]
 fn test_build_qemu_command_with_recovery_image() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(None), None, None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::RecoveryImage(None),
+        None,
+        None,
+    );
 
-    assert!(cmd.contains("format=dmg"), "Should contain format=dmg for recovery image");
-    assert!(cmd.contains("snapshot=on"), "Should use snapshot overlay for writability");
-    assert!(cmd.contains("if=ide,index=2"), "Should attach via IDE/AHCI at index 2");
-    assert!(!cmd.contains("-boot d"), "Should NOT contain -boot d for recovery images");
-    assert!(cmd.contains("\"$RECOVERY_IMG\""), "Should reference $RECOVERY_IMG variable");
+    assert!(
+        cmd.contains("format=dmg"),
+        "Should contain format=dmg for recovery image"
+    );
+    assert!(
+        cmd.contains("snapshot=on"),
+        "Should use snapshot overlay for writability"
+    );
+    assert!(
+        cmd.contains("if=ide,index=2"),
+        "Should attach via IDE/AHCI at index 2"
+    );
+    assert!(
+        !cmd.contains("-boot d"),
+        "Should NOT contain -boot d for recovery images"
+    );
+    assert!(
+        cmd.contains("\"$RECOVERY_IMG\""),
+        "Should reference $RECOVERY_IMG variable"
+    );
 }
 
 #[test]
 fn test_build_qemu_command_with_recovery_image_custom_path() {
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::RecoveryImage(Some("\"$2\"")), None, None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::RecoveryImage(Some("\"$2\"")),
+        None,
+        None,
+    );
 
     assert!(cmd.contains("format=dmg"), "Should contain format=dmg");
     assert!(cmd.contains("\"$2\""), "Should use custom path expression");
@@ -271,11 +348,26 @@ fn test_generate_launch_script_with_recovery_image() {
         None,
     );
 
-    assert!(script.contains("RECOVERY_IMG="), "Should use RECOVERY_IMG variable");
-    assert!(!script.contains("ISO="), "Should NOT contain ISO variable when recovery image");
-    assert!(script.contains("/tmp/BaseSystem.dmg"), "Should contain DMG path");
-    assert!(script.contains("--recovery"), "Should contain --recovery option");
-    assert!(script.contains("format=dmg"), "Install mode should use format=dmg");
+    assert!(
+        script.contains("RECOVERY_IMG="),
+        "Should use RECOVERY_IMG variable"
+    );
+    assert!(
+        !script.contains("ISO="),
+        "Should NOT contain ISO variable when recovery image"
+    );
+    assert!(
+        script.contains("/tmp/BaseSystem.dmg"),
+        "Should contain DMG path"
+    );
+    assert!(
+        script.contains("--recovery"),
+        "Should contain --recovery option"
+    );
+    assert!(
+        script.contains("format=dmg"),
+        "Install mode should use format=dmg"
+    );
 }
 
 #[test]
@@ -292,10 +384,19 @@ fn test_generate_launch_script_iso_unchanged() {
     );
 
     assert!(script.contains("ISO="), "Should use ISO variable");
-    assert!(!script.contains("RECOVERY_IMG="), "Should NOT contain RECOVERY_IMG variable");
+    assert!(
+        !script.contains("RECOVERY_IMG="),
+        "Should NOT contain RECOVERY_IMG variable"
+    );
     assert!(script.contains("--cdrom"), "Should contain --cdrom option");
-    assert!(script.contains("--recovery"), "Should still contain --recovery option for flexibility");
-    assert!(script.contains("-boot d"), "Install mode should boot from CD-ROM");
+    assert!(
+        script.contains("--recovery"),
+        "Should still contain --recovery option for flexibility"
+    );
+    assert!(
+        script.contains("-boot d"),
+        "Install mode should boot from CD-ROM"
+    );
 }
 
 // === macOS-specific tests ===
@@ -359,67 +460,149 @@ fn macos_non_uefi_config() -> WizardQemuConfig {
 #[test]
 fn test_macos_includes_smc_and_smbios() {
     let config = macos_non_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("mac-osx-leopard"),
+        None,
+    );
 
-    assert!(cmd.contains("isa-applesmc,osk="), "Should contain Apple SMC device with quoted value");
-    assert!(cmd.contains("-smbios type=2"), "Should contain SMBIOS type=2");
+    assert!(
+        cmd.contains("isa-applesmc,osk="),
+        "Should contain Apple SMC device with quoted value"
+    );
+    assert!(
+        cmd.contains("-smbios type=2"),
+        "Should contain SMBIOS type=2"
+    );
 }
 
 #[test]
 fn test_macos_uefi_uses_ahci() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("macos-sonoma"),
+        None,
+    );
 
-    assert!(cmd.contains("ich9-ahci,id=sata"), "Should have explicit AHCI controller");
+    assert!(
+        cmd.contains("ich9-ahci,id=sata"),
+        "Should have explicit AHCI controller"
+    );
     assert!(cmd.contains("bus=sata."), "Should use sata bus addressing");
     // Should NOT use the old if=ide,index=0 style
-    assert!(!cmd.contains("if=ide,index=0"), "Should NOT use legacy if=ide,index=0 for macOS UEFI");
+    assert!(
+        !cmd.contains("if=ide,index=0"),
+        "Should NOT use legacy if=ide,index=0 for macOS UEFI"
+    );
 }
 
 #[test]
 fn test_macos_uefi_with_opencore() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("macos-sonoma"),
+        None,
+    );
 
     // OpenCore as sata.0
-    assert!(cmd.contains("file=\"$ROM\",format=qcow2,if=none,id=oc"), "Should have OpenCore drive");
-    assert!(cmd.contains("drive=oc,bus=sata.0"), "OpenCore should be on sata.0");
+    assert!(
+        cmd.contains("file=\"$ROM\",format=qcow2,if=none,id=oc"),
+        "Should have OpenCore drive"
+    );
+    assert!(
+        cmd.contains("drive=oc,bus=sata.0"),
+        "OpenCore should be on sata.0"
+    );
     // Main disk as sata.1
-    assert!(cmd.contains("drive=maindisk,bus=sata.1"), "Main disk should be on sata.1");
+    assert!(
+        cmd.contains("drive=maindisk,bus=sata.1"),
+        "Main disk should be on sata.1"
+    );
     // Should NOT have -bios "$ROM" (OpenCore is an AHCI drive, not a BIOS)
-    assert!(!cmd.contains("-bios \"$ROM\""), "Should NOT use -bios for macOS UEFI with OpenCore");
+    assert!(
+        !cmd.contains("-bios \"$ROM\""),
+        "Should NOT use -bios for macOS UEFI with OpenCore"
+    );
 }
 
 #[test]
 fn test_macos_recovery_image_qcow2_on_ahci() {
     let config = macos_uefi_config();
     let cmd = build_qemu_command_with_os(
-        &config, "disk.qcow2", &InstallMedia::RecoveryImage(None), Some("macos-sonoma"), None
+        &config,
+        "disk.qcow2",
+        &InstallMedia::RecoveryImage(None),
+        Some("macos-sonoma"),
+        None,
     );
 
     // Recovery image on AHCI bus (no format= so QEMU auto-detects DMG vs qcow2)
-    assert!(cmd.contains("if=none,id=recovery"), "Recovery should be on AHCI bus");
-    assert!(!cmd.contains("format=qcow2,if=none,id=recovery"), "Recovery should NOT hardcode format (auto-detect)");
-    assert!(cmd.contains("bus=sata.2"), "Recovery should be on sata.2 (after OpenCore on sata.0 and disk on sata.1)");
-    assert!(!cmd.contains("-boot d"), "Should NOT boot from recovery directly (OpenCore handles it)");
+    assert!(
+        cmd.contains("if=none,id=recovery"),
+        "Recovery should be on AHCI bus"
+    );
+    assert!(
+        !cmd.contains("format=qcow2,if=none,id=recovery"),
+        "Recovery should NOT hardcode format (auto-detect)"
+    );
+    assert!(
+        cmd.contains("bus=sata.2"),
+        "Recovery should be on sata.2 (after OpenCore on sata.0 and disk on sata.1)"
+    );
+    assert!(
+        !cmd.contains("-boot d"),
+        "Should NOT boot from recovery directly (OpenCore handles it)"
+    );
 }
 
 #[test]
 fn test_macos_spice_audio() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("macos-sonoma"),
+        None,
+    );
 
-    assert!(cmd.contains("-audiodev spice,id=audio0"), "Should use spice audio backend with spice-app display");
-    assert!(!cmd.contains("-audiodev pa,id=audio0"), "Should NOT use pa audio with spice-app display");
+    assert!(
+        cmd.contains("-audiodev spice,id=audio0"),
+        "Should use spice audio backend with spice-app display"
+    );
+    assert!(
+        !cmd.contains("-audiodev pa,id=audio0"),
+        "Should NOT use pa audio with spice-app display"
+    );
 }
 
 #[test]
 fn test_macos_usb_kbd() {
     let config = macos_uefi_config();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("macos-sonoma"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("macos-sonoma"),
+        None,
+    );
 
-    assert!(cmd.contains("-device usb-kbd"), "Should include USB keyboard for macOS");
-    assert!(cmd.contains("-device usb-tablet"), "Should also include USB tablet");
+    assert!(
+        cmd.contains("-device usb-kbd"),
+        "Should include USB keyboard for macOS"
+    );
+    assert!(
+        cmd.contains("-device usb-tablet"),
+        "Should also include USB tablet"
+    );
 }
 
 #[test]
@@ -439,38 +622,87 @@ fn test_ppc_macos_no_smc() {
         ..Default::default()
     };
 
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-tiger"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("mac-osx-tiger"),
+        None,
+    );
 
-    assert!(!cmd.contains("applesmc"), "PPC macOS should NOT have Apple SMC");
-    assert!(!cmd.contains("-smbios type=2"), "PPC macOS should NOT have SMBIOS type=2");
-    assert!(!cmd.contains("usb-kbd"), "PPC macOS should NOT have USB keyboard");
+    assert!(
+        !cmd.contains("applesmc"),
+        "PPC macOS should NOT have Apple SMC"
+    );
+    assert!(
+        !cmd.contains("-smbios type=2"),
+        "PPC macOS should NOT have SMBIOS type=2"
+    );
+    assert!(
+        !cmd.contains("usb-kbd"),
+        "PPC macOS should NOT have USB keyboard"
+    );
 }
 
 #[test]
 fn test_non_macos_unchanged() {
     // Linux VM should not get any macOS-specific args
     let config = WizardQemuConfig::default();
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("ubuntu-24-04"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("ubuntu-24-04"),
+        None,
+    );
 
-    assert!(!cmd.contains("applesmc"), "Linux VM should NOT have Apple SMC");
-    assert!(!cmd.contains("-smbios type=2"), "Linux VM should NOT have SMBIOS type=2");
-    assert!(!cmd.contains("usb-kbd"), "Linux VM should NOT have USB keyboard");
-    assert!(!cmd.contains("ich9-ahci"), "Linux VM should NOT have explicit AHCI controller");
+    assert!(
+        !cmd.contains("applesmc"),
+        "Linux VM should NOT have Apple SMC"
+    );
+    assert!(
+        !cmd.contains("-smbios type=2"),
+        "Linux VM should NOT have SMBIOS type=2"
+    );
+    assert!(
+        !cmd.contains("usb-kbd"),
+        "Linux VM should NOT have USB keyboard"
+    );
+    assert!(
+        !cmd.contains("ich9-ahci"),
+        "Linux VM should NOT have explicit AHCI controller"
+    );
     // Default config includes audio, so pa backend should be used (not spice)
-    assert!(cmd.contains("-audiodev pa,id=audio0"), "Linux VM should use pa audio backend");
-    assert!(!cmd.contains("-audiodev spice"), "Linux VM should NOT use spice audio backend");
+    assert!(
+        cmd.contains("-audiodev pa,id=audio0"),
+        "Linux VM should use pa audio backend"
+    );
+    assert!(
+        !cmd.contains("-audiodev spice"),
+        "Linux VM should NOT use spice audio backend"
+    );
 }
 
 #[test]
 fn test_macos_uefi_iso_no_boot_d() {
     let config = macos_uefi_config();
     let cmd = build_qemu_command_with_os(
-        &config, "disk.qcow2", &InstallMedia::Iso(None), Some("macos-sonoma"), None
+        &config,
+        "disk.qcow2",
+        &InstallMedia::Iso(None),
+        Some("macos-sonoma"),
+        None,
     );
 
     // macOS UEFI should attach ISO on AHCI bus and NOT add -boot d
-    assert!(cmd.contains("bus=sata.3"), "ISO should be on sata.3 (after OpenCore.0, disk.1, skipping .2 for recovery)");
-    assert!(!cmd.contains("-boot d"), "macOS UEFI should NOT use -boot d (OpenCore handles boot)");
+    assert!(
+        cmd.contains("bus=sata.3"),
+        "ISO should be on sata.3 (after OpenCore.0, disk.1, skipping .2 for recovery)"
+    );
+    assert!(
+        !cmd.contains("-boot d"),
+        "macOS UEFI should NOT use -boot d (OpenCore handles boot)"
+    );
 }
 
 #[test]
@@ -486,8 +718,14 @@ fn test_macos_opencore_bootloader_check_in_script() {
         None,
     );
 
-    assert!(script.contains("Verify OpenCore bootloader exists"), "Script should verify OpenCore exists");
-    assert!(script.contains("kholia/OSX-KVM"), "Script should mention OSX-KVM download source");
+    assert!(
+        script.contains("Verify OpenCore bootloader exists"),
+        "Script should verify OpenCore exists"
+    );
+    assert!(
+        script.contains("kholia/OSX-KVM"),
+        "Script should mention OSX-KVM download source"
+    );
 }
 
 #[test]
@@ -495,10 +733,22 @@ fn test_macos_non_uefi_uses_bios() {
     // Leopard-era macOS: non-UEFI Intel, with a bios_path should use -bios "$ROM"
     let mut config = macos_non_uefi_config();
     config.bios_path = Some(PathBuf::from("some-rom.bin"));
-    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, Some("mac-osx-leopard"), None);
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        Some("mac-osx-leopard"),
+        None,
+    );
 
-    assert!(cmd.contains("-bios \"$ROM\""), "Non-UEFI macOS with bios_path should use -bios");
-    assert!(!cmd.contains("ich9-ahci"), "Non-UEFI macOS should NOT use explicit AHCI controller");
+    assert!(
+        cmd.contains("-bios \"$ROM\""),
+        "Non-UEFI macOS with bios_path should use -bios"
+    );
+    assert!(
+        !cmd.contains("ich9-ahci"),
+        "Non-UEFI macOS should NOT use explicit AHCI controller"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -512,12 +762,19 @@ impl TestVmDir {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
         let mut dir = std::env::temp_dir();
-        dir.push(format!("vm-curator-test-{}-{}-{}", name, std::process::id(), seq));
+        dir.push(format!(
+            "vm-curator-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            seq
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         TestVmDir(dir)
     }
-    fn path(&self) -> &Path { &self.0 }
+    fn path(&self) -> &Path {
+        &self.0
+    }
 }
 impl Drop for TestVmDir {
     fn drop(&mut self) {
@@ -562,7 +819,11 @@ fn test_update_network_in_script_inserts_into_all_branches() {
     // MAC must rewrite the network args in every case branch, not just the
     // first one (--install).
     let vm = TestVmDir::new("issue38-bridge");
-    std::fs::write(vm.path().join("launch.sh"), fixture_launch_sh_five_branch_user_net()).unwrap();
+    std::fs::write(
+        vm.path().join("launch.sh"),
+        fixture_launch_sh_five_branch_user_net(),
+    )
+    .unwrap();
 
     update_network_in_script(
         vm.path(),
@@ -576,21 +837,44 @@ fn test_update_network_in_script_inserts_into_all_branches() {
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
 
-    let netdev_count = updated.matches("-netdev bridge,id=net0,br=nm-bridge").count();
-    assert_eq!(netdev_count, 5, "expected -netdev in all 5 case branches, got {netdev_count}\n---\n{updated}");
+    let netdev_count = updated
+        .matches("-netdev bridge,id=net0,br=nm-bridge")
+        .count();
+    assert_eq!(
+        netdev_count, 5,
+        "expected -netdev in all 5 case branches, got {netdev_count}\n---\n{updated}"
+    );
 
     let device_count = updated
         .matches("-device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56")
         .count();
-    assert_eq!(device_count, 5, "expected -device with MAC in all 5 case branches, got {device_count}\n---\n{updated}");
+    assert_eq!(
+        device_count, 5,
+        "expected -device with MAC in all 5 case branches, got {device_count}\n---\n{updated}"
+    );
 
     // No stray remnants of the original user-mode backend.
-    assert!(!updated.contains("-netdev user,id=net0"), "old user-mode -netdev not stripped:\n{updated}");
+    assert!(
+        !updated.contains("-netdev user,id=net0"),
+        "old user-mode -netdev not stripped:\n{updated}"
+    );
 
     // Non-network args surrounding the network block must survive the rewrite.
-    assert_eq!(updated.matches("-usb").count(), 5, "trailing -usb arg must survive in all 5 branches:\n{updated}");
-    assert_eq!(updated.matches("-device usb-tablet").count(), 5, "trailing -device usb-tablet must survive in all 5 branches:\n{updated}");
-    assert_eq!(updated.matches("-device intel-hda").count(), 5, "preceding -device intel-hda must survive in all 5 branches:\n{updated}");
+    assert_eq!(
+        updated.matches("-usb").count(),
+        5,
+        "trailing -usb arg must survive in all 5 branches:\n{updated}"
+    );
+    assert_eq!(
+        updated.matches("-device usb-tablet").count(),
+        5,
+        "trailing -device usb-tablet must survive in all 5 branches:\n{updated}"
+    );
+    assert_eq!(
+        updated.matches("-device intel-hda").count(),
+        5,
+        "preceding -device intel-hda must survive in all 5 branches:\n{updated}"
+    );
 }
 
 #[test]
@@ -599,13 +883,25 @@ fn test_update_network_in_script_strips_when_model_none() {
     // leave each branch's qemu command syntactically valid (no dangling
     // backslash-continuations that would swallow `;;`).
     let vm = TestVmDir::new("issue38-none");
-    std::fs::write(vm.path().join("launch.sh"), fixture_launch_sh_five_branch_user_net()).unwrap();
+    std::fs::write(
+        vm.path().join("launch.sh"),
+        fixture_launch_sh_five_branch_user_net(),
+    )
+    .unwrap();
 
     update_network_in_script(vm.path(), "none", "user", None, &[], None).unwrap();
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
-    assert_eq!(updated.matches("-netdev").count(), 0, "no -netdev lines should remain:\n{updated}");
-    assert_eq!(updated.matches("virtio-net-pci").count(), 0, "no -device virtio-net-pci lines should remain:\n{updated}");
+    assert_eq!(
+        updated.matches("-netdev").count(),
+        0,
+        "no -netdev lines should remain:\n{updated}"
+    );
+    assert_eq!(
+        updated.matches("virtio-net-pci").count(),
+        0,
+        "no -device virtio-net-pci lines should remain:\n{updated}"
+    );
 
     // Every line that immediately precedes a `;;` terminator must end without
     // a trailing backslash, otherwise bash would parse `;;` as a continuation.
@@ -635,17 +931,15 @@ fn test_update_network_in_script_originally_no_network_falls_back() {
         .join("\n");
     std::fs::write(vm.path().join("launch.sh"), stripped).unwrap();
 
-    update_network_in_script(
-        vm.path(),
-        "virtio",
-        "bridge",
-        Some("qemubr0"),
-        &[],
-        None,
-    )
-    .unwrap();
+    update_network_in_script(vm.path(), "virtio", "bridge", Some("qemubr0"), &[], None).unwrap();
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
-    assert!(updated.contains("-netdev bridge,id=net0,br=qemubr0"), "fallback should still inject -netdev:\n{updated}");
-    assert!(updated.contains("-device virtio-net-pci,netdev=net0"), "fallback should still inject -device:\n{updated}");
+    assert!(
+        updated.contains("-netdev bridge,id=net0,br=qemubr0"),
+        "fallback should still inject -netdev:\n{updated}"
+    );
+    assert!(
+        updated.contains("-device virtio-net-pci,netdev=net0"),
+        "fallback should still inject -device:\n{updated}"
+    );
 }

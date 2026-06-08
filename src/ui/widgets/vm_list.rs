@@ -112,19 +112,32 @@ impl<'a> VmListWidget<'a> {
         let title = format!(" VMs ({}) ", self.filtered_indices.len());
 
         // Build hierarchical structure
-        let vm_hierarchy = build_vm_hierarchy(self.vms, self.filtered_indices, self.hierarchy, self.metadata);
+        let vm_hierarchy = build_vm_hierarchy(
+            self.vms,
+            self.filtered_indices,
+            self.hierarchy,
+            self.metadata,
+        );
 
         // Available width for list items: area minus borders minus highlight symbol ("→ ")
         let inner_width = area.width.saturating_sub(2 + 3) as usize;
 
         // Render as tree with proper indices
-        let (items, index_map) = render_hierarchy_items(&vm_hierarchy, self.hierarchy, self.metadata, self.running_vms, self.stopping_vms, inner_width);
+        let (items, index_map) = render_hierarchy_items(
+            &vm_hierarchy,
+            self.hierarchy,
+            self.metadata,
+            self.running_vms,
+            self.stopping_vms,
+            inner_width,
+        );
 
         // Get the filtered_idx for the currently selected visual position
         let selected_filtered_idx = self.visual_order.get(self.selected).copied();
 
         // Find the selected item's position in the rendered list
-        let selected_pos = index_map.iter()
+        let selected_pos = index_map
+            .iter()
             .position(|&idx| idx == selected_filtered_idx)
             .unwrap_or(0);
 
@@ -195,8 +208,14 @@ fn build_vm_hierarchy<'a>(
                     // Use os_profile for metadata lookup if available
                     let id_a = a.vm.os_profile.as_deref().unwrap_or(&a.vm.id);
                     let id_b = b.vm.os_profile.as_deref().unwrap_or(&b.vm.id);
-                    let date_a = metadata.get(id_a).map(|i| i.release_date.as_str()).unwrap_or("");
-                    let date_b = metadata.get(id_b).map(|i| i.release_date.as_str()).unwrap_or("");
+                    let date_a = metadata
+                        .get(id_a)
+                        .map(|i| i.release_date.as_str())
+                        .unwrap_or("");
+                    let date_b = metadata
+                        .get(id_b)
+                        .map(|i| i.release_date.as_str())
+                        .unwrap_or("");
 
                     match (date_a.is_empty(), date_b.is_empty()) {
                         (true, true) => {
@@ -265,14 +284,17 @@ fn render_hierarchy_items<'a>(
                 Span::raw(format!("{} ", family.icon)),
                 Span::styled(
                     &family.name,
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ])));
             index_map.push(None); // Headers are not selectable
 
             // Get subcategories for this family in order
             let family_subcats: Vec<_> = hierarchy.subcategories_for_family(&family.id);
-            let subcat_count = family_subcats.iter()
+            let subcat_count = family_subcats
+                .iter()
                 .filter(|s| subcats.contains_key(&s.id))
                 .count();
             let mut subcat_rendered = 0;
@@ -284,12 +306,10 @@ fn render_hierarchy_items<'a>(
                     let subcat_branch = if is_last_subcat { "└─" } else { "├─" };
 
                     // Subcategory header
-                    items.push(ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!("  {} {}", subcat_branch, subcat.name),
-                            Style::default().fg(Color::Magenta),
-                        ),
-                    ])));
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        format!("  {} {}", subcat_branch, subcat.name),
+                        Style::default().fg(Color::Magenta),
+                    )])));
                     index_map.push(None); // Headers are not selectable
 
                     let vm_count = vm_entries.len();
@@ -311,7 +331,11 @@ fn render_hierarchy_items<'a>(
 
                         if is_stopping || is_running {
                             let padding = inner_width.saturating_sub(used_width + 2);
-                            let color = if is_stopping { Color::Yellow } else { Color::Green };
+                            let color = if is_stopping {
+                                Color::Yellow
+                            } else {
+                                Color::Green
+                            };
                             items.push(ListItem::new(Line::from(vec![
                                 Span::styled(prefix, Style::default().fg(Color::DarkGray)),
                                 Span::styled(display_name, Style::default().fg(Color::White)),

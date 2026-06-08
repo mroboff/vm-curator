@@ -11,7 +11,10 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use crate::app::App;
 use crate::config::Config;
 use crate::fs;
-use crate::hardware::{check_multi_gpu_passthrough_status, check_single_gpu_support, MultiGpuPassthroughStatus, LookingGlassConfig, SingleGpuSupport};
+use crate::hardware::{
+    check_multi_gpu_passthrough_status, check_single_gpu_support, LookingGlassConfig,
+    MultiGpuPassthroughStatus, SingleGpuSupport,
+};
 use crate::vm::single_gpu_scripts::{run_system_setup, SystemSetupResult};
 
 /// GPU passthrough validation result
@@ -108,7 +111,9 @@ impl SettingsItem {
             SettingsItem::EnableMultiGpuPassthrough => String::new(), // Radio button, no value display
             SettingsItem::MultiGpuIvshmemSize => config.default_ivshmem_size_mb.to_string(),
             SettingsItem::MultiGpuShowWarnings => bool_to_yes_no(config.show_gpu_warnings),
-            SettingsItem::MultiGpuAutoLaunchLookingGlass => bool_to_yes_no(config.looking_glass_auto_launch),
+            SettingsItem::MultiGpuAutoLaunchLookingGlass => {
+                bool_to_yes_no(config.looking_glass_auto_launch)
+            }
             SettingsItem::EnableSingleGpuPassthrough => String::new(), // Radio button, no value display
             SettingsItem::SingleGpuRunSetup => String::new(), // Action button, no value display
             SettingsItem::SingleGpuAutoTty => bool_to_yes_no(config.single_gpu_auto_tty),
@@ -177,7 +182,9 @@ impl SettingsItem {
             SettingsItem::GpuPassthroughDisabled => "gpu_passthrough_disabled",
             SettingsItem::EnableMultiGpuPassthrough => "enable_multi_gpu_passthrough",
             SettingsItem::MultiGpuIvshmemSize => "multi_gpu_ivshmem_size",
-            SettingsItem::MultiGpuShowWarnings | SettingsItem::SingleGpuShowWarnings => "show_gpu_warnings",
+            SettingsItem::MultiGpuShowWarnings | SettingsItem::SingleGpuShowWarnings => {
+                "show_gpu_warnings"
+            }
             SettingsItem::MultiGpuAutoLaunchLookingGlass => "auto_launch_looking_glass",
             SettingsItem::EnableSingleGpuPassthrough => "enable_single_gpu_passthrough",
             SettingsItem::SingleGpuRunSetup => "single_gpu_run_setup",
@@ -227,7 +234,10 @@ fn build_visible_items(config: &Config) -> Vec<VisibleItem> {
     if config.enable_multi_gpu_passthrough {
         items.push(make_visible(SettingsItem::MultiGpuIvshmemSize, 2));
         items.push(make_visible(SettingsItem::MultiGpuShowWarnings, 2));
-        items.push(make_visible(SettingsItem::MultiGpuAutoLaunchLookingGlass, 2));
+        items.push(make_visible(
+            SettingsItem::MultiGpuAutoLaunchLookingGlass,
+            2,
+        ));
     }
 
     // Single-GPU option (radio button)
@@ -294,8 +304,8 @@ pub fn render(app: &App, frame: &mut Frame) {
     // Right panel: help text + optional validation
     let right_constraints = if show_validation {
         vec![
-            Constraint::Min(6),      // Help text
-            Constraint::Length(10),  // Validation panel
+            Constraint::Min(6),     // Help text
+            Constraint::Length(10), // Validation panel
         ]
     } else {
         vec![Constraint::Min(6)]
@@ -348,7 +358,9 @@ fn render_settings_list(app: &App, frame: &mut Frame, area: Rect, visible_items:
                     SettingsItem::GpuPassthroughDisabled => {
                         !app.config.enable_multi_gpu_passthrough && !app.config.single_gpu_enabled
                     }
-                    SettingsItem::EnableMultiGpuPassthrough => app.config.enable_multi_gpu_passthrough,
+                    SettingsItem::EnableMultiGpuPassthrough => {
+                        app.config.enable_multi_gpu_passthrough
+                    }
                     SettingsItem::EnableSingleGpuPassthrough => app.config.single_gpu_enabled,
                     _ => false,
                 };
@@ -372,9 +384,13 @@ fn render_settings_list(app: &App, frame: &mut Frame, area: Rect, visible_items:
             };
 
             let style = if vi.is_header {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if vi.is_action {
                 // Action buttons are styled like links
                 Style::default().fg(Color::Cyan)
@@ -389,19 +405,29 @@ fn render_settings_list(app: &App, frame: &mut Frame, area: Rect, visible_items:
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE));
+    let list = List::new(items).block(Block::default().borders(Borders::NONE));
     frame.render_widget(list, area);
 }
 
 /// Render the contextual help panel
-fn render_help_panel(frame: &mut Frame, area: Rect, current_item: Option<&SettingsItem>, help_store: &crate::metadata::SettingsHelpStore) {
-    let help_key = current_item.map(|item| item.help_key()).unwrap_or("default");
+fn render_help_panel(
+    frame: &mut Frame,
+    area: Rect,
+    current_item: Option<&SettingsItem>,
+    help_store: &crate::metadata::SettingsHelpStore,
+) {
+    let help_key = current_item
+        .map(|item| item.help_key())
+        .unwrap_or("default");
     let (title, description) = help_store.get_or_default(help_key);
 
     let help_block = Block::default()
         .title(format!(" {} ", title))
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -414,7 +440,11 @@ fn render_help_panel(frame: &mut Frame, area: Rect, current_item: Option<&Settin
 }
 
 /// Render the GPU validation panel
-fn render_validation_panel(frame: &mut Frame, area: Rect, validation: &Option<GpuValidationResult>) {
+fn render_validation_panel(
+    frame: &mut Frame,
+    area: Rect,
+    validation: &Option<GpuValidationResult>,
+) {
     let Some(result) = validation else {
         return;
     };
@@ -432,11 +462,19 @@ fn render_validation_panel(frame: &mut Frame, area: Rect, validation: &Option<Gp
 /// Render multi-GPU validation status
 fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuPassthroughStatus) {
     let is_ready = status.is_ready();
-    let border_color = if is_ready { Color::Green } else { Color::Yellow };
+    let border_color = if is_ready {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
 
     let block = Block::default()
         .title(" Multi-GPU Status ")
-        .title_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
@@ -447,7 +485,11 @@ fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuP
 
     // IOMMU check
     let iommu_icon = if status.iommu_enabled { "[+]" } else { "[-]" };
-    let iommu_style = if status.iommu_enabled { Color::Green } else { Color::Red };
+    let iommu_style = if status.iommu_enabled {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::styled(iommu_icon, Style::default().fg(iommu_style)),
         Span::raw(" IOMMU enabled"),
@@ -455,7 +497,11 @@ fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuP
 
     // VFIO check
     let vfio_icon = if status.vfio_loaded { "[+]" } else { "[-]" };
-    let vfio_style = if status.vfio_loaded { Color::Green } else { Color::Red };
+    let vfio_style = if status.vfio_loaded {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::styled(vfio_icon, Style::default().fg(vfio_style)),
         Span::raw(" VFIO modules loaded"),
@@ -490,12 +536,16 @@ fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuP
     if is_ready {
         lines.push(Line::from(Span::styled(
             "Ready for passthrough",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "Not ready",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )));
         // Show first error as hint
         if let Some(error) = status.errors.first() {
@@ -521,11 +571,19 @@ fn render_multi_gpu_validation(frame: &mut Frame, area: Rect, status: &MultiGpuP
 /// Render single-GPU validation status
 fn render_single_gpu_validation(frame: &mut Frame, area: Rect, support: &SingleGpuSupport) {
     let is_ready = support.is_supported();
-    let border_color = if is_ready { Color::Green } else { Color::Yellow };
+    let border_color = if is_ready {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
 
     let block = Block::default()
         .title(" Single GPU Status ")
-        .title_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
@@ -536,7 +594,11 @@ fn render_single_gpu_validation(frame: &mut Frame, area: Rect, support: &SingleG
 
     // IOMMU check
     let iommu_icon = if support.iommu_enabled { "[+]" } else { "[-]" };
-    let iommu_style = if support.iommu_enabled { Color::Green } else { Color::Red };
+    let iommu_style = if support.iommu_enabled {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::styled(iommu_icon, Style::default().fg(iommu_style)),
         Span::raw(" IOMMU enabled"),
@@ -544,7 +606,11 @@ fn render_single_gpu_validation(frame: &mut Frame, area: Rect, support: &SingleG
 
     // VFIO check
     let vfio_icon = if support.vfio_available { "[+]" } else { "[-]" };
-    let vfio_style = if support.vfio_available { Color::Green } else { Color::Red };
+    let vfio_style = if support.vfio_available {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::styled(vfio_icon, Style::default().fg(vfio_style)),
         Span::raw(" VFIO available"),
@@ -561,7 +627,11 @@ fn render_single_gpu_validation(frame: &mut Frame, area: Rect, support: &SingleG
 
     // Single GPU confirmation (informational - yellow if multiple GPUs detected)
     let single_icon = if support.has_single_gpu { "[+]" } else { "[!]" };
-    let single_style = if support.has_single_gpu { Color::Green } else { Color::Yellow };
+    let single_style = if support.has_single_gpu {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
     let single_text = if support.has_single_gpu {
         " Single GPU confirmed"
     } else {
@@ -588,12 +658,16 @@ fn render_single_gpu_validation(frame: &mut Frame, area: Rect, support: &SingleG
     if is_ready {
         lines.push(Line::from(Span::styled(
             "Ready for passthrough",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "Not ready",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )));
     }
 
@@ -613,10 +687,19 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect, visible_items: &[
 
     // Get help text for current item
     let current_item = visible_items.get(app.settings_selected).map(|vi| &vi.item);
-    let is_header = visible_items.get(app.settings_selected).map(|vi| vi.is_header).unwrap_or(false);
-    let is_radio = visible_items.get(app.settings_selected).map(|vi| vi.is_radio).unwrap_or(false);
+    let is_header = visible_items
+        .get(app.settings_selected)
+        .map(|vi| vi.is_header)
+        .unwrap_or(false);
+    let is_radio = visible_items
+        .get(app.settings_selected)
+        .map(|vi| vi.is_radio)
+        .unwrap_or(false);
 
-    let is_action = visible_items.get(app.settings_selected).map(|vi| vi.is_action).unwrap_or(false);
+    let is_action = visible_items
+        .get(app.settings_selected)
+        .map(|vi| vi.is_action)
+        .unwrap_or(false);
 
     let key_hints = if app.settings_editing {
         "[Enter] Save  [Esc] Cancel"
@@ -753,18 +836,17 @@ fn toggle_radio(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
             app.config.enable_multi_gpu_passthrough = true;
             app.config.single_gpu_enabled = false;
             // Run validation
-            app.settings_gpu_validation = Some(
-                GpuValidationResult::MultiGpu(check_multi_gpu_passthrough_status())
-            );
+            app.settings_gpu_validation = Some(GpuValidationResult::MultiGpu(
+                check_multi_gpu_passthrough_status(),
+            ));
         }
         SettingsItem::EnableSingleGpuPassthrough => {
             // Enable single-GPU, disable multi-GPU
             app.config.single_gpu_enabled = true;
             app.config.enable_multi_gpu_passthrough = false;
             // Run validation
-            app.settings_gpu_validation = Some(
-                GpuValidationResult::SingleGpu(check_single_gpu_support())
-            );
+            app.settings_gpu_validation =
+                Some(GpuValidationResult::SingleGpu(check_single_gpu_support()));
         }
         _ => {}
     }
@@ -864,7 +946,10 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
                 };
 
                 if !path.is_dir() {
-                    app.set_status(format!("Path does not exist or is not a directory: {}", path.display()));
+                    app.set_status(format!(
+                        "Path does not exist or is not a directory: {}",
+                        path.display()
+                    ));
                     return Ok(());
                 }
 

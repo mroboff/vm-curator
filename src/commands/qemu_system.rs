@@ -54,10 +54,7 @@ pub fn is_kvm_available() -> bool {
 /// Runs `<emulator> -display help` and parses the output to get
 /// the list of supported display backends (e.g., gtk, sdl, spice-app, vnc).
 pub fn get_supported_displays(emulator: &str) -> Vec<String> {
-    let output = match Command::new(emulator)
-        .args(["-display", "help"])
-        .output()
-    {
+    let output = match Command::new(emulator).args(["-display", "help"]).output() {
         Ok(o) => o,
         Err(_) => return Vec::new(),
     };
@@ -224,10 +221,7 @@ fn is_bridge_helper_configured(path: &Path) -> bool {
     }
 
     // Check capabilities via getcap
-    if let Ok(output) = Command::new("getcap")
-        .arg(path)
-        .output()
-    {
+    if let Ok(output) = Command::new("getcap").arg(path).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if stdout.contains("cap_net_admin") {
             return true;
@@ -287,7 +281,15 @@ For a short list of the suboptions for each display, see the top-level -help out
         let parsed = parse_display_help(raw);
         assert_eq!(
             parsed,
-            vec!["none", "gtk", "sdl", "egl-headless", "curses", "spice-app", "dbus"]
+            vec![
+                "none",
+                "gtk",
+                "sdl",
+                "egl-headless",
+                "curses",
+                "spice-app",
+                "dbus"
+            ]
         );
     }
 

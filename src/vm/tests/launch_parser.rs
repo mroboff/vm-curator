@@ -21,14 +21,8 @@ fn test_extract_emulator() {
 
 #[test]
 fn test_extract_vga() {
-    assert_eq!(
-        extract_vga("-vga cirrus -m 512"),
-        Some(VgaType::Cirrus)
-    );
-    assert_eq!(
-        extract_vga("-vga virtio"),
-        Some(VgaType::Virtio)
-    );
+    assert_eq!(extract_vga("-vga cirrus -m 512"), Some(VgaType::Cirrus));
+    assert_eq!(extract_vga("-vga virtio"), Some(VgaType::Virtio));
 }
 
 #[test]
@@ -63,14 +57,16 @@ fn test_extract_port_forwards() {
 
 #[test]
 fn test_extract_network_passt() {
-    let content = "qemu-system-x86_64 \\\n  -netdev passt,id=net0 \\\n  -device virtio-net-pci,netdev=net0";
+    let content =
+        "qemu-system-x86_64 \\\n  -netdev passt,id=net0 \\\n  -device virtio-net-pci,netdev=net0";
     let config = extract_network(content).unwrap();
     assert_eq!(config.backend, NetworkBackend::Passt);
 }
 
 #[test]
 fn test_extract_network_bridge() {
-    let content = "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device e1000,netdev=net0";
+    let content =
+        "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device e1000,netdev=net0";
     let config = extract_network(content).unwrap();
     assert_eq!(config.backend, NetworkBackend::Bridge("virbr0".to_string()));
     assert_eq!(config.bridge, Some("virbr0".to_string()));
@@ -177,7 +173,12 @@ qemu-system-m68k \
     let config = parse_launch_script(&script_path, content).unwrap();
     assert!(config.bios_path.is_some(), "Should have bios_path");
     assert!(
-        config.bios_path.as_ref().unwrap().to_string_lossy().contains("MacROM.bin"),
+        config
+            .bios_path
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+            .contains("MacROM.bin"),
         "bios_path should contain MacROM.bin"
     );
     // Should NOT trigger UEFI detection

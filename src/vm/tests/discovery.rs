@@ -36,19 +36,40 @@ fn test_linux_display_names() {
     assert_eq!(format_os_display_name("linux-arch"), "Arch Linux (rolling)");
     assert_eq!(format_os_display_name("linux-ubuntu-2404"), "Ubuntu 2404");
     // SuSE naming
-    assert_eq!(format_os_display_name("linux-suse"), "openSUSE Tumbleweed (rolling)");
+    assert_eq!(
+        format_os_display_name("linux-suse"),
+        "openSUSE Tumbleweed (rolling)"
+    );
     assert_eq!(format_os_display_name("linux-suse-7"), "SuSE Linux 7");
-    assert_eq!(format_os_display_name("linux-opensuse-leap-15"), "openSUSE Leap 15");
+    assert_eq!(
+        format_os_display_name("linux-opensuse-leap-15"),
+        "openSUSE Leap 15"
+    );
 }
 
 #[test]
 fn test_linux_display_names_with_suffix() {
     // Rolling distros with numeric suffixes should display the same as originals
-    assert_eq!(format_os_display_name("linux-cachyos-2"), "CachyOS (rolling)");
-    assert_eq!(format_os_display_name("linux-cachyos-3"), "CachyOS (rolling)");
-    assert_eq!(format_os_display_name("linux-arch-2"), "Arch Linux (rolling)");
-    assert_eq!(format_os_display_name("linux-gentoo-2"), "Gentoo Linux (rolling)");
-    assert_eq!(format_os_display_name("linux-manjaro-3"), "Manjaro Linux (rolling)");
+    assert_eq!(
+        format_os_display_name("linux-cachyos-2"),
+        "CachyOS (rolling)"
+    );
+    assert_eq!(
+        format_os_display_name("linux-cachyos-3"),
+        "CachyOS (rolling)"
+    );
+    assert_eq!(
+        format_os_display_name("linux-arch-2"),
+        "Arch Linux (rolling)"
+    );
+    assert_eq!(
+        format_os_display_name("linux-gentoo-2"),
+        "Gentoo Linux (rolling)"
+    );
+    assert_eq!(
+        format_os_display_name("linux-manjaro-3"),
+        "Manjaro Linux (rolling)"
+    );
     // Versioned distros keep version numbers (which may look like suffixes)
     assert_eq!(format_os_display_name("linux-fedora-2"), "Fedora Linux 2");
     assert_eq!(format_os_display_name("linux-ubuntu-2"), "Ubuntu 2");

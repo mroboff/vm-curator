@@ -24,7 +24,9 @@ pub fn render(frame: &mut Frame) {
     let help_text = vec![
         Line::from(Span::styled(
             "Navigation",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         key_line("j / Down", "Move selection down"),
@@ -34,7 +36,9 @@ pub fn render(frame: &mut Frame) {
         Line::from(""),
         Line::from(Span::styled(
             "Actions",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         key_line("m", "Open Management menu"),
@@ -44,14 +48,18 @@ pub fn render(frame: &mut Frame) {
         Line::from(""),
         Line::from(Span::styled(
             "Management Menu",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         key_line("Network", "Backend, port forwarding"),
         Line::from(""),
         Line::from(Span::styled(
             "General",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         key_line("?", "Show this help"),
@@ -69,10 +77,7 @@ pub fn render(frame: &mut Frame) {
 
 fn key_line<'a>(key: &'a str, description: &'a str) -> Line<'a> {
     Line::from(vec![
-        Span::styled(
-            format!("  {:12}", key),
-            Style::default().fg(Color::Green),
-        ),
+        Span::styled(format!("  {:12}", key), Style::default().fg(Color::Green)),
         Span::raw(description),
     ])
 }

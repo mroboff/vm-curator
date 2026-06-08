@@ -120,8 +120,7 @@ impl Config {
                 .with_context(|| format!("Failed to create config directory {:?}", parent))?;
         }
 
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize config")?;
+        let content = toml::to_string_pretty(self).context("Failed to serialize config")?;
         std::fs::write(&config_path, content)
             .with_context(|| format!("Failed to write config to {:?}", config_path))?;
 

@@ -77,7 +77,6 @@ impl UsbDevice {
             format!("USB Device {:04x}:{:04x}", self.vendor_id, self.product_id)
         }
     }
-
 }
 
 /// Enumerate USB devices using libudev
@@ -87,7 +86,10 @@ pub fn enumerate_usb_devices() -> Result<Vec<UsbDevice>> {
         Ok(devs) => devs,
         Err(e) => {
             // Log the fallback for debugging purposes
-            eprintln!("vm-curator: libudev enumeration failed ({}), falling back to sysfs", e);
+            eprintln!(
+                "vm-curator: libudev enumeration failed ({}), falling back to sysfs",
+                e
+            );
             enumerate_via_sysfs().unwrap_or_default()
         }
     };
@@ -103,10 +105,11 @@ fn enumerate_via_udev() -> Result<Vec<UsbDevice>> {
     use libudev::Context;
 
     let context = Context::new().context("Failed to create udev context")?;
-    let mut enumerator = libudev::Enumerator::new(&context)
-        .context("Failed to create udev enumerator")?;
+    let mut enumerator =
+        libudev::Enumerator::new(&context).context("Failed to create udev enumerator")?;
 
-    enumerator.match_subsystem("usb")
+    enumerator
+        .match_subsystem("usb")
         .context("Failed to match USB subsystem")?;
 
     let mut devices = Vec::new();
@@ -286,7 +289,9 @@ pub enum UdevInstallResult {
 pub fn generate_udev_rules(devices: &[UsbDevice]) -> String {
     let mut rules = String::new();
     rules.push_str("# USB Passthrough rules for QEMU (managed by vm-curator)\n");
-    rules.push_str("# These rules allow non-root users to access USB devices for VM passthrough\n\n");
+    rules.push_str(
+        "# These rules allow non-root users to access USB devices for VM passthrough\n\n",
+    );
 
     // Collect unique vendor IDs to avoid duplicate rules
     let mut seen_vendors = std::collections::HashSet::new();
@@ -366,7 +371,9 @@ pub fn install_udev_rules(devices: &[UsbDevice]) -> UdevInstallResult {
             }
         }
         Some(false) => UdevInstallResult::PermissionDenied,
-        None => UdevInstallResult::Error("No suitable privilege escalation method found".to_string()),
+        None => {
+            UdevInstallResult::Error("No suitable privilege escalation method found".to_string())
+        }
     }
 }
 
@@ -374,7 +381,13 @@ fn try_pkexec_install(temp_path: &str, rules_path: &str) -> Option<bool> {
     use std::process::Command;
 
     // Check if pkexec is available
-    if Command::new("which").arg("pkexec").output().ok()?.status.success() {
+    if Command::new("which")
+        .arg("pkexec")
+        .output()
+        .ok()?
+        .status
+        .success()
+    {
         // Use pkexec to copy the file
         let status = Command::new("pkexec")
             .args(["cp", temp_path, rules_path])
@@ -391,7 +404,13 @@ fn try_sudo_install(temp_path: &str, rules_path: &str) -> Option<bool> {
     use std::process::{Command, Stdio};
 
     // Check if sudo is available
-    if !Command::new("which").arg("sudo").output().ok()?.status.success() {
+    if !Command::new("which")
+        .arg("sudo")
+        .output()
+        .ok()?
+        .status
+        .success()
+    {
         return None;
     }
 
@@ -425,10 +444,7 @@ fn reload_udev_rules() -> bool {
     }
 
     // Fall back to sudo
-    if let Ok(status) = Command::new("sudo")
-        .args(["sh", "-c", reload_cmd])
-        .status()
-    {
+    if let Ok(status) = Command::new("sudo").args(["sh", "-c", reload_cmd]).status() {
         return status.success();
     }
 

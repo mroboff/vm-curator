@@ -1,9 +1,9 @@
 //! Wizard and import state types, extracted from app.rs so they can be
 //! exposed via the library target without pulling in the TUI (ratatui/crossterm).
 
-use std::path::PathBuf;
-use anyhow::Result;
 use crate::vm::qemu_config::{PortForward, PortProtocol};
+use anyhow::Result;
+use std::path::PathBuf;
 
 /// Action to take with an existing disk when using it for a new VM
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -156,9 +156,10 @@ impl Default for WizardQemuConfig {
 impl WizardQemuConfig {
     /// Create from a QEMU profile
     pub fn from_profile(profile: &crate::metadata::QemuProfile) -> Self {
-        let gl_acceleration = profile.extra_args.iter().any(|arg|
-            arg.contains("virtio-vga-gl") || arg.contains("gl=on")
-        );
+        let gl_acceleration = profile
+            .extra_args
+            .iter()
+            .any(|arg| arg.contains("virtio-vga-gl") || arg.contains("gl=on"));
 
         Self {
             emulator: profile.emulator.clone(),
@@ -281,10 +282,7 @@ impl Default for CreateWizardState {
             os_list_scroll: 0,
             os_filter: String::new(),
             selected_category: 0,
-            expanded_categories: vec![
-                "windows".to_string(),
-                "linux".to_string(),
-            ],
+            expanded_categories: vec!["windows".to_string(), "linux".to_string()],
             os_list_selected: 0,
             error_message: None,
             editing_field: None,

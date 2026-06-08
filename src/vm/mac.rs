@@ -23,7 +23,10 @@ pub fn generate_random_mac() -> String {
         bytes[1] = ((nanos >> 8) & 0xff) as u8;
         bytes[2] = ((nanos >> 16) & 0xff) as u8;
     }
-    format!("52:54:00:{:02x}:{:02x}:{:02x}", bytes[0], bytes[1], bytes[2])
+    format!(
+        "52:54:00:{:02x}:{:02x}:{:02x}",
+        bytes[0], bytes[1], bytes[2]
+    )
 }
 
 /// Validate a MAC address in canonical colon-separated hex form
@@ -33,9 +36,9 @@ pub fn is_valid_mac(s: &str) -> bool {
     if parts.len() != 6 {
         return false;
     }
-    parts.iter().all(|p| {
-        p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit())
-    })
+    parts
+        .iter()
+        .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]

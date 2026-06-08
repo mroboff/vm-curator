@@ -14,9 +14,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Title
-            Constraint::Min(10),    // Main content
-            Constraint::Length(3),  // Status/help bar
+            Constraint::Length(3), // Title
+            Constraint::Min(10),   // Main content
+            Constraint::Length(3), // Status/help bar
         ])
         .split(area);
 
@@ -33,7 +33,8 @@ pub fn render(app: &App, frame: &mut Frame) {
     VmListWidget::new(app).render(main_chunks[0], frame.buffer_mut());
 
     // Render ASCII art and info
-    let vm_name = app.selected_vm()
+    let vm_name = app
+        .selected_vm()
         .map(|vm| vm.display_name())
         .unwrap_or_else(|| "No VM selected".to_string());
 
@@ -116,7 +117,9 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
     if app.status_message.is_none() {
         if let Some((id, sent_at)) = app.stopping_vms.iter().next() {
             let elapsed = sent_at.elapsed().as_secs();
-            let vm_name = app.vms.iter()
+            let vm_name = app
+                .vms
+                .iter()
                 .find(|vm| &vm.id == id)
                 .map(|vm| vm.display_name())
                 .unwrap_or_else(|| id.clone());
@@ -138,10 +141,7 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
     // Add status message if present (overrides everything)
     if let Some(ref msg) = app.status_message {
         hints.clear();
-        hints.push(Span::styled(
-            msg.clone(),
-            Style::default().fg(Color::Green),
-        ));
+        hints.push(Span::styled(msg.clone(), Style::default().fg(Color::Green)));
     }
 
     let help = Paragraph::new(Line::from(hints))

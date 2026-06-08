@@ -41,13 +41,13 @@ pub fn render(app: &App, frame: &mut Frame) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(6),  // System status
-            Constraint::Length(1),  // Separator
-            Constraint::Length(5),  // GPU info
-            Constraint::Length(1),  // Separator
-            Constraint::Length(4),  // Looking Glass config
-            Constraint::Min(1),     // Spacer
-            Constraint::Length(2),  // Help
+            Constraint::Length(6), // System status
+            Constraint::Length(1), // Separator
+            Constraint::Length(5), // GPU info
+            Constraint::Length(1), // Separator
+            Constraint::Length(4), // Looking Glass config
+            Constraint::Min(1),    // Spacer
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
@@ -83,12 +83,18 @@ fn render_system_status(frame: &mut Frame, area: Rect) {
     // Title
     lines.push(Line::styled(
         "System Requirements:",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // IOMMU check
     let iommu_icon = if status.iommu_enabled { "[+]" } else { "[-]" };
-    let iommu_style = if status.iommu_enabled { Color::Green } else { Color::Red };
+    let iommu_style = if status.iommu_enabled {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(iommu_icon, Style::default().fg(iommu_style)),
@@ -97,7 +103,11 @@ fn render_system_status(frame: &mut Frame, area: Rect) {
 
     // VFIO check
     let vfio_icon = if status.vfio_loaded { "[+]" } else { "[-]" };
-    let vfio_style = if status.vfio_loaded { Color::Green } else { Color::Red };
+    let vfio_style = if status.vfio_loaded {
+        Color::Green
+    } else {
+        Color::Red
+    };
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(vfio_icon, Style::default().fg(vfio_style)),
@@ -145,11 +155,14 @@ fn render_gpu_info(app: &App, frame: &mut Frame, area: Rect) {
 
     lines.push(Line::styled(
         "Selected GPUs for Passthrough:",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // Get selected GPUs from PCI devices (selected_pci_devices contains indices)
-    let selected_gpus: Vec<_> = app.selected_pci_devices
+    let selected_gpus: Vec<_> = app
+        .selected_pci_devices
         .iter()
         .filter_map(|&idx| app.pci_devices.get(idx))
         .filter(|d| d.is_gpu())
@@ -194,7 +207,9 @@ fn render_looking_glass_config(app: &App, frame: &mut Frame, area: Rect) {
 
     lines.push(Line::styled(
         "Looking Glass Configuration:",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // IVSHMEM size
@@ -211,7 +226,11 @@ fn render_looking_glass_config(app: &App, frame: &mut Frame, area: Rect) {
     ]));
 
     // Auto-launch
-    let auto_launch = if app.config.looking_glass_auto_launch { "Yes" } else { "No" };
+    let auto_launch = if app.config.looking_glass_auto_launch {
+        "Yes"
+    } else {
+        "No"
+    };
     lines.push(Line::from(vec![
         Span::raw("  Auto-launch client: "),
         Span::styled(auto_launch, Style::default().fg(Color::White)),

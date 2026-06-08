@@ -77,7 +77,8 @@ impl MetadataStore {
             if path.extension().map(|e| e == "toml").unwrap_or(false) {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if let Ok(info) = toml::from_str::<OsInfo>(&content) {
-                        let id = path.file_stem()
+                        let id = path
+                            .file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or("")
                             .to_string();
@@ -174,7 +175,8 @@ fn guess_os_details(vm_id: &str) -> (String, String) {
     let id = vm_id.to_lowercase();
 
     if id.contains("windows") {
-        let arch = if id.contains("11") || id.contains("10") || id.contains("8") || id.contains("7") {
+        let arch = if id.contains("11") || id.contains("10") || id.contains("8") || id.contains("7")
+        {
             "x86_64"
         } else {
             "i386"

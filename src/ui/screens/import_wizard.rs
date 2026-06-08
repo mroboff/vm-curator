@@ -59,7 +59,7 @@ fn render_step_select_source(state: &ImportWizardState, frame: &mut Frame, area:
         .constraints([
             Constraint::Length(2), // Description
             Constraint::Length(1), // Spacer
-            Constraint::Min(8),   // Options
+            Constraint::Min(8),    // Options
             Constraint::Length(2), // Help
         ])
         .split(inner);
@@ -69,9 +69,18 @@ fn render_step_select_source(state: &ImportWizardState, frame: &mut Frame, area:
     frame.render_widget(desc, chunks[0]);
 
     let options: &[(&str, &str)] = &[
-        ("libvirt (XML)", "Import from libvirt/virt-manager domain XML"),
-        ("quickemu (.conf)", "Import from quickemu configuration file"),
-        ("Browse for config file...", "Browse filesystem for .xml or .conf file"),
+        (
+            "libvirt (XML)",
+            "Import from libvirt/virt-manager domain XML",
+        ),
+        (
+            "quickemu (.conf)",
+            "Import from quickemu configuration file",
+        ),
+        (
+            "Browse for config file...",
+            "Browse filesystem for .xml or .conf file",
+        ),
     ];
 
     let items: Vec<ListItem> = options
@@ -135,7 +144,7 @@ fn render_step_select_vm(state: &ImportWizardState, frame: &mut Frame, area: Rec
         .constraints([
             Constraint::Length(1), // Description
             Constraint::Length(1), // Spacer
-            Constraint::Min(8),   // VM list
+            Constraint::Min(8),    // VM list
             Constraint::Length(2), // Help
         ])
         .split(inner);
@@ -237,7 +246,7 @@ fn render_step_warnings(state: &ImportWizardState, frame: &mut Frame, area: Rect
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Length(1), // Spacer
-            Constraint::Min(8),   // Warnings list
+            Constraint::Min(8),    // Warnings list
             Constraint::Length(2), // Help
         ])
         .split(inner);
@@ -291,7 +300,7 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
         .constraints([
             Constraint::Length(2), // Description
             Constraint::Length(1), // Spacer
-            Constraint::Min(6),   // Disk info + options
+            Constraint::Min(6),    // Disk info + options
             Constraint::Length(4), // Warning text
             Constraint::Length(2), // Help
         ])
@@ -320,11 +329,7 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
                 Span::styled("  Disk: ", Style::default().fg(Color::Gray)),
                 Span::styled(
                     format!("{} ({}){}", disk.display(), size_str, status),
-                    Style::default().fg(if readable {
-                        Color::White
-                    } else {
-                        Color::Red
-                    }),
+                    Style::default().fg(if readable { Color::White } else { Color::Red }),
                 ),
             ]));
         }
@@ -333,9 +338,21 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
 
     // Disk action options
     let actions = [
-        (ImportDiskAction::Symlink, "Symlink", "Instant, saves space. Original must stay in place."),
-        (ImportDiskAction::Copy, "Copy", "Independent copy. Slow for large disks."),
-        (ImportDiskAction::Move, "Move", "Relocates disk to VM library."),
+        (
+            ImportDiskAction::Symlink,
+            "Symlink",
+            "Instant, saves space. Original must stay in place.",
+        ),
+        (
+            ImportDiskAction::Copy,
+            "Copy",
+            "Independent copy. Slow for large disks.",
+        ),
+        (
+            ImportDiskAction::Move,
+            "Move",
+            "Relocates disk to VM library.",
+        ),
     ];
 
     for (i, (action, label, desc)) in actions.iter().enumerate() {
@@ -354,10 +371,7 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
 
         content_lines.push(Line::from(vec![
             Span::styled(format!("  {} {} ", radio, label), style),
-            Span::styled(
-                format!("- {}", desc),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("- {}", desc), Style::default().fg(Color::DarkGray)),
         ]));
     }
 
@@ -401,7 +415,7 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Min(16),  // Config summary
+            Constraint::Min(16),   // Config summary
             Constraint::Length(2), // Help
         ])
         .split(inner);
@@ -423,10 +437,7 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
         lines.push(Line::from(vec![
             Span::styled("  VM Name:    ", Style::default().fg(Color::Gray)),
             Span::styled(&state.vm_name, Style::default().fg(Color::White)),
-            Span::styled(
-                "  [Tab to edit]",
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled("  [Tab to edit]", Style::default().fg(Color::DarkGray)),
         ]));
     }
 
@@ -580,7 +591,11 @@ fn handle_select_source(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         KeyCode::Enter => {
-            let focus = app.import_state.as_ref().map(|s| s.field_focus).unwrap_or(0);
+            let focus = app
+                .import_state
+                .as_ref()
+                .map(|s| s.field_focus)
+                .unwrap_or(0);
             match focus {
                 0 => {
                     // libvirt
@@ -651,11 +666,10 @@ fn handle_select_vm(app: &mut App, key: KeyEvent) -> Result<()> {
                 if let Some(vm) = state.discovered_vms.get(state.selected_vm_index).cloned() {
                     let library_path = app.config.vm_library_path.clone();
                     state.vm_name = vm.name.clone();
-                    state.folder_name =
-                        crate::app::CreateWizardState::find_available_folder_name(
-                            &library_path,
-                            &crate::app::CreateWizardState::generate_folder_name(&vm.name),
-                        );
+                    state.folder_name = crate::app::CreateWizardState::find_available_folder_name(
+                        &library_path,
+                        &crate::app::CreateWizardState::generate_folder_name(&vm.name),
+                    );
                     state.selected_vm = Some(vm.clone());
                     state.error_message = None;
                     state.field_focus = 0;
@@ -701,7 +715,11 @@ fn handle_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => {
             if let Some(ref mut state) = app.import_state {
                 // Go back to warnings if they existed, otherwise to VM selection
-                if state.selected_vm.as_ref().map(|vm| !vm.import_notes.is_empty()).unwrap_or(false)
+                if state
+                    .selected_vm
+                    .as_ref()
+                    .map(|vm| !vm.import_notes.is_empty())
+                    .unwrap_or(false)
                 {
                     state.step = ImportStep::CompatibilityWarnings;
                 } else {

@@ -30,10 +30,7 @@ pub enum SetupField {
 
 impl SetupField {
     fn all() -> &'static [SetupField] {
-        &[
-            SetupField::GenerateScripts,
-            SetupField::DeleteScripts,
-        ]
+        &[SetupField::GenerateScripts, SetupField::DeleteScripts]
     }
 }
 
@@ -62,12 +59,12 @@ pub fn render(app: &App, frame: &mut Frame) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),  // System support status
-            Constraint::Length(6),  // GPU info
-            Constraint::Length(1),  // Separator
-            Constraint::Length(6),  // Scripts info
-            Constraint::Min(1),     // Spacer
-            Constraint::Length(2),  // Help
+            Constraint::Length(3), // System support status
+            Constraint::Length(6), // GPU info
+            Constraint::Length(1), // Separator
+            Constraint::Length(6), // Scripts info
+            Constraint::Min(1),    // Spacer
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
@@ -104,18 +101,31 @@ fn render_system_support(_app: &App, frame: &mut Frame, area: Rect) {
 
     lines.push(Line::from(vec![
         Span::styled("Status: ", Style::default().fg(Color::White)),
-        Span::styled(status_text, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status_text,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     // Details
     let mut details = Vec::new();
     details.push(format!(
         "IOMMU: {}",
-        if support.iommu_enabled { "Enabled" } else { "Disabled" }
+        if support.iommu_enabled {
+            "Enabled"
+        } else {
+            "Disabled"
+        }
     ));
     details.push(format!(
         "VFIO: {}",
-        if support.vfio_available { "Available" } else { "Not Available" }
+        if support.vfio_available {
+            "Available"
+        } else {
+            "Not Available"
+        }
     ));
 
     lines.push(Line::styled(
@@ -233,11 +243,11 @@ fn render_scripts_info(app: &App, frame: &mut Frame, area: Rect) {
         .unwrap_or_else(|| "~/vm-space/<vm>/".to_string());
 
     let mut lines = vec![
+        Line::styled("Scripts location:", Style::default().fg(Color::White)),
         Line::styled(
-            "Scripts location:",
-            Style::default().fg(Color::White),
+            format!("  {}", vm_path),
+            Style::default().fg(Color::DarkGray),
         ),
-        Line::styled(format!("  {}", vm_path), Style::default().fg(Color::DarkGray)),
     ];
 
     if scripts_present {
@@ -285,11 +295,9 @@ fn render_scripts_info(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render help text
 fn render_help(_app: &App, frame: &mut Frame, area: Rect) {
-    let help = Paragraph::new(
-        "[g] Generate Scripts  [d] Delete Scripts  [Esc] Back",
-    )
-    .style(Style::default().fg(Color::DarkGray))
-    .alignment(Alignment::Center);
+    let help = Paragraph::new("[g] Generate Scripts  [d] Delete Scripts  [Esc] Back")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
     frame.render_widget(help, area);
 }
 
@@ -443,7 +451,11 @@ fn generate_scripts(app: &mut App) -> anyhow::Result<()> {
                     app.set_status(format!(
                         "Generated: {}, {} in {}",
                         scripts.start_script.file_name().unwrap().to_string_lossy(),
-                        scripts.restore_script.file_name().unwrap().to_string_lossy(),
+                        scripts
+                            .restore_script
+                            .file_name()
+                            .unwrap()
+                            .to_string_lossy(),
                         dir.display()
                     ));
                     // Show instructions dialog
@@ -501,7 +513,10 @@ pub fn init_single_gpu_config(app: &mut App) {
     }
 
     // Find the boot VGA device
-    let boot_vga = app.pci_devices.iter().find(|d| d.can_single_gpu_passthrough());
+    let boot_vga = app
+        .pci_devices
+        .iter()
+        .find(|d| d.can_single_gpu_passthrough());
 
     if let Some(gpu) = boot_vga {
         let config = SingleGpuConfig::new(gpu.clone(), &app.pci_devices);

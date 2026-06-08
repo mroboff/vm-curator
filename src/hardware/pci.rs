@@ -168,10 +168,7 @@ impl PciDevice {
                 self.device_name.clone()
             }
         } else {
-            format!(
-                "PCI Device {:04x}:{:04x}",
-                self.vendor_id, self.device_id
-            )
+            format!("PCI Device {:04x}:{:04x}", self.vendor_id, self.device_id)
         }
     }
 
@@ -286,7 +283,11 @@ impl MultiGpuPassthroughStatus {
             format!(
                 "Ready ({} GPU{} available)",
                 self.passthrough_gpus.len(),
-                if self.passthrough_gpus.len() == 1 { "" } else { "s" }
+                if self.passthrough_gpus.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             )
         } else {
             let mut issues = Vec::new();
@@ -367,16 +368,16 @@ fn read_pci_device(path: &Path, address: &str) -> Result<PciDevice> {
 
 /// Read hex value from sysfs as u16
 fn read_sysfs_hex_u16(path: &Path, attr: &str) -> Result<u16> {
-    let value = fs::read_to_string(path.join(attr))
-        .with_context(|| format!("Failed to read {}", attr))?;
+    let value =
+        fs::read_to_string(path.join(attr)).with_context(|| format!("Failed to read {}", attr))?;
     let value = value.trim().trim_start_matches("0x");
     u16::from_str_radix(value, 16).context("Failed to parse hex value")
 }
 
 /// Read hex value from sysfs as u32
 fn read_sysfs_hex_u32(path: &Path, attr: &str) -> Result<u32> {
-    let value = fs::read_to_string(path.join(attr))
-        .with_context(|| format!("Failed to read {}", attr))?;
+    let value =
+        fs::read_to_string(path.join(attr)).with_context(|| format!("Failed to read {}", attr))?;
     let value = value.trim().trim_start_matches("0x");
     u32::from_str_radix(value, 16).context("Failed to parse hex value")
 }
@@ -404,13 +405,11 @@ fn read_driver_binding(path: &Path) -> Option<String> {
 fn read_iommu_group(path: &Path) -> Option<u32> {
     let iommu_link = path.join("iommu_group");
     if iommu_link.exists() {
-        fs::read_link(&iommu_link)
-            .ok()
-            .and_then(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .and_then(|s| s.parse().ok())
-            })
+        fs::read_link(&iommu_link).ok().and_then(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|s| s.parse().ok())
+        })
     } else {
         None
     }
@@ -568,13 +567,18 @@ pub fn check_multi_gpu_passthrough_status() -> MultiGpuPassthroughStatus {
     // Check IOMMU
     status.iommu_enabled = check_iommu_enabled();
     if !status.iommu_enabled {
-        status.errors.push("IOMMU is not enabled. Add intel_iommu=on or amd_iommu=on to kernel parameters.".to_string());
+        status.errors.push(
+            "IOMMU is not enabled. Add intel_iommu=on or amd_iommu=on to kernel parameters."
+                .to_string(),
+        );
     }
 
     // Check VFIO modules
     status.vfio_loaded = check_vfio_modules();
     if !status.vfio_loaded {
-        status.errors.push("VFIO modules not loaded. Run: sudo modprobe vfio-pci".to_string());
+        status
+            .errors
+            .push("VFIO modules not loaded. Run: sudo modprobe vfio-pci".to_string());
     }
 
     // Enumerate GPUs
@@ -598,7 +602,9 @@ pub fn check_multi_gpu_passthrough_status() -> MultiGpuPassthroughStatus {
     status.available_gpus = status.passthrough_gpus.len();
 
     if status.available_gpus == 0 && status.boot_vga.is_some() {
-        status.errors.push("Only one GPU found (boot VGA). Need a secondary GPU for passthrough.".to_string());
+        status.errors.push(
+            "Only one GPU found (boot VGA). Need a secondary GPU for passthrough.".to_string(),
+        );
     }
 
     status

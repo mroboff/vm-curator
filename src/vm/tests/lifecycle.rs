@@ -132,11 +132,20 @@ fn test_insert_section_before_case_statement() {
     // Section must appear before the case statement
     let marker_pos = result.find(SHARED_FOLDERS_MARKER_START).unwrap();
     let case_pos = result.find("case \"$1\"").unwrap();
-    assert!(marker_pos < case_pos, "Section must be before case statement, got marker at {} and case at {}", marker_pos, case_pos);
+    assert!(
+        marker_pos < case_pos,
+        "Section must be before case statement, got marker at {} and case at {}",
+        marker_pos,
+        case_pos
+    );
 
     // Both QEMU commands should have $SHARED_FOLDERS_ARGS appended
     let count = result.matches("$SHARED_FOLDERS_ARGS").count();
-    assert_eq!(count, 2, "Expected 2 appended refs (one per QEMU command), got {}", count);
+    assert_eq!(
+        count, 2,
+        "Expected 2 appended refs (one per QEMU command), got {}",
+        count
+    );
 }
 
 #[test]
@@ -168,7 +177,10 @@ fn test_shell_escape_safe() {
 
 #[test]
 fn test_shell_escape_special() {
-    assert_eq!(shell_escape("/home/user/My Documents"), "'/home/user/My Documents'");
+    assert_eq!(
+        shell_escape("/home/user/My Documents"),
+        "'/home/user/My Documents'"
+    );
     assert_eq!(shell_escape("path with spaces"), "'path with spaces'");
 }
 
@@ -181,7 +193,9 @@ fn test_detect_qemu_processes_parsing() {
     let mut cmdlines = Vec::new();
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         if let Some(space_pos) = line.find(' ') {
             if let Ok(pid) = line[..space_pos].parse::<u32>() {
                 pids.push(pid);
@@ -234,7 +248,10 @@ fn test_parse_pci_section_with_multifunction() {
     );
     let args = parse_pci_section(&content);
     assert_eq!(args.len(), 1);
-    assert_eq!(args[0], "-device vfio-pci,host=0000:01:00.0,multifunction=on");
+    assert_eq!(
+        args[0],
+        "-device vfio-pci,host=0000:01:00.0,multifunction=on"
+    );
 }
 
 #[test]
@@ -260,6 +277,9 @@ fn test_parse_pci_section_with_vfio_bind_functions() {
     );
     let args = parse_pci_section(&content);
     assert_eq!(args.len(), 2);
-    assert_eq!(args[0], "-device vfio-pci,host=0000:10:00.0,multifunction=on");
+    assert_eq!(
+        args[0],
+        "-device vfio-pci,host=0000:10:00.0,multifunction=on"
+    );
     assert_eq!(args[1], "-device vfio-pci,host=0000:10:00.1");
 }

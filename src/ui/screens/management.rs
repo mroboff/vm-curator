@@ -172,20 +172,25 @@ const DISPLAY_OPTIONS: &[(&str, &str)] = &[
 /// Falls back to DISPLAY_OPTIONS if detection is not available.
 pub fn get_display_options(app: &App) -> Vec<(String, String)> {
     // Get the emulator for the currently selected VM
-    let emulator = app.selected_vm()
+    let emulator = app
+        .selected_vm()
         .map(|vm| vm.config.emulator.command())
         .unwrap_or("qemu-system-x86_64");
 
     let detected = app.get_display_options_for_emulator(emulator);
 
     // Map detected backends to (name, description) pairs using DISPLAY_OPTIONS for descriptions
-    detected.iter().map(|backend| {
-        let desc = DISPLAY_OPTIONS.iter()
-            .find(|(name, _)| *name == backend.as_str())
-            .map(|(_, desc)| desc.to_string())
-            .unwrap_or_else(|| format!("{} display", backend));
-        (backend.clone(), desc)
-    }).collect()
+    detected
+        .iter()
+        .map(|backend| {
+            let desc = DISPLAY_OPTIONS
+                .iter()
+                .find(|(name, _)| *name == backend.as_str())
+                .map(|(_, desc)| desc.to_string())
+                .unwrap_or_else(|| format!("{} display", backend));
+            (backend.clone(), desc)
+        })
+        .collect()
 }
 
 /// Render the management menu
@@ -209,7 +214,8 @@ pub fn render(app: &App, frame: &mut Frame) {
     // Clear the background
     frame.render_widget(Clear, dialog_area);
 
-    let vm_name = app.selected_vm()
+    let vm_name = app
+        .selected_vm()
         .map(|vm| vm.display_name())
         .unwrap_or_else(|| "Unknown".to_string());
 
@@ -226,9 +232,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(2),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Right margin
+            Constraint::Length(2), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Right margin
         ])
         .split(inner);
 
@@ -236,9 +242,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Top padding
-            Constraint::Min(4),     // Menu items
-            Constraint::Length(2),  // Help text
+            Constraint::Length(1), // Top padding
+            Constraint::Min(4),    // Menu items
+            Constraint::Length(2), // Help text
         ])
         .split(h_chunks[1]);
 
@@ -248,7 +254,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         .enumerate()
         .map(|(i, item)| {
             let style = if i == app.selected_menu_item {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -268,8 +276,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     let mut state = ListState::default();
     state.select(Some(app.selected_menu_item));
 
-    let list = List::new(items)
-        .highlight_symbol("> ");
+    let list = List::new(items).highlight_symbol("> ");
 
     frame.render_stateful_widget(list, chunks[1], &mut state);
 
@@ -302,9 +309,9 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(2),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Right margin
+            Constraint::Length(2), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Right margin
         ])
         .split(inner);
 
@@ -312,8 +319,8 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Top padding
-            Constraint::Min(1),     // Content
+            Constraint::Length(1), // Top padding
+            Constraint::Min(1),    // Content
         ])
         .split(h_chunks[1]);
 
@@ -321,8 +328,14 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
         ("Normal boot", "Start the VM normally"),
         ("Install mode", "Boot from installation media"),
         ("Boot with custom ISO", "Select an ISO file to boot"),
-        ("Boot with recovery DMG", "Select a DMG file as recovery image"),
-        ("Boot with floppy image", "Select a floppy image (.img, .ima) to boot"),
+        (
+            "Boot with recovery DMG",
+            "Select a DMG file as recovery image",
+        ),
+        (
+            "Boot with floppy image",
+            "Select a floppy image (.img, .ima) to boot",
+        ),
     ];
 
     let items: Vec<ListItem> = boot_items
@@ -330,14 +343,19 @@ pub fn render_boot_options(app: &App, frame: &mut Frame) {
         .enumerate()
         .map(|(i, (name, desc))| {
             let style = if i == app.selected_menu_item {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
 
             ListItem::new(vec![
                 Line::styled(format!("[{}] {}", i + 1, name), style),
-                Line::styled(format!("    {}", desc), Style::default().fg(Color::DarkGray)),
+                Line::styled(
+                    format!("    {}", desc),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])
         })
         .collect();
@@ -359,7 +377,8 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
     frame.render_widget(Clear, dialog_area);
 
     // Get current display setting from VM
-    let current_display = app.selected_vm()
+    let current_display = app
+        .selected_vm()
         .map(|vm| extract_display_from_script(&vm.config.raw_script))
         .unwrap_or_else(|| "gtk".to_string());
 
@@ -376,9 +395,9 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(2),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Right margin
+            Constraint::Length(2), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Right margin
         ])
         .split(inner);
 
@@ -386,9 +405,9 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Top padding
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Help
+            Constraint::Length(1), // Top padding
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Help
         ])
         .split(h_chunks[1]);
 
@@ -400,7 +419,9 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
         .map(|(i, (name, desc))| {
             let is_current = *name == current_display;
             let style = if i == app.selected_menu_item {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if is_current {
                 Style::default().fg(Color::Green)
             } else {
@@ -411,7 +432,10 @@ pub fn render_display_options(app: &App, frame: &mut Frame) {
 
             ListItem::new(vec![
                 Line::styled(format!("[{}] {}{}", i + 1, name, marker), style),
-                Line::styled(format!("    {}", desc), Style::default().fg(Color::DarkGray)),
+                Line::styled(
+                    format!("    {}", desc),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])
         })
         .collect();
@@ -435,7 +459,8 @@ fn extract_display_from_script(script: &str) -> String {
     if let Some(pos) = script.find("-display ") {
         let rest = &script[pos + 9..];
         // Find the display value (ends at space, comma, or backslash)
-        let end = rest.find(|c: char| c.is_whitespace() || c == ',' || c == '\\')
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == ',' || c == '\\')
             .unwrap_or(rest.len());
         let display = rest[..end].trim();
         // Handle gl=on suffix
@@ -458,7 +483,8 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
-    let supports_snapshots = app.selected_vm()
+    let supports_snapshots = app
+        .selected_vm()
         .map(|vm| vm.config.supports_snapshots())
         .unwrap_or(false);
 
@@ -481,9 +507,9 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(2),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Right margin
+            Constraint::Length(2), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Right margin
         ])
         .split(inner);
 
@@ -491,8 +517,8 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Top padding
-            Constraint::Min(1),     // Content
+            Constraint::Length(1), // Top padding
+            Constraint::Min(1),    // Content
         ])
         .split(h_chunks[1]);
 
@@ -508,16 +534,18 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(4), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
         .split(content_area);
 
     // Action buttons
-    let actions = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("[c]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Create new snapshot"),
-        ]),
-    ]);
+    let actions = Paragraph::new(vec![Line::from(vec![
+        Span::styled("[c]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Create new snapshot"),
+    ])]);
     frame.render_widget(actions, chunks[0]);
 
     // Snapshot list
@@ -527,12 +555,15 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
             .alignment(Alignment::Center);
         frame.render_widget(msg, chunks[1]);
     } else {
-        let items: Vec<ListItem> = app.snapshots
+        let items: Vec<ListItem> = app
+            .snapshots
             .iter()
             .enumerate()
             .map(|(i, snap)| {
                 let style = if i == app.selected_snapshot {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -550,8 +581,7 @@ pub fn render_snapshots(app: &App, frame: &mut Frame) {
         let mut state = ListState::default();
         state.select(Some(app.selected_snapshot));
 
-        let list = List::new(items)
-            .highlight_symbol("> ");
+        let list = List::new(items).highlight_symbol("> ");
         frame.render_stateful_widget(list, chunks[1], &mut state);
     }
 

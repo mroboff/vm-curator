@@ -17,24 +17,20 @@ use std::path::{Path, PathBuf};
 // These are used in extract_qemu_command_for_passthrough() and compiled once
 
 /// Regex to match -name "..." arguments
-static RE_NAME: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"-name\s+["'][^"']+["']"#).expect("Invalid regex: RE_NAME")
-});
+static RE_NAME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"-name\s+["'][^"']+["']"#).expect("Invalid regex: RE_NAME"));
 
 /// Regex to match -display arguments
-static RE_DISPLAY: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-display\s+\S+(,\S+)*").expect("Invalid regex: RE_DISPLAY")
-});
+static RE_DISPLAY: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-display\s+\S+(,\S+)*").expect("Invalid regex: RE_DISPLAY"));
 
 /// Regex to match -vga arguments
-static RE_VGA: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-vga\s+\S+").expect("Invalid regex: RE_VGA")
-});
+static RE_VGA: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-vga\s+\S+").expect("Invalid regex: RE_VGA"));
 
 /// Regex to match -audiodev arguments
-static RE_AUDIODEV: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-audiodev\s+\S+(,\S+)*").expect("Invalid regex: RE_AUDIODEV")
-});
+static RE_AUDIODEV: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-audiodev\s+\S+(,\S+)*").expect("Invalid regex: RE_AUDIODEV"));
 
 /// Regex to match sound/audio device arguments
 static RE_SOUNDHW: Lazy<Regex> = Lazy::new(|| {
@@ -58,24 +54,20 @@ static RE_DRIVE_ISO: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// Regex to match empty continuation lines
-static RE_EMPTY_CONT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\\\n\s*\\\n").expect("Invalid regex: RE_EMPTY_CONT")
-});
+static RE_EMPTY_CONT: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\\\n\s*\\\n").expect("Invalid regex: RE_EMPTY_CONT"));
 
 /// Regex to match -cpu host
-static RE_CPU_HOST: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-cpu\s+host\b").expect("Invalid regex: RE_CPU_HOST")
-});
+static RE_CPU_HOST: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-cpu\s+host\b").expect("Invalid regex: RE_CPU_HOST"));
 
 /// Regex to match -machine arguments
-static RE_MACHINE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-machine\s+(\S+)").expect("Invalid regex: RE_MACHINE")
-});
+static RE_MACHINE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-machine\s+(\S+)").expect("Invalid regex: RE_MACHINE"));
 
 /// Regex to match -boot order=d
-static RE_BOOT_D: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"-boot\s+order=d\b").expect("Invalid regex: RE_BOOT_D")
-});
+static RE_BOOT_D: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"-boot\s+order=d\b").expect("Invalid regex: RE_BOOT_D"));
 
 use crate::hardware::SingleGpuConfig;
 use crate::vm::lifecycle::{load_pci_passthrough, load_usb_passthrough};
@@ -236,8 +228,7 @@ pub fn generate_single_gpu_scripts(
 
 /// Write a script file and make it executable
 fn write_executable_script(path: &Path, content: &str) -> Result<()> {
-    fs::write(path, content)
-        .with_context(|| format!("Failed to write script: {:?}", path))?;
+    fs::write(path, content).with_context(|| format!("Failed to write script: {:?}", path))?;
 
     let mut perms = fs::metadata(path)?.permissions();
     perms.set_mode(0o755);
@@ -249,7 +240,11 @@ fn write_executable_script(path: &Path, content: &str) -> Result<()> {
 /// Generate the main start script
 fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<String> {
     let gpu_addr = &config.gpu.address;
-    let audio_addr = config.audio.as_ref().map(|a| a.address.as_str()).unwrap_or("");
+    let audio_addr = config
+        .audio
+        .as_ref()
+        .map(|a| a.address.as_str())
+        .unwrap_or("");
     let original_driver = config.original_driver.module_name();
     let display_manager = config.display_manager.service_name();
     let vm_dir = vm.path.display();
@@ -295,7 +290,13 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
     };
 
     // Build QEMU command from existing launch.sh
-    let qemu_command = extract_qemu_command_for_passthrough(vm, config, &components, &usb_passthrough_args, &pci_passthrough_args)?;
+    let qemu_command = extract_qemu_command_for_passthrough(
+        vm,
+        config,
+        &components,
+        &usb_passthrough_args,
+        &pci_passthrough_args,
+    )?;
 
     // Generate variable definitions
     let variable_defs = generate_variable_definitions(vm, &components);
@@ -312,7 +313,8 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
         r#"
 # Start TPM emulator
 start_tpm
-"#.to_string()
+"#
+        .to_string()
     } else {
         String::new()
     };
@@ -327,11 +329,15 @@ start_tpm
     sleep 0.5
     modprobe nvidia_drm 2>/dev/null || true
     modprobe nvidia_uvm 2>/dev/null || true
-    sleep 1"#.to_string()
+    sleep 1"#
+            .to_string()
     } else {
-        format!(r#"
+        format!(
+            r#"
     modprobe "{}" 2>/dev/null || true
-    sleep 1"#, original_driver)
+    sleep 1"#,
+            original_driver
+        )
     };
 
     let script = format!(
@@ -561,7 +567,9 @@ echo "VM has exited."
         pkill -f "swtpm.*$TPM_DIR" 2>/dev/null || true
     fi
 "#
-        } else { "" },
+        } else {
+            ""
+        },
         nvidia_module_load = nvidia_module_load,
         unload_modules_cmd = unload_modules_cmd,
         tpm_start = tpm_start,
@@ -620,7 +628,8 @@ fn generate_variable_definitions(vm: &DiscoveredVm, components: &LaunchScriptCom
 fn generate_tpm_functions(components: &LaunchScriptComponents) -> String {
     let tpm_dir = components.tpm_dir.as_deref().unwrap_or("$VM_DIR/tpm");
 
-    format!(r#"
+    format!(
+        r#"
 # ============================================================================
 # TPM Functions
 # ============================================================================
@@ -643,7 +652,9 @@ start_tpm() {{
         --daemon
     sleep 1
 }}
-"#, tpm_dir = tpm_dir)
+"#,
+        tpm_dir = tpm_dir
+    )
 }
 
 /// Extract PCI addresses from passthrough args (e.g., "-device vfio-pci,host=0000:47:00.0")
@@ -652,12 +663,9 @@ fn extract_pci_addresses(pci_args: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|arg| {
             // Format: "-device vfio-pci,host=0000:XX:XX.X"
-            arg.split("host=").nth(1).map(|s| {
-                s.split([',', ' '])
-                    .next()
-                    .unwrap_or(s)
-                    .to_string()
-            })
+            arg.split("host=")
+                .nth(1)
+                .map(|s| s.split([',', ' ']).next().unwrap_or(s).to_string())
         })
         .collect()
 }
@@ -730,11 +738,14 @@ fn generate_restore_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Strin
 
     let tpm_cleanup = if components.has_tpm {
         let tpm_dir = components.tpm_dir.as_deref().unwrap_or("$VM_DIR/tpm");
-        format!(r#"
+        format!(
+            r#"
 # Kill TPM emulator if running
 TPM_DIR="{tpm_dir}"
 pkill -f "swtpm.*$TPM_DIR" 2>/dev/null || true
-"#, tpm_dir = tpm_dir)
+"#,
+            tpm_dir = tpm_dir
+        )
     } else {
         String::new()
     };
@@ -749,12 +760,16 @@ pkill -f "swtpm.*$TPM_DIR" 2>/dev/null || true
     sleep 0.5
     modprobe nvidia_drm 2>/dev/null || true
     modprobe nvidia_uvm 2>/dev/null || true
-    sleep 1"#.to_string()
+    sleep 1"#
+            .to_string()
     } else {
-        format!(r#"
+        format!(
+            r#"
     echo "Loading {} driver..."
     modprobe "{}" 2>/dev/null || true
-    sleep 2"#, original_driver, original_driver)
+    sleep 2"#,
+            original_driver, original_driver
+        )
     };
 
     format!(
@@ -1092,14 +1107,22 @@ fn extract_qemu_command_for_passthrough(
 
     if !found_qemu {
         // Fallback: generate a basic QEMU command
-        return Ok(generate_basic_qemu_command(vm, config, components, usb_passthrough_args, pci_passthrough_args));
+        return Ok(generate_basic_qemu_command(
+            vm,
+            config,
+            components,
+            usb_passthrough_args,
+            pci_passthrough_args,
+        ));
     }
 
     // Build the modified QEMU command
     let mut qemu_cmd = qemu_lines.join("\n");
 
     // Replace any hardcoded -name with $VM_NAME variable (for cleanup to work correctly)
-    qemu_cmd = RE_NAME.replace_all(&qemu_cmd, r#"-name "$VM_NAME""#).to_string();
+    qemu_cmd = RE_NAME
+        .replace_all(&qemu_cmd, r#"-name "$VM_NAME""#)
+        .to_string();
 
     // Remove existing -display if present (we'll use the GPU's display)
     qemu_cmd = RE_DISPLAY.replace_all(&qemu_cmd, "").to_string();
@@ -1133,10 +1156,7 @@ fn extract_qemu_command_for_passthrough(
 
     // Audio passthrough (if present)
     if let Some(ref audio) = config.audio {
-        passthrough_args.push(format!(
-            "-device vfio-pci,host={}",
-            audio.address
-        ));
+        passthrough_args.push(format!("-device vfio-pci,host={}", audio.address));
     }
 
     // Display settings - none (output goes to physical GPU)
@@ -1170,11 +1190,7 @@ fn extract_qemu_command_for_passthrough(
     // Find the end of the QEMU command and insert our args
     if let Some(last_backslash) = qemu_cmd.rfind('\\') {
         let (before, _) = qemu_cmd.split_at(last_backslash);
-        qemu_cmd = format!(
-            "{} \\\n    {}",
-            before.trim_end(),
-            passthrough_str
-        );
+        qemu_cmd = format!("{} \\\n    {}", before.trim_end(), passthrough_str);
     } else {
         // No continuation, just append
         qemu_cmd = format!("{} \\\n    {}", qemu_cmd.trim_end(), passthrough_str);
@@ -1193,7 +1209,9 @@ fn extract_qemu_command_for_passthrough(
             let machine_opts = caps.get(1).unwrap().as_str();
             if !machine_opts.contains("kernel_irqchip") {
                 let new_opts = format!("{},kernel_irqchip=on", machine_opts);
-                qemu_cmd = RE_MACHINE.replace(&qemu_cmd, format!("-machine {}", new_opts).as_str()).to_string();
+                qemu_cmd = RE_MACHINE
+                    .replace(&qemu_cmd, format!("-machine {}", new_opts).as_str())
+                    .to_string();
             }
         }
     }
@@ -1231,31 +1249,34 @@ fn generate_basic_qemu_command(
     -m {} \
     -smp {} \
     -enable-kvm"#,
-        qemu_emulator,
-        cpu_flags,
-        memory,
-        cpu_cores
+        qemu_emulator, cpu_flags, memory, cpu_cores
     );
 
     // Add SMBIOS options if present (for Windows to avoid corporate machine detection)
     if components.smbios_opts.is_some() {
-        cmd.push_str(r#" \
-    "${SMBIOS_OPTS[@]}""#);
+        cmd.push_str(
+            r#" \
+    "${SMBIOS_OPTS[@]}""#,
+        );
     }
 
     // Add UEFI if present
     if components.has_uefi {
-        cmd.push_str(r#" \
+        cmd.push_str(
+            r#" \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-    -drive if=pflash,format=raw,file="$OVMF_VARS""#);
+    -drive if=pflash,format=raw,file="$OVMF_VARS""#,
+        );
     }
 
     // Add TPM if present
     if components.has_tpm {
-        cmd.push_str(r#" \
+        cmd.push_str(
+            r#" \
     -chardev socket,id=chrtpm,path="$TPM_DIR/swtpm-sock" \
     -tpmdev emulator,id=tpm0,chardev=chrtpm \
-    -device tpm-tis,tpmdev=tpm0"#);
+    -device tpm-tis,tpmdev=tpm0"#,
+        );
     }
 
     // Add disk
@@ -1339,10 +1360,7 @@ fn generate_basic_qemu_command(
 
 /// Delete single GPU scripts for a VM
 pub fn delete_scripts(vm_path: &Path) -> Result<()> {
-    let scripts = [
-        "single-gpu-start.sh",
-        "single-gpu-restore.sh",
-    ];
+    let scripts = ["single-gpu-start.sh", "single-gpu-restore.sh"];
 
     for script in scripts {
         let path = vm_path.join(script);
@@ -1380,8 +1398,8 @@ pub fn regenerate_from_saved_config(vm: &DiscoveredVm) -> Result<bool> {
     }
 
     // Try to load saved config
-    let config = load_config(&vm.path)
-        .ok_or_else(|| anyhow::anyhow!("No saved single-GPU config found"))?;
+    let config =
+        load_config(&vm.path).ok_or_else(|| anyhow::anyhow!("No saved single-GPU config found"))?;
 
     // Regenerate scripts
     generate_single_gpu_scripts(vm, &config)?;

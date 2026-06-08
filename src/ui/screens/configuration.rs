@@ -16,7 +16,8 @@ pub fn render(app: &App, frame: &mut Frame) {
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
-    let vm_name = app.selected_vm()
+    let vm_name = app
+        .selected_vm()
         .map(|vm| vm.display_name())
         .unwrap_or_else(|| "Unknown".to_string());
 
@@ -33,9 +34,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(2),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(2),  // Right margin
+            Constraint::Length(2), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(2), // Right margin
         ])
         .split(inner);
 
@@ -43,10 +44,10 @@ pub fn render(app: &App, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),   // Top padding
-            Constraint::Min(10),     // Config content
-            Constraint::Length(1),   // Bottom padding
-            Constraint::Length(2),   // Help text
+            Constraint::Length(1), // Top padding
+            Constraint::Min(10),   // Config content
+            Constraint::Length(1), // Bottom padding
+            Constraint::Length(2), // Help text
         ])
         .split(h_chunks[1]);
 
@@ -118,7 +119,8 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
 
     // Audio
     if !config.audio_devices.is_empty() {
-        let audio_str = config.audio_devices
+        let audio_str = config
+            .audio_devices
             .iter()
             .map(|a| format!("{:?}", a))
             .collect::<Vec<_>>()
@@ -147,7 +149,10 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
                 Style::default().fg(Color::DarkGray),
             )));
             for pf in &net.port_forwards {
-                lines.push(Line::from(format!("    {} {} -> {}", pf.protocol, pf.host_port, pf.guest_port)));
+                lines.push(Line::from(format!(
+                    "    {} {} -> {}",
+                    pf.protocol, pf.host_port, pf.guest_port
+                )));
             }
         }
     }
@@ -157,11 +162,15 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
     // Disks
     lines.push(Line::from(Span::styled(
         "Disks:",
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
     )));
 
     for disk in &config.disks {
-        let path = disk.path.file_name()
+        let path = disk
+            .path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
         lines.push(Line::from(format!(
@@ -202,8 +211,7 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
         snapshot_support,
     ]));
 
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 
@@ -216,11 +224,16 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
-    let vm_name = app.selected_vm()
+    let vm_name = app
+        .selected_vm()
         .map(|vm| vm.display_name())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let modified_indicator = if app.script_editor_modified { " [modified]" } else { "" };
+    let modified_indicator = if app.script_editor_modified {
+        " [modified]"
+    } else {
+        ""
+    };
 
     let block = Block::default()
         .title(format!(" {} - launch.sh{} ", vm_name, modified_indicator))
@@ -239,8 +252,8 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),     // Editor content
-            Constraint::Length(1),  // Help text
+            Constraint::Min(1),    // Editor content
+            Constraint::Length(1), // Help text
         ])
         .split(inner);
 
@@ -251,8 +264,8 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(5),  // Line numbers
-            Constraint::Min(1),     // Text content
+            Constraint::Length(5), // Line numbers
+            Constraint::Min(1),    // Text content
         ])
         .split(editor_area);
 
@@ -287,7 +300,11 @@ pub fn render_raw_script(app: &App, frame: &mut Frame) {
 
     let text_lines: Vec<Line> = (start_line..end_line)
         .map(|i| {
-            let line = app.script_editor_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+            let line = app
+                .script_editor_lines
+                .get(i)
+                .map(|s| s.as_str())
+                .unwrap_or("");
 
             // Apply horizontal scroll
             let visible_line = if h_scroll < line.len() {
@@ -353,11 +370,16 @@ pub fn render_edit_notes(app: &App, frame: &mut Frame) {
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
 
-    let vm_name = app.selected_vm()
+    let vm_name = app
+        .selected_vm()
         .map(|vm| vm.display_name())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let modified_indicator = if app.script_editor_modified { " [modified]" } else { "" };
+    let modified_indicator = if app.script_editor_modified {
+        " [modified]"
+    } else {
+        ""
+    };
 
     let block = Block::default()
         .title(format!(" {} - Notes{} ", vm_name, modified_indicator))
@@ -376,8 +398,8 @@ pub fn render_edit_notes(app: &App, frame: &mut Frame) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),     // Editor content
-            Constraint::Length(1),  // Help text
+            Constraint::Min(1),    // Editor content
+            Constraint::Length(1), // Help text
         ])
         .split(inner);
 
@@ -388,8 +410,8 @@ pub fn render_edit_notes(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(5),  // Line numbers
-            Constraint::Min(1),     // Text content
+            Constraint::Length(5), // Line numbers
+            Constraint::Min(1),    // Text content
         ])
         .split(editor_area);
 
@@ -423,7 +445,11 @@ pub fn render_edit_notes(app: &App, frame: &mut Frame) {
 
     let text_lines: Vec<Line> = (start_line..end_line)
         .map(|i| {
-            let line = app.script_editor_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+            let line = app
+                .script_editor_lines
+                .get(i)
+                .map(|s| s.as_str())
+                .unwrap_or("");
 
             let visible_line = if h_scroll < line.len() {
                 &line[h_scroll..]

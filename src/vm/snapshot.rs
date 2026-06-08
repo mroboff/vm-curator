@@ -108,8 +108,8 @@ pub fn list_snapshots(disk_path: &Path) -> Result<Vec<Snapshot>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: QemuImgInfo = serde_json::from_str(&stdout)
-        .context("Failed to parse qemu-img JSON output")?;
+    let info: QemuImgInfo =
+        serde_json::from_str(&stdout).context("Failed to parse qemu-img JSON output")?;
 
     let snapshots = info
         .snapshots
@@ -239,13 +239,16 @@ pub fn get_disk_info(disk_path: &Path) -> Result<DiskInfo> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: QemuImgInfo = serde_json::from_str(&stdout)
-        .context("Failed to parse qemu-img JSON output")?;
+    let info: QemuImgInfo =
+        serde_json::from_str(&stdout).context("Failed to parse qemu-img JSON output")?;
 
     Ok(DiskInfo {
         format: info.format,
         virtual_size: format_size(info.virtual_size),
-        disk_size: info.actual_size.map(format_size).unwrap_or_else(|| "unknown".to_string()),
+        disk_size: info
+            .actual_size
+            .map(format_size)
+            .unwrap_or_else(|| "unknown".to_string()),
         cluster_size: info.cluster_size.map(format_size),
         backing_file: info.backing_filename,
     })

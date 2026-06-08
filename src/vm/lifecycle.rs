@@ -116,7 +116,10 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
             if !dmg_path.is_file() {
                 return LaunchResult {
                     success: false,
-                    error: Some(format!("Recovery image path is not a file: {}", dmg_path.display())),
+                    error: Some(format!(
+                        "Recovery image path is not a file: {}",
+                        dmg_path.display()
+                    )),
                     vm_name,
                 };
             }
@@ -134,7 +137,10 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
             if !floppy_path.is_file() {
                 return LaunchResult {
                     success: false,
-                    error: Some(format!("Floppy path is not a file: {}", floppy_path.display())),
+                    error: Some(format!(
+                        "Floppy path is not a file: {}",
+                        floppy_path.display()
+                    )),
                     vm_name,
                 };
             }
@@ -230,11 +236,13 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
             thread::sleep(Duration::from_millis(300));
 
             // Try to get error output
-            let stderr_lines = rx.recv_timeout(Duration::from_millis(500))
+            let stderr_lines = rx
+                .recv_timeout(Duration::from_millis(500))
                 .unwrap_or_default();
 
             // Filter for error-related lines for display
-            let error_lines: Vec<&String> = stderr_lines.iter()
+            let error_lines: Vec<&String> = stderr_lines
+                .iter()
                 .filter(|line| {
                     let lower = line.to_lowercase();
                     lower.contains("error")
@@ -252,7 +260,11 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 .collect();
 
             let error_msg = if !error_lines.is_empty() {
-                error_lines.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+                error_lines
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
             } else if !stderr_lines.is_empty() {
                 // Show all stderr if no specific errors found
                 stderr_lines.join("\n")
@@ -295,7 +307,10 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
     if result.success {
         Ok(())
     } else {
-        bail!("{}", result.error.unwrap_or_else(|| "Unknown error".to_string()))
+        bail!(
+            "{}",
+            result.error.unwrap_or_else(|| "Unknown error".to_string())
+        )
     }
 }
 
@@ -305,7 +320,7 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
 #[allow(dead_code)]
 pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
     let tmp = vm.path.join(".launch_dbus_tmp.sh");
-    let _ = std::fs::remove_file(&tmp);                       // stale temp script from prior crash
+    let _ = std::fs::remove_file(&tmp); // stale temp script from prior crash
     let _ = std::fs::remove_file(vm.path.join("qemu.sock")); // stale socket from unclean shutdown
 
     if let Err(e) = ensure_qmp_in_script(&vm.path) {
@@ -313,8 +328,7 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
     }
 
     let script_path = vm.path.join("launch.sh");
-    let content = std::fs::read_to_string(&script_path)
-        .context("Failed to read launch.sh")?;
+    let content = std::fs::read_to_string(&script_path).context("Failed to read launch.sh")?;
 
     let modified = replace_display_for_dbus(&content, "-display dbus");
 
@@ -335,8 +349,14 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
     thread::sleep(Duration::from_millis(300));
     if let Ok(Some(status)) = child.try_wait() {
         use std::io::Read;
-        let stderr = child.stderr.take()
-            .map(|mut s| { let mut b = String::new(); s.read_to_string(&mut b).ok(); b })
+        let stderr = child
+            .stderr
+            .take()
+            .map(|mut s| {
+                let mut b = String::new();
+                s.read_to_string(&mut b).ok();
+                b
+            })
             .unwrap_or_default();
         bail!("QEMU exited immediately ({}): {}", status, stderr.trim());
     }
@@ -359,8 +379,8 @@ fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for line in content.lines() {
         let t = line.trim();
-        let is_display = !t.starts_with('#')
-            && (t.starts_with("-display ") || t.contains(" -display "));
+        let is_display =
+            !t.starts_with('#') && (t.starts_with("-display ") || t.contains(" -display "));
         let is_spice = t.starts_with("-spice ")
             || (t.starts_with("-device virtio-serial") && t.contains("spice"))
             || (t.starts_with("-device virtserialport") && t.contains("com.redhat.spice"))
@@ -378,21 +398,24 @@ fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
         }
     }
     let mut s = out.join("\n");
-    if content.ends_with('\n') { s.push('\n'); }
+    if content.ends_with('\n') {
+        s.push('\n');
+    }
     s
 }
 
 /// Reset a VM by recreating its disk from a backing file or template
 pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
     // Find the primary disk
-    let disk = vm.config.primary_disk()
+    let disk = vm
+        .config
+        .primary_disk()
         .context("VM has no disk configured")?;
 
     let disk_path = &disk.path;
 
     // Check for a backing file or template
-    let info = super::snapshot::get_disk_info(disk_path)
-        .context("Failed to get disk info")?;
+    let info = super::snapshot::get_disk_info(disk_path).context("Failed to get disk info")?;
 
     if let Some(backing) = &info.backing_file {
         // Recreate from backing file
@@ -402,18 +425,13 @@ pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
         }
 
         // Remove old disk
-        std::fs::remove_file(disk_path)
-            .context("Failed to remove old disk")?;
+        std::fs::remove_file(disk_path).context("Failed to remove old disk")?;
 
         // Create new disk with backing file
         let disk_str = path_to_str(disk_path)?;
         let output = Command::new("qemu-img")
             .args([
-                "create",
-                "-f", "qcow2",
-                "-F", "qcow2",
-                "-b", backing,
-                disk_str,
+                "create", "-f", "qcow2", "-F", "qcow2", "-b", backing, disk_str,
             ])
             .output()
             .context("Failed to create disk from backing file")?;
@@ -445,23 +463,17 @@ pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
 /// Delete a VM (move to trash or permanently delete)
 pub fn delete_vm(vm: &DiscoveredVm, permanent: bool) -> Result<()> {
     if permanent {
-        std::fs::remove_dir_all(&vm.path)
-            .context("Failed to delete VM directory")?;
+        std::fs::remove_dir_all(&vm.path).context("Failed to delete VM directory")?;
     } else {
         // Move to trash using trash-cli if available
-        let result = Command::new("trash-put")
-            .arg(&vm.path)
-            .output();
+        let result = Command::new("trash-put").arg(&vm.path).output();
 
         match result {
             Ok(output) if output.status.success() => {}
             _ => {
                 // Fall back to moving to a .trash directory
-                let trash_dir = vm.path.parent()
-                    .unwrap_or(Path::new("."))
-                    .join(".trash");
-                std::fs::create_dir_all(&trash_dir)
-                    .context("Failed to create trash directory")?;
+                let trash_dir = vm.path.parent().unwrap_or(Path::new(".")).join(".trash");
+                std::fs::create_dir_all(&trash_dir).context("Failed to create trash directory")?;
 
                 // Find a unique name in trash (append timestamp if needed)
                 let mut trash_path = trash_dir.join(&vm.id);
@@ -473,8 +485,7 @@ pub fn delete_vm(vm: &DiscoveredVm, permanent: bool) -> Result<()> {
                     trash_path = trash_dir.join(format!("{}-{}", vm.id, timestamp));
                 }
 
-                std::fs::rename(&vm.path, &trash_path)
-                    .context("Failed to move VM to trash")?;
+                std::fs::rename(&vm.path, &trash_path).context("Failed to move VM to trash")?;
             }
         }
     }
@@ -485,8 +496,7 @@ pub fn delete_vm(vm: &DiscoveredVm, permanent: bool) -> Result<()> {
 /// Rename a VM by updating its display name in vm-curator.toml
 pub fn rename_vm(vm: &DiscoveredVm, new_name: &str) -> Result<()> {
     // Preserve existing os_profile and notes
-    let os_profile = vm.os_profile.as_deref()
-        .or(Some(&vm.id));
+    let os_profile = vm.os_profile.as_deref().or(Some(&vm.id));
     let notes = vm.notes.as_deref();
 
     crate::vm::create::write_vm_metadata(&vm.path, new_name, os_profile, notes)
@@ -516,10 +526,7 @@ pub struct QemuProcess {
 /// Detect all running QEMU processes.
 /// Returns process info including the working directory read from /proc.
 pub fn detect_qemu_processes() -> Vec<QemuProcess> {
-    let output = match Command::new("pgrep")
-        .args(["-a", "qemu-system"])
-        .output()
-    {
+    let output = match Command::new("pgrep").args(["-a", "qemu-system"]).output() {
         Ok(o) => o,
         Err(_) => return Vec::new(),
     };
@@ -572,8 +579,6 @@ pub fn force_stop_vm(pid: u32) -> Result<()> {
     Ok(())
 }
 
-
-
 // USB Passthrough configuration markers
 const USB_MARKER_START: &str = "# >>> USB Passthrough (managed by vm-curator) >>>";
 const USB_MARKER_END: &str = "# <<< USB Passthrough <<<";
@@ -581,8 +586,7 @@ const USB_MARKER_END: &str = "# <<< USB Passthrough <<<";
 /// Save USB passthrough configuration to the VM's launch.sh
 pub fn save_usb_passthrough(vm: &DiscoveredVm, devices: &[UsbPassthrough]) -> Result<()> {
     let script_path = &vm.launch_script;
-    let content = std::fs::read_to_string(script_path)
-        .context("Failed to read launch.sh")?;
+    let content = std::fs::read_to_string(script_path).context("Failed to read launch.sh")?;
 
     // Remove existing USB passthrough section if present
     let content = remove_usb_section(&content);
@@ -595,8 +599,7 @@ pub fn save_usb_passthrough(vm: &DiscoveredVm, devices: &[UsbPassthrough]) -> Re
     let new_content = insert_usb_section(&content, &usb_section);
 
     // Write back
-    std::fs::write(script_path, new_content)
-        .context("Failed to write launch.sh")?;
+    std::fs::write(script_path, new_content).context("Failed to write launch.sh")?;
 
     Ok(())
 }
@@ -736,7 +739,8 @@ pub fn insert_args_section(content: &str, section: &str, var_ref: &str) -> Strin
     }
 
     // Track which end lines we need to modify
-    let qemu_end_indices: std::collections::HashSet<usize> = qemu_commands.iter().map(|(_, end)| *end).collect();
+    let qemu_end_indices: std::collections::HashSet<usize> =
+        qemu_commands.iter().map(|(_, end)| *end).collect();
 
     // Determine where to insert the section: before a `case` statement if present
     // (so the variable is in top-level scope), otherwise before the first QEMU command.
@@ -845,8 +849,7 @@ fn extract_hex_value(s: &str, prefix: &str) -> Option<u16> {
     let rest = &s[start..];
 
     // Find end of hex value (comma, space, quote, or end of string)
-    let end = rest.find([',', ' ', '"', '\''])
-        .unwrap_or(rest.len());
+    let end = rest.find([',', ' ', '"', '\'']).unwrap_or(rest.len());
 
     let hex_str = &rest[..end];
 
@@ -881,18 +884,13 @@ fn shell_escape(s: &str) -> String {
 /// Save shared folders configuration to the VM's launch.sh
 pub fn save_shared_folders(vm: &DiscoveredVm, folders: &[SharedFolder]) -> Result<()> {
     let script_path = &vm.launch_script;
-    let content =
-        std::fs::read_to_string(script_path).context("Failed to read launch.sh")?;
+    let content = std::fs::read_to_string(script_path).context("Failed to read launch.sh")?;
 
     // Remove existing shared folders section if present
     let content = remove_shared_folders_section(&content);
 
     // Determine device name based on architecture
-    let device_name = if vm
-        .config
-        .emulator
-        .command()
-        .contains("aarch64")
+    let device_name = if vm.config.emulator.command().contains("aarch64")
         || vm.config.emulator.command().contains("arm")
     {
         "virtio-9p-device"
@@ -1047,9 +1045,7 @@ fn extract_path_value(s: &str) -> Option<String> {
         Some(result)
     } else {
         // Unquoted path: ends at comma or space
-        let end = rest
-            .find([',', ' ', '"'])
-            .unwrap_or(rest.len());
+        let end = rest.find([',', ' ', '"']).unwrap_or(rest.len());
         Some(rest[..end].to_string())
     }
 }
@@ -1058,9 +1054,7 @@ fn extract_path_value(s: &str) -> Option<String> {
 fn extract_simple_value(s: &str, prefix: &str) -> Option<String> {
     let start = s.find(prefix)? + prefix.len();
     let rest = &s[start..];
-    let end = rest
-        .find([',', ' ', '"', '\''])
-        .unwrap_or(rest.len());
+    let end = rest.find([',', ' ', '"', '\'']).unwrap_or(rest.len());
     let value = rest[..end].trim();
     if value.is_empty() {
         None
@@ -1111,7 +1105,10 @@ fn parse_pci_section(content: &str) -> Vec<String> {
                             let part = part.trim();
                             if part.starts_with("vfio-pci,host=") {
                                 // Extract the host address (ends at space or end of string)
-                                let arg = format!("-device {}", part.split_whitespace().next().unwrap_or(part));
+                                let arg = format!(
+                                    "-device {}",
+                                    part.split_whitespace().next().unwrap_or(part)
+                                );
                                 args.push(arg);
                             }
                         }
@@ -1129,8 +1126,8 @@ pub fn save_pci_passthrough(
     vm: &DiscoveredVm,
     devices: &[crate::hardware::PciDevice],
 ) -> Result<()> {
-    let content = std::fs::read_to_string(&vm.launch_script)
-        .context("Failed to read launch script")?;
+    let content =
+        std::fs::read_to_string(&vm.launch_script).context("Failed to read launch script")?;
 
     // Strip existing section and $PCI_PASSTHROUGH_ARGS variable references
     let mut cleaned = String::new();
@@ -1158,8 +1155,7 @@ pub fn save_pci_passthrough(
     }
 
     if devices.is_empty() {
-        std::fs::write(&vm.launch_script, cleaned)
-            .context("Failed to write launch script")?;
+        std::fs::write(&vm.launch_script, cleaned).context("Failed to write launch script")?;
         return Ok(());
     }
 
@@ -1173,7 +1169,9 @@ pub fn save_pci_passthrough(
     section.push_str("\"\n");
     section.push_str("PCI_DEVICES=(");
     for (i, dev) in devices.iter().enumerate() {
-        if i > 0 { section.push(' '); }
+        if i > 0 {
+            section.push(' ');
+        }
         section.push_str(&format!("\"{}\"", dev.address));
     }
     section.push_str(")\n");
@@ -1234,8 +1232,7 @@ bind_vfio || exit 1
     section.push('\n');
 
     let new_content = insert_args_section(&cleaned, &section, "$PCI_PASSTHROUGH_ARGS");
-    std::fs::write(&vm.launch_script, new_content)
-        .context("Failed to write launch script")?;
+    std::fs::write(&vm.launch_script, new_content).context("Failed to write launch script")?;
     Ok(())
 }
 
@@ -1249,8 +1246,8 @@ const QMP_ARG: &str = "        -qmp unix:$VM_DIR/qemu.sock,server=on,wait=off";
 #[allow(dead_code)]
 pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
-    let content = std::fs::read_to_string(&script_path)
-        .context("Failed to read launch.sh for QMP patch")?;
+    let content =
+        std::fs::read_to_string(&script_path).context("Failed to read launch.sh for QMP patch")?;
 
     if content.contains("qemu.sock") {
         return Ok(());

@@ -45,9 +45,12 @@ impl<'a> AsciiInfoWidget<'a> {
 
         // Name and details
         if let Some(info) = self.os_info {
-            lines.push(Line::from(vec![
-                Span::styled(&info.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                &info.name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )]));
             lines.push(Line::from(vec![
                 Span::styled(&info.publisher, Style::default().fg(Color::Gray)),
                 Span::raw(" | "),
@@ -69,7 +72,9 @@ impl<'a> AsciiInfoWidget<'a> {
             if !info.blurb.long.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "About",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for line in info.blurb.long.lines() {
                     lines.push(Line::from(line.to_string()));
@@ -81,7 +86,9 @@ impl<'a> AsciiInfoWidget<'a> {
             if !info.fun_facts.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "Fun Facts",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for fact in &info.fun_facts {
                     lines.push(Line::from(format!("• {}", fact)));
@@ -93,7 +100,9 @@ impl<'a> AsciiInfoWidget<'a> {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Notes",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for line in notes.lines() {
                     lines.push(Line::from(line.to_string()));
@@ -103,7 +112,9 @@ impl<'a> AsciiInfoWidget<'a> {
             // Just show the VM name
             lines.push(Line::from(Span::styled(
                 self.vm_name,
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             )));
 
             // User notes (even without OS info)
@@ -111,7 +122,9 @@ impl<'a> AsciiInfoWidget<'a> {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Notes",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for line in notes.lines() {
                     lines.push(Line::from(line.to_string()));
@@ -168,7 +181,9 @@ impl<'a> DetailedInfoWidget<'a> {
             if !info.blurb.long.is_empty() {
                 text.push(Line::from(Span::styled(
                     "About",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for line in info.blurb.long.lines() {
                     text.push(Line::from(line.to_string()));
@@ -180,15 +195,16 @@ impl<'a> DetailedInfoWidget<'a> {
             if !info.fun_facts.is_empty() {
                 text.push(Line::from(Span::styled(
                     "Fun Facts",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for fact in &info.fun_facts {
                     text.push(Line::from(format!("• {}", fact)));
                 }
             }
 
-            let para = Paragraph::new(text)
-                .wrap(Wrap { trim: true });
+            let para = Paragraph::new(text).wrap(Wrap { trim: true });
             para.render(inner, buf);
         } else {
             let text = Paragraph::new("No detailed information available for this VM.")

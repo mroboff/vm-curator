@@ -104,7 +104,8 @@ impl HierarchyConfig {
         let raw: HierarchyToml = toml::from_str(content)?;
 
         // Convert families
-        let mut families: Vec<Family> = raw.families
+        let mut families: Vec<Family> = raw
+            .families
             .into_iter()
             .map(|(id, f)| Family {
                 id,
@@ -116,7 +117,8 @@ impl HierarchyConfig {
         families.sort_by_key(|f| f.order);
 
         // Convert subcategories
-        let mut subcategories: Vec<Subcategory> = raw.subcategories
+        let mut subcategories: Vec<Subcategory> = raw
+            .subcategories
             .into_iter()
             .map(|(id, s)| {
                 let sort_by = match s.sort_by.as_deref() {

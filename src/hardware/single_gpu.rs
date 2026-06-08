@@ -151,10 +151,7 @@ pub fn detect_display_manager() -> DisplayManager {
     }
 
     // Check systemctl get-default for graphical target
-    if let Ok(output) = Command::new("systemctl")
-        .args(["get-default"])
-        .output()
-    {
+    if let Ok(output) = Command::new("systemctl").args(["get-default"]).output() {
         let target = String::from_utf8_lossy(&output.stdout);
         if target.contains("graphical") {
             // Check which DM is set as display-manager
@@ -338,9 +335,18 @@ pub fn save_config(vm_path: &Path, config: &SingleGpuConfig) -> anyhow::Result<(
     content.push_str(&format!("address = \"{}\"\n", config.gpu.address));
     content.push_str(&format!("vendor_id = \"0x{:04x}\"\n", config.gpu.vendor_id));
     content.push_str(&format!("device_id = \"0x{:04x}\"\n", config.gpu.device_id));
-    content.push_str(&format!("vendor_name = \"{}\"\n", config.gpu.vendor_name.replace('"', "\\\"")));
-    content.push_str(&format!("device_name = \"{}\"\n", config.gpu.device_name.replace('"', "\\\"")));
-    content.push_str(&format!("class_code = \"0x{:06x}\"\n", config.gpu.class_code));
+    content.push_str(&format!(
+        "vendor_name = \"{}\"\n",
+        config.gpu.vendor_name.replace('"', "\\\"")
+    ));
+    content.push_str(&format!(
+        "device_name = \"{}\"\n",
+        config.gpu.device_name.replace('"', "\\\"")
+    ));
+    content.push_str(&format!(
+        "class_code = \"0x{:06x}\"\n",
+        config.gpu.class_code
+    ));
     if let Some(ref driver) = config.gpu.driver {
         content.push_str(&format!("driver = \"{}\"\n", driver));
     }
@@ -354,8 +360,14 @@ pub fn save_config(vm_path: &Path, config: &SingleGpuConfig) -> anyhow::Result<(
         content.push_str(&format!("address = \"{}\"\n", audio.address));
         content.push_str(&format!("vendor_id = \"0x{:04x}\"\n", audio.vendor_id));
         content.push_str(&format!("device_id = \"0x{:04x}\"\n", audio.device_id));
-        content.push_str(&format!("vendor_name = \"{}\"\n", audio.vendor_name.replace('"', "\\\"")));
-        content.push_str(&format!("device_name = \"{}\"\n", audio.device_name.replace('"', "\\\"")));
+        content.push_str(&format!(
+            "vendor_name = \"{}\"\n",
+            audio.vendor_name.replace('"', "\\\"")
+        ));
+        content.push_str(&format!(
+            "device_name = \"{}\"\n",
+            audio.device_name.replace('"', "\\\"")
+        ));
         content.push_str(&format!("class_code = \"0x{:06x}\"\n", audio.class_code));
         if let Some(ref driver) = audio.driver {
             content.push_str(&format!("driver = \"{}\"\n", driver));
@@ -366,8 +378,14 @@ pub fn save_config(vm_path: &Path, config: &SingleGpuConfig) -> anyhow::Result<(
     }
 
     content.push_str("\n[settings]\n");
-    content.push_str(&format!("original_driver = \"{}\"\n", config.original_driver.module_name()));
-    content.push_str(&format!("display_manager = \"{}\"\n", config.display_manager.service_name()));
+    content.push_str(&format!(
+        "original_driver = \"{}\"\n",
+        config.original_driver.module_name()
+    ));
+    content.push_str(&format!(
+        "display_manager = \"{}\"\n",
+        config.display_manager.service_name()
+    ));
 
     fs::write(&config_path, content)?;
     Ok(())
@@ -414,7 +432,7 @@ pub fn load_config(vm_path: &Path) -> Option<SingleGpuConfig> {
         }
 
         if line.starts_with('[') && line.ends_with(']') {
-            current_section = &line[1..line.len()-1];
+            current_section = &line[1..line.len() - 1];
             continue;
         }
 

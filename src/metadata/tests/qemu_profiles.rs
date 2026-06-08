@@ -56,21 +56,45 @@ fn test_classic_mac_bios_rom_config() {
 
     // m68k Mac profiles should have required bios_rom
     let system6 = store.get("mac-system6").expect("Should have mac-system6");
-    assert!(system6.bios_rom.is_some(), "mac-system6 should have bios_rom config");
-    assert!(system6.bios_rom.as_ref().unwrap().required, "mac-system6 bios_rom should be required");
+    assert!(
+        system6.bios_rom.is_some(),
+        "mac-system6 should have bios_rom config"
+    );
+    assert!(
+        system6.bios_rom.as_ref().unwrap().required,
+        "mac-system6 bios_rom should be required"
+    );
 
     let system7 = store.get("mac-system7").expect("Should have mac-system7");
-    assert!(system7.bios_rom.is_some(), "mac-system7 should have bios_rom config");
-    assert!(system7.bios_rom.as_ref().unwrap().required, "mac-system7 bios_rom should be required");
+    assert!(
+        system7.bios_rom.is_some(),
+        "mac-system7 should have bios_rom config"
+    );
+    assert!(
+        system7.bios_rom.as_ref().unwrap().required,
+        "mac-system7 bios_rom should be required"
+    );
 
     // PPC Mac profiles should have optional bios_rom
     let os8 = store.get("mac-os8").expect("Should have mac-os8");
-    assert!(os8.bios_rom.is_some(), "mac-os8 should have bios_rom config");
-    assert!(!os8.bios_rom.as_ref().unwrap().required, "mac-os8 bios_rom should be optional");
+    assert!(
+        os8.bios_rom.is_some(),
+        "mac-os8 should have bios_rom config"
+    );
+    assert!(
+        !os8.bios_rom.as_ref().unwrap().required,
+        "mac-os8 bios_rom should be optional"
+    );
 
     let os9 = store.get("mac-os9").expect("Should have mac-os9");
-    assert!(os9.bios_rom.is_some(), "mac-os9 should have bios_rom config");
-    assert!(!os9.bios_rom.as_ref().unwrap().required, "mac-os9 bios_rom should be optional");
+    assert!(
+        os9.bios_rom.is_some(),
+        "mac-os9 should have bios_rom config"
+    );
+    assert!(
+        !os9.bios_rom.as_ref().unwrap().required,
+        "mac-os9 bios_rom should be optional"
+    );
 }
 
 #[test]
@@ -78,10 +102,16 @@ fn test_non_mac_profiles_no_bios_rom() {
     let store = QemuProfileStore::load_embedded();
 
     let win10 = store.get("windows-10").expect("Should have windows-10");
-    assert!(win10.bios_rom.is_none(), "windows-10 should not have bios_rom");
+    assert!(
+        win10.bios_rom.is_none(),
+        "windows-10 should not have bios_rom"
+    );
 
     let debian = store.get("linux-debian").expect("Should have linux-debian");
-    assert!(debian.bios_rom.is_none(), "linux-debian should not have bios_rom");
+    assert!(
+        debian.bios_rom.is_none(),
+        "linux-debian should not have bios_rom"
+    );
 }
 
 #[test]

@@ -131,11 +131,8 @@ boot="efi"
 tpm="on"
 "#;
 
-    let vm = parse_quickemu_conf_str(
-        conf,
-        Path::new("/home/user/quickemu/ubuntu-22.04.conf"),
-    )
-    .unwrap();
+    let vm =
+        parse_quickemu_conf_str(conf, Path::new("/home/user/quickemu/ubuntu-22.04.conf")).unwrap();
 
     assert_eq!(vm.name, "ubuntu-22.04");
     assert_eq!(vm.qemu_config.memory_mb, 4096);

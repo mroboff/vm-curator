@@ -31,7 +31,11 @@ pub fn render(app: &App, frame: &mut Frame) {
         // Single GPU mode - don't show GPU count (boot VGA is passed through differently)
         format!(" PCI Passthrough ({} selected) ", selected_count)
     } else if app.config.enable_multi_gpu_passthrough {
-        let gpu_count = app.pci_devices.iter().filter(|d| d.is_gpu() && !d.is_boot_vga).count();
+        let gpu_count = app
+            .pci_devices
+            .iter()
+            .filter(|d| d.is_gpu() && !d.is_boot_vga)
+            .count();
         format!(
             " PCI Passthrough ({} selected, {} GPU{} available) ",
             selected_count,
@@ -68,9 +72,9 @@ pub fn render(app: &App, frame: &mut Frame) {
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(1),  // Left margin
-            Constraint::Min(1),     // Content
-            Constraint::Length(1),  // Right margin
+            Constraint::Length(1), // Left margin
+            Constraint::Min(1),    // Content
+            Constraint::Length(1), // Right margin
         ])
         .split(chunks[1]);
 
@@ -97,7 +101,10 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         vec![
             Span::styled(" Mode: ", Style::default().fg(Color::White)),
             Span::styled("Single GPU Passthrough", Style::default().fg(Color::Cyan)),
-            Span::styled("  (GPU selection managed via Single GPU Setup)", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  (GPU selection managed via Single GPU Setup)",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]
     } else if app.config.enable_multi_gpu_passthrough {
         // Multi-GPU passthrough mode - show full status
@@ -122,24 +129,36 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             spans.push(Span::raw("  |  "));
             spans.push(Span::styled(
                 "IOMMU",
-                Style::default().fg(if status.iommu_enabled { Color::Green } else { Color::Red }),
+                Style::default().fg(if status.iommu_enabled {
+                    Color::Green
+                } else {
+                    Color::Red
+                }),
             ));
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 "VFIO",
-                Style::default().fg(if status.vfio_loaded { Color::Green } else { Color::Red }),
+                Style::default().fg(if status.vfio_loaded {
+                    Color::Green
+                } else {
+                    Color::Red
+                }),
             ));
         }
         spans
     } else {
         // GPU passthrough disabled - show simple message
-        vec![
-            Span::styled(" Select PCI devices to pass through to the VM", Style::default().fg(Color::DarkGray)),
-        ]
+        vec![Span::styled(
+            " Select PCI devices to pass through to the VM",
+            Style::default().fg(Color::DarkGray),
+        )]
     };
 
-    let status_para = Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray)));
+    let status_para = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
 
     frame.render_widget(status_para, area);
 }
@@ -147,9 +166,11 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
 /// Render the device list
 fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
     if app.pci_devices.is_empty() {
-        let msg = Paragraph::new("No PCI devices found.\n\nEnsure you have permission to read /sys/bus/pci/devices.")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center);
+        let msg = Paragraph::new(
+            "No PCI devices found.\n\nEnsure you have permission to read /sys/bus/pci/devices.",
+        )
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
     }
@@ -230,7 +251,9 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
                 Span::styled(
                     format!("{} ", checkbox),
                     if is_current {
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
                     } else if selected {
                         Style::default().fg(Color::Green)
                     } else {
@@ -249,10 +272,7 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
                     format!("{:<12} ", driver_info),
                     Style::default().fg(driver_color),
                 ),
-                Span::styled(
-                    iommu_info,
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(iommu_info, Style::default().fg(Color::DarkGray)),
             ]);
 
             // Add boot VGA warning
@@ -260,7 +280,9 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
             if device.is_boot_vga {
                 lines.push(Line::styled(
                     "     (Boot VGA - cannot be passed through)",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::ITALIC),
                 ));
             }
 
@@ -309,16 +331,25 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
 
     lines.push(Line::styled(
         "GPU Passthrough Prerequisites",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     ));
     lines.push(Line::raw(""));
 
     if let Some(status) = status {
         // IOMMU check
         let iommu_icon = if status.iommu_enabled { " OK " } else { "FAIL" };
-        let iommu_color = if status.iommu_enabled { Color::Green } else { Color::Red };
+        let iommu_color = if status.iommu_enabled {
+            Color::Green
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(vec![
-            Span::styled(format!("[{}] ", iommu_icon), Style::default().fg(iommu_color)),
+            Span::styled(
+                format!("[{}] ", iommu_icon),
+                Style::default().fg(iommu_color),
+            ),
             Span::raw("IOMMU enabled in kernel"),
         ]));
         if !status.iommu_enabled {
@@ -330,7 +361,11 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
 
         // VFIO check
         let vfio_icon = if status.vfio_loaded { " OK " } else { "FAIL" };
-        let vfio_color = if status.vfio_loaded { Color::Green } else { Color::Red };
+        let vfio_color = if status.vfio_loaded {
+            Color::Green
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(vec![
             Span::styled(format!("[{}] ", vfio_icon), Style::default().fg(vfio_color)),
             Span::raw("VFIO modules loaded"),
@@ -345,7 +380,11 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
         // GPU availability
         let gpu_available = !status.passthrough_gpus.is_empty();
         let gpu_icon = if gpu_available { " OK " } else { "FAIL" };
-        let gpu_color = if gpu_available { Color::Green } else { Color::Red };
+        let gpu_color = if gpu_available {
+            Color::Green
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(vec![
             Span::styled(format!("[{}] ", gpu_icon), Style::default().fg(gpu_color)),
             Span::raw(format!(
@@ -356,7 +395,10 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
 
         if let Some(ref boot_vga) = status.boot_vga {
             lines.push(Line::styled(
-                format!("    Boot VGA: {} (cannot be passed through)", boot_vga.display_name()),
+                format!(
+                    "    Boot VGA: {} (cannot be passed through)",
+                    boot_vga.display_name()
+                ),
                 Style::default().fg(Color::DarkGray),
             ));
         }
@@ -376,9 +418,15 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
         // Warnings
         if !status.warnings.is_empty() {
             lines.push(Line::raw(""));
-            lines.push(Line::styled("Warnings:", Style::default().fg(Color::Yellow)));
+            lines.push(Line::styled(
+                "Warnings:",
+                Style::default().fg(Color::Yellow),
+            ));
             for warning in &status.warnings {
-                lines.push(Line::styled(format!("  - {}", warning), Style::default().fg(Color::Yellow)));
+                lines.push(Line::styled(
+                    format!("  - {}", warning),
+                    Style::default().fg(Color::Yellow),
+                ));
             }
         }
 
@@ -386,10 +434,16 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
         lines.push(Line::raw(""));
         lines.push(Line::styled(
             "VFIO Driver Binding:",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ));
-        lines.push(Line::raw("  Devices are automatically bound to vfio-pci at launch"));
-        lines.push(Line::raw("  and restored to their original driver on VM exit."));
+        lines.push(Line::raw(
+            "  Devices are automatically bound to vfio-pci at launch",
+        ));
+        lines.push(Line::raw(
+            "  and restored to their original driver on VM exit.",
+        ));
         lines.push(Line::styled(
             "  Requires authentication via pkexec (polkit) or sudo.",
             Style::default().fg(Color::Yellow),
@@ -399,7 +453,9 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
         lines.push(Line::raw(""));
         lines.push(Line::styled(
             "For Looking Glass:",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ));
         lines.push(Line::raw("  - Install looking-glass-client on host"));
         lines.push(Line::raw("  - Install Looking Glass Host in guest VM"));
@@ -417,8 +473,7 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 }
 
@@ -484,7 +539,10 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         }
         KeyCode::Char('j') | KeyCode::Down => {
             // Find current position in relevant devices
-            if let Some(current_pos) = relevant_indices.iter().position(|&i| i == app.selected_menu_item) {
+            if let Some(current_pos) = relevant_indices
+                .iter()
+                .position(|&i| i == app.selected_menu_item)
+            {
                 if current_pos < relevant_indices.len().saturating_sub(1) {
                     app.selected_menu_item = relevant_indices[current_pos + 1];
                 }
@@ -493,7 +551,10 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if let Some(current_pos) = relevant_indices.iter().position(|&i| i == app.selected_menu_item) {
+            if let Some(current_pos) = relevant_indices
+                .iter()
+                .position(|&i| i == app.selected_menu_item)
+            {
                 if current_pos > 0 {
                     app.selected_menu_item = relevant_indices[current_pos - 1];
                 }
@@ -529,7 +590,8 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                     if let Some(vm) = app.selected_vm() {
                         if crate::hardware::scripts_exist(&vm.path) {
                             // Try with in-memory config first, fall back to saved config
-                            let regen_result = if let Some(config) = app.single_gpu_config.as_ref() {
+                            let regen_result = if let Some(config) = app.single_gpu_config.as_ref()
+                            {
                                 crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
                             } else {
                                 crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
@@ -541,7 +603,10 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                                 }
                                 Ok(false) => {} // Scripts don't exist, nothing to regenerate
                                 Err(e) => {
-                                    status_msg.push_str(&format!("; warning: failed to regenerate single-GPU scripts: {}", e));
+                                    status_msg.push_str(&format!(
+                                        "; warning: failed to regenerate single-GPU scripts: {}",
+                                        e
+                                    ));
                                 }
                             }
                         }
@@ -646,7 +711,7 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
 
     // Generate the passthrough args
     let args = crate::hardware::generate_passthrough_args(
-        &devices.iter().map(|d| (*d).clone()).collect::<Vec<_>>()
+        &devices.iter().map(|d| (*d).clone()).collect::<Vec<_>>(),
     );
 
     section.push_str("PCI_PASSTHROUGH_ARGS=\"");
@@ -666,7 +731,8 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
     section.push('\n');
 
     // Helper to run sysfs commands with privilege escalation
-    section.push_str(r#"# Run a command with elevated privileges if needed
+    section.push_str(
+        r#"# Run a command with elevated privileges if needed
 _pci_elevated() {
     if [[ $EUID -eq 0 ]]; then
         sh -c "$1"
@@ -680,10 +746,12 @@ _pci_elevated() {
         return 1
     fi
 }
-"#);
+"#,
+    );
 
     // VFIO bind function: unbinds devices from current driver, binds to vfio-pci
-    section.push_str(r#"bind_vfio() {
+    section.push_str(
+        r#"bind_vfio() {
     local bind_cmds=""
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
@@ -711,10 +779,12 @@ _pci_elevated() {
     fi
     sleep 0.5
 }
-"#);
+"#,
+    );
 
     // VFIO restore function: rebinds devices to their original drivers after VM exit
-    section.push_str(r#"restore_pci() {
+    section.push_str(
+        r#"restore_pci() {
     local restore_cmds=""
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
@@ -740,19 +810,22 @@ _pci_elevated() {
         fi
     fi
 }
-"#);
+"#,
+    );
 
     // Hook restore_pci into exit cleanup, then bind devices
     // The trap/cleanup setup must happen before bind_vfio so partially-bound
     // devices get restored if binding fails partway through
-    section.push_str(r#"if declare -f cleanup >/dev/null 2>&1; then
+    section.push_str(
+        r#"if declare -f cleanup >/dev/null 2>&1; then
     eval "$(declare -f cleanup | sed '1s/cleanup/_pci_pre_cleanup/')"
     cleanup() { restore_pci; _pci_pre_cleanup; }
 else
     trap 'restore_pci' EXIT
 fi
 bind_vfio || exit 1
-"#);
+"#,
+    );
 
     section.push_str(PCI_MARKER_END);
     section.push('\n');
