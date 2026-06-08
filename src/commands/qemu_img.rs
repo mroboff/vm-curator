@@ -59,7 +59,67 @@ pub fn detect_disk_format(path: &Path) -> Option<String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout).ok()?;
+    parse_format_from_info_json(&stdout)
+}
 
+/// Extract the `format` field from the JSON emitted by `qemu-img info --output=json`.
+///
+/// Returns `None` if the JSON is malformed or has no string `format` field. Kept
+/// separate from [`detect_disk_format`] so the parsing logic is unit-testable
+/// without invoking `qemu-img`.
+fn parse_format_from_info_json(stdout: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(stdout).ok()?;
     json["format"].as_str().map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_format_qcow2() {
+        let json = r#"{"virtual-size":42949672960,"filename":"disk.qcow2","format":"qcow2","actual-size":200704}"#;
+        assert_eq!(parse_format_from_info_json(json), Some("qcow2".to_string()));
+    }
+
+    #[test]
+    fn parse_format_raw() {
+        let json = r#"{"format":"raw","virtual-size":1048576}"#;
+        assert_eq!(parse_format_from_info_json(json), Some("raw".to_string()));
+    }
+
+    #[test]
+    fn parse_format_missing_field() {
+        let json = r#"{"virtual-size":1048576,"filename":"disk.img"}"#;
+        assert_eq!(parse_format_from_info_json(json), None);
+    }
+
+    #[test]
+    fn parse_format_non_string_field() {
+        let json = r#"{"format":123}"#;
+        assert_eq!(parse_format_from_info_json(json), None);
+    }
+
+    #[test]
+    fn parse_format_malformed_json() {
+        assert_eq!(parse_format_from_info_json("not json at all"), None);
+        assert_eq!(parse_format_from_info_json(""), None);
+    }
+
+    #[test]
+    fn path_to_str_valid_utf8() {
+        let path = PathBuf::from("/tmp/disk.qcow2");
+        assert_eq!(path_to_str(&path).unwrap(), "/tmp/disk.qcow2");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_to_str_invalid_utf8_errors() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        // 0xFF is not valid UTF-8.
+        let path = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff.img"));
+        assert!(path_to_str(&path).is_err());
+    }
 }

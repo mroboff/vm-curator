@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,12 +97,18 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Load configuration from file or create default
+    /// Load configuration from the default file path, or return defaults if absent.
     pub fn load() -> Result<Self> {
-        let config_path = Self::config_file_path();
+        Self::load_from(&Self::config_file_path())
+    }
 
+    /// Load configuration from a specific path, returning defaults if it does not exist.
+    ///
+    /// Path-parameterized so the load logic can be exercised in tests without
+    /// touching the real user config directory.
+    pub fn load_from(config_path: &Path) -> Result<Self> {
         if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path)
+            let content = std::fs::read_to_string(config_path)
                 .with_context(|| format!("Failed to read config from {:?}", config_path))?;
             toml::from_str(&content)
                 .with_context(|| format!("Failed to parse config from {:?}", config_path))
@@ -111,17 +117,23 @@ impl Config {
         }
     }
 
-    /// Save configuration to file
+    /// Save configuration to the default file path.
     pub fn save(&self) -> Result<()> {
-        let config_path = Self::config_file_path();
+        self.save_to(&Self::config_file_path())
+    }
 
+    /// Save configuration to a specific path, creating parent directories as needed.
+    ///
+    /// Path-parameterized so the save logic can be exercised in tests without
+    /// touching the real user config directory.
+    pub fn save_to(&self, config_path: &Path) -> Result<()> {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create config directory {:?}", parent))?;
         }
 
         let content = toml::to_string_pretty(self).context("Failed to serialize config")?;
-        std::fs::write(&config_path, content)
+        std::fs::write(config_path, content)
             .with_context(|| format!("Failed to write config to {:?}", config_path))?;
 
         Ok(())
@@ -133,5 +145,75 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from(".config"))
             .join("vm-curator")
             .join("config.toml")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_from_missing_path_returns_default() {
+        let cfg = Config::load_from(Path::new("/nonexistent/vm-curator/config.toml")).unwrap();
+        let default = Config::default();
+        assert_eq!(cfg.snapshot_prefix, default.snapshot_prefix);
+        assert_eq!(cfg.default_memory_mb, default.default_memory_mb);
+        assert_eq!(cfg.vm_library_path, default.vm_library_path);
+    }
+
+    #[test]
+    fn save_then_load_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+
+        let cfg = Config {
+            snapshot_prefix: "custom-prefix".to_string(),
+            default_memory_mb: 8192,
+            default_iso_path: Some(PathBuf::from("/tmp/isos")),
+            single_gpu_enabled: true,
+            ..Config::default()
+        };
+
+        // save_to should create the missing parent directory.
+        cfg.save_to(&path).unwrap();
+        assert!(path.exists());
+
+        let loaded = Config::load_from(&path).unwrap();
+        assert_eq!(loaded.snapshot_prefix, "custom-prefix");
+        assert_eq!(loaded.default_memory_mb, 8192);
+        assert_eq!(loaded.default_iso_path, Some(PathBuf::from("/tmp/isos")));
+        assert!(loaded.single_gpu_enabled);
+    }
+
+    #[test]
+    fn load_from_partial_toml_fills_defaults() {
+        // `#[serde(default)]` on the struct means a partial file is valid and
+        // missing fields fall back to defaults.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "snapshot_prefix = \"partial\"\n").unwrap();
+
+        let loaded = Config::load_from(&path).unwrap();
+        assert_eq!(loaded.snapshot_prefix, "partial");
+        // Untouched field uses the default.
+        assert_eq!(
+            loaded.default_cpu_cores,
+            Config::default().default_cpu_cores
+        );
+    }
+
+    #[test]
+    fn load_from_malformed_toml_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "this is = not valid = toml = [[[").unwrap();
+
+        assert!(Config::load_from(&path).is_err());
+    }
+
+    #[test]
+    fn config_file_path_ends_with_expected_segments() {
+        let path = Config::config_file_path();
+        assert!(path.ends_with("vm-curator/config.toml"));
     }
 }
