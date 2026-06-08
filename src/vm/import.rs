@@ -23,246 +23,368 @@ pub fn parse_libvirt_xml(path: &Path) -> Result<ImportableVm> {
     parse_libvirt_xml_str(&content, path)
 }
 
-/// Parse libvirt XML from a string (for testing)
+/// Return the value of the first attribute named `key` on an element, if present.
+fn find_attr(e: &quick_xml::events::BytesStart, key: &[u8]) -> Option<String> {
+    e.attributes()
+        .flatten()
+        .find(|attr| attr.key.as_ref() == key)
+        .map(|attr| attr_value(&attr))
+}
+
+/// Mutable accumulator for streaming a libvirt domain XML document.
+///
+/// quick-xml is event-based, so parsed values build up across Start/Empty/Text/End
+/// events. Each `handle_*` method applies a single event, and
+/// [`LibvirtParse::into_importable_vm`] validates and maps the accumulated values
+/// onto a [`WizardQemuConfig`]. Splitting the work this way keeps each step small
+/// and independently readable instead of one large event loop.
+#[derive(Default)]
+struct LibvirtParse {
+    domain_type: String,
+    vm_name: String,
+    memory_kb: u64,
+    memory_unit: String,
+    vcpu: u32,
+    emulator_path: String,
+    arch: String,
+    machine_type: String,
+    has_uefi: bool,
+    has_tpm: bool,
+    disk_paths: Vec<PathBuf>,
+    disk_buses: Vec<String>,
+    graphics_type: String,
+    vga_model: String,
+    import_notes: Vec<String>,
+
+    // Network (first interface found)
+    net_type: String,
+    net_model: String,
+    net_bridge: String,
+
+    // Streaming bookkeeping
+    element_stack: Vec<String>,
+    /// Element name whose text content should be captured on the next Text event.
+    capture_text_for: Option<String>,
+
+    // Current <disk> being parsed
+    in_disk: bool,
+    current_disk_bus: String,
+    current_disk_source: PathBuf,
+
+    // Current <interface> being parsed
+    in_interface: bool,
+    current_net_type: String,
+    current_net_model: String,
+    current_net_bridge: String,
+}
+
+impl LibvirtParse {
+    /// Name of the currently-open enclosing element.
+    fn parent(&self) -> String {
+        self.element_stack
+            .last()
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Read `arch`/`machine` from an `<os><type ...>` element.
+    fn apply_os_type(&mut self, e: &quick_xml::events::BytesStart) {
+        if let Some(v) = find_attr(e, b"arch") {
+            self.arch = v;
+        }
+        if let Some(v) = find_attr(e, b"machine") {
+            self.machine_type = v;
+        }
+    }
+
+    /// Read the VGA model from a `<video><model type=...>` element.
+    fn apply_video_model(&mut self, e: &quick_xml::events::BytesStart) {
+        if let Some(v) = find_attr(e, b"type") {
+            self.vga_model = v;
+        }
+    }
+
+    /// Read the NIC model from an `<interface><model type=...>` element.
+    fn apply_interface_model(&mut self, e: &quick_xml::events::BytesStart) {
+        if let Some(v) = find_attr(e, b"type") {
+            self.current_net_model = v;
+        }
+    }
+
+    /// Apply a Start element (one with children or text content).
+    fn handle_start(&mut self, e: &quick_xml::events::BytesStart) {
+        let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+        let parent = self.parent();
+
+        match tag.as_str() {
+            "domain" => {
+                if let Some(v) = find_attr(e, b"type") {
+                    self.domain_type = v;
+                }
+            }
+            "name" if parent == "domain" => {
+                self.capture_text_for = Some("name".to_string());
+            }
+            "memory" | "currentMemory" if self.memory_kb == 0 => {
+                self.memory_unit = find_attr(e, b"unit").unwrap_or_else(|| "KiB".to_string());
+                self.capture_text_for = Some("memory".to_string());
+            }
+            "vcpu" => {
+                self.capture_text_for = Some("vcpu".to_string());
+            }
+            "type" if parent == "os" => self.apply_os_type(e),
+            "loader" => self.has_uefi = true,
+            "emulator" => {
+                self.capture_text_for = Some("emulator".to_string());
+            }
+            "disk" => {
+                self.in_disk = true;
+                self.current_disk_bus.clear();
+                self.current_disk_source = PathBuf::new();
+            }
+            "interface" => {
+                self.in_interface = true;
+                self.current_net_type.clear();
+                self.current_net_model.clear();
+                self.current_net_bridge.clear();
+                if let Some(v) = find_attr(e, b"type") {
+                    self.current_net_type = v;
+                }
+            }
+            "video" => {} // Just track in stack
+            "model" if parent == "video" => self.apply_video_model(e),
+            "model" if self.in_interface => self.apply_interface_model(e),
+            "tpm" => self.has_tpm = true,
+            _ => {}
+        }
+
+        self.element_stack.push(tag);
+    }
+
+    /// Apply an Empty element (self-closing, e.g. `<source .../>`).
+    fn handle_empty(&mut self, e: &quick_xml::events::BytesStart) {
+        let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+        let parent = self.parent();
+
+        match tag.as_str() {
+            "loader" => self.has_uefi = true,
+            "source" if self.in_disk => {
+                if let Some(v) = find_attr(e, b"file") {
+                    self.current_disk_source = PathBuf::from(v);
+                }
+            }
+            "target" if self.in_disk => {
+                if let Some(v) = find_attr(e, b"bus") {
+                    self.current_disk_bus = v;
+                }
+            }
+            "source" if self.in_interface => {
+                // A libvirt interface source uses `bridge` or `network`.
+                if let Some(v) = find_attr(e, b"bridge") {
+                    self.current_net_bridge = v;
+                }
+                if let Some(v) = find_attr(e, b"network") {
+                    self.current_net_bridge = v;
+                }
+            }
+            "model" if parent == "video" => self.apply_video_model(e),
+            "model" if self.in_interface => self.apply_interface_model(e),
+            "graphics" => {
+                if let Some(v) = find_attr(e, b"type") {
+                    self.graphics_type = v;
+                }
+            }
+            "tpm" => self.has_tpm = true,
+            "type" if parent == "os" => self.apply_os_type(e),
+            _ => {}
+        }
+    }
+
+    /// Apply a Text event, storing the content for the pending captured element.
+    fn handle_text(&mut self, raw: &str) {
+        let Some(target) = self.capture_text_for.take() else {
+            return;
+        };
+        let text = raw.trim();
+        match target.as_str() {
+            "name" => self.vm_name = text.to_string(),
+            "memory" => {
+                if let Ok(val) = text.parse::<u64>() {
+                    self.memory_kb = convert_memory_to_kib(val, &self.memory_unit);
+                }
+            }
+            "vcpu" => {
+                if let Ok(val) = text.parse::<u32>() {
+                    self.vcpu = val;
+                }
+            }
+            "emulator" => self.emulator_path = text.to_string(),
+            _ => {}
+        }
+    }
+
+    /// Apply an End element, finalizing the current disk/interface and popping the stack.
+    fn handle_end(&mut self, tag: &str) {
+        if tag == "disk" && self.in_disk {
+            if !self.current_disk_source.as_os_str().is_empty() {
+                self.disk_paths.push(self.current_disk_source.clone());
+                self.disk_buses.push(self.current_disk_bus.clone());
+            }
+            self.in_disk = false;
+        }
+        if tag == "interface" && self.in_interface {
+            // Take the first network interface found
+            if self.net_type.is_empty() {
+                self.net_type = self.current_net_type.clone();
+                self.net_model = self.current_net_model.clone();
+                self.net_bridge = self.current_net_bridge.clone();
+            }
+            self.in_interface = false;
+        }
+
+        // Pop from stack
+        if self.element_stack.last().map(|s| s.as_str()) == Some(tag) {
+            self.element_stack.pop();
+        }
+        self.capture_text_for = None;
+    }
+
+    /// Validate the parsed domain and map it onto an [`ImportableVm`].
+    fn into_importable_vm(mut self, config_path: &Path) -> Result<ImportableVm> {
+        // Validate domain type
+        match self.domain_type.as_str() {
+            "kvm" | "qemu" => {}
+            "" => {
+                bail!("No domain type found in XML. Only QEMU/KVM domains can be imported.");
+            }
+            other => {
+                bail!(
+                    "This VM uses the {} hypervisor, which is not supported. Only QEMU/KVM domains can be imported.",
+                    other
+                );
+            }
+        }
+
+        if self.vm_name.is_empty() {
+            self.vm_name = config_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("imported-vm")
+                .to_string();
+        }
+
+        let emulator = map_emulator_path(&self.emulator_path, &self.arch);
+        let machine = normalize_machine_type(&self.machine_type);
+        let vga = map_vga_model(&self.vga_model);
+        let display = map_graphics_type(&self.graphics_type);
+        let (network_backend, bridge_name, network_model) = map_network(
+            &self.net_type,
+            &self.net_model,
+            &self.net_bridge,
+            &mut self.import_notes,
+        );
+
+        // Map disk interface from first disk
+        let disk_interface = self
+            .disk_buses
+            .first()
+            .map(|bus| map_disk_bus(bus))
+            .unwrap_or_else(|| "ide".to_string());
+
+        // Move disks out so we can push readability notes onto import_notes.
+        let disk_paths = std::mem::take(&mut self.disk_paths);
+        let disks_readable: Vec<bool> = disk_paths
+            .iter()
+            .map(|p| p.exists() && fs::File::open(p).is_ok())
+            .collect();
+
+        // Add notes for unreadable/missing disks
+        for (i, (path, readable)) in disk_paths.iter().zip(disks_readable.iter()).enumerate() {
+            if !readable && path.exists() {
+                self.import_notes.push(format!(
+                    "Disk {}: {} is not readable by current user. You may need: sudo chmod +r {}",
+                    i + 1,
+                    path.display(),
+                    path.display()
+                ));
+            } else if !path.exists() {
+                self.import_notes.push(format!(
+                    "Disk {}: {} does not exist",
+                    i + 1,
+                    path.display()
+                ));
+            }
+        }
+
+        let enable_kvm = self.domain_type == "kvm";
+        let detected_os_profile = detect_os_profile(&self.vm_name);
+
+        let qemu_config = WizardQemuConfig {
+            emulator,
+            memory_mb: (self.memory_kb / 1024) as u32,
+            cpu_cores: if self.vcpu == 0 { 1 } else { self.vcpu },
+            cpu_model: if enable_kvm {
+                Some("host".to_string())
+            } else {
+                None
+            },
+            machine: if machine.is_empty() {
+                None
+            } else {
+                Some(machine)
+            },
+            vga,
+            audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
+            network_model,
+            disk_interface,
+            enable_kvm,
+            gl_acceleration: false,
+            uefi: self.has_uefi,
+            tpm: self.has_tpm,
+            rtc_localtime: false,
+            usb_tablet: true,
+            display,
+            network_backend,
+            port_forwards: Vec::new(),
+            bridge_name,
+            mac_address: None,
+            extra_args: Vec::new(),
+            bios_path: None,
+        };
+
+        Ok(ImportableVm {
+            name: self.vm_name,
+            config_path: config_path.to_path_buf(),
+            source: ImportSource::Libvirt,
+            qemu_config,
+            disk_paths,
+            detected_os_profile,
+            import_notes: self.import_notes,
+            disks_readable,
+        })
+    }
+}
+
+/// Parse libvirt XML from a string (separated from file IO so it can be tested).
 fn parse_libvirt_xml_str(xml: &str, config_path: &Path) -> Result<ImportableVm> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
     let mut reader = Reader::from_str(xml);
-
-    // Parsed values
-    let mut domain_type = String::new();
-    let mut vm_name = String::new();
-    let mut memory_kb: u64 = 0;
-    let mut memory_unit = String::new();
-    let mut vcpu: u32 = 0;
-    let mut emulator_path = String::new();
-    let mut arch = String::new();
-    let mut machine_type = String::new();
-    let mut has_uefi = false;
-    let mut has_tpm = false;
-    let mut disk_paths: Vec<PathBuf> = Vec::new();
-    let mut disk_buses: Vec<String> = Vec::new();
-    let mut graphics_type = String::new();
-    let mut vga_model = String::new();
-    let mut import_notes: Vec<String> = Vec::new();
-
-    // Network (first interface found)
-    let mut net_type = String::new();
-    let mut net_model = String::new();
-    let mut net_bridge = String::new();
-
-    // Element tracking
-    let mut element_stack: Vec<String> = Vec::new();
-    // Text capture for the next Text event
-    let mut capture_text_for: Option<String> = None;
-
-    // Current disk/interface state
-    let mut in_disk = false;
-    let mut current_disk_bus = String::new();
-    let mut current_disk_source = PathBuf::new();
-    let mut in_interface = false;
-    let mut current_net_type = String::new();
-    let mut current_net_model = String::new();
-    let mut current_net_bridge = String::new();
-
+    let mut state = LibvirtParse::default();
     let mut buf = Vec::new();
+
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-                let parent = element_stack.last().map(|s| s.as_str()).unwrap_or("");
-
-                match tag.as_str() {
-                    "domain" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                domain_type = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "name" if parent == "domain" => {
-                        capture_text_for = Some("name".to_string());
-                    }
-                    "memory" | "currentMemory" if memory_kb == 0 => {
-                        memory_unit = "KiB".to_string();
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"unit" {
-                                memory_unit = attr_value(&attr);
-                            }
-                        }
-                        capture_text_for = Some("memory".to_string());
-                    }
-                    "vcpu" => {
-                        capture_text_for = Some("vcpu".to_string());
-                    }
-                    "type" if parent == "os" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"arch" {
-                                arch = attr_value(&attr);
-                            }
-                            if attr.key.as_ref() == b"machine" {
-                                machine_type = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "loader" => {
-                        has_uefi = true;
-                    }
-                    "emulator" => {
-                        capture_text_for = Some("emulator".to_string());
-                    }
-                    "disk" => {
-                        in_disk = true;
-                        current_disk_bus.clear();
-                        current_disk_source = PathBuf::new();
-                    }
-                    "interface" => {
-                        in_interface = true;
-                        current_net_type.clear();
-                        current_net_model.clear();
-                        current_net_bridge.clear();
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                current_net_type = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "video" => {} // Just track in stack
-                    "model" if parent == "video" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                vga_model = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "model" if in_interface => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                current_net_model = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "tpm" => {
-                        has_tpm = true;
-                    }
-                    _ => {}
-                }
-
-                element_stack.push(tag);
-            }
-            Ok(Event::Empty(ref e)) => {
-                let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-                let parent = element_stack.last().map(|s| s.as_str()).unwrap_or("");
-
-                match tag.as_str() {
-                    "loader" => {
-                        has_uefi = true;
-                    }
-                    "source" if in_disk => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"file" {
-                                current_disk_source = PathBuf::from(attr_value(&attr));
-                            }
-                        }
-                    }
-                    "target" if in_disk => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"bus" {
-                                current_disk_bus = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "source" if in_interface => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"bridge" || attr.key.as_ref() == b"network" {
-                                current_net_bridge = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "model" if parent == "video" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                vga_model = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "model" if in_interface => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                current_net_model = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "graphics" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"type" {
-                                graphics_type = attr_value(&attr);
-                            }
-                        }
-                    }
-                    "tpm" => {
-                        has_tpm = true;
-                    }
-                    "type" if parent == "os" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"arch" {
-                                arch = attr_value(&attr);
-                            }
-                            if attr.key.as_ref() == b"machine" {
-                                machine_type = attr_value(&attr);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            Ok(Event::Start(ref e)) => state.handle_start(e),
+            Ok(Event::Empty(ref e)) => state.handle_empty(e),
             Ok(Event::Text(ref t)) => {
-                if let Some(ref target) = capture_text_for {
-                    let text = String::from_utf8_lossy(t.as_ref()).trim().to_string();
-                    match target.as_str() {
-                        "name" => vm_name = text,
-                        "memory" => {
-                            if let Ok(val) = text.parse::<u64>() {
-                                memory_kb = convert_memory_to_kib(val, &memory_unit);
-                            }
-                        }
-                        "vcpu" => {
-                            if let Ok(val) = text.parse::<u32>() {
-                                vcpu = val;
-                            }
-                        }
-                        "emulator" => emulator_path = text,
-                        _ => {}
-                    }
-                    capture_text_for = None;
-                }
+                let text = String::from_utf8_lossy(t.as_ref());
+                state.handle_text(&text);
             }
             Ok(Event::End(ref e)) => {
                 let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-
-                if tag == "disk" && in_disk {
-                    if !current_disk_source.as_os_str().is_empty() {
-                        disk_paths.push(current_disk_source.clone());
-                        disk_buses.push(current_disk_bus.clone());
-                    }
-                    in_disk = false;
-                }
-                if tag == "interface" && in_interface {
-                    // Take the first network interface found
-                    if net_type.is_empty() {
-                        net_type = current_net_type.clone();
-                        net_model = current_net_model.clone();
-                        net_bridge = current_net_bridge.clone();
-                    }
-                    in_interface = false;
-                }
-
-                // Pop from stack
-                if element_stack.last().map(|s| s.as_str()) == Some(&tag) {
-                    element_stack.pop();
-                }
-                capture_text_for = None;
+                state.handle_end(&tag);
             }
             Ok(Event::Eof) => break,
             Err(e) => bail!("Error parsing libvirt XML: {}", e),
@@ -271,117 +393,7 @@ fn parse_libvirt_xml_str(xml: &str, config_path: &Path) -> Result<ImportableVm> 
         buf.clear();
     }
 
-    // Validate domain type
-    match domain_type.as_str() {
-        "kvm" | "qemu" => {}
-        "" => {
-            bail!("No domain type found in XML. Only QEMU/KVM domains can be imported.");
-        }
-        other => {
-            bail!(
-                "This VM uses the {} hypervisor, which is not supported. Only QEMU/KVM domains can be imported.",
-                other
-            );
-        }
-    }
-
-    if vm_name.is_empty() {
-        vm_name = config_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("imported-vm")
-            .to_string();
-    }
-
-    // Map emulator path to emulator string
-    let emulator = map_emulator_path(&emulator_path, &arch);
-
-    // Map machine type
-    let machine = normalize_machine_type(&machine_type);
-
-    // Map VGA model
-    let vga = map_vga_model(&vga_model);
-
-    // Map display
-    let display = map_graphics_type(&graphics_type);
-
-    // Map network
-    let (network_backend, bridge_name, network_model) =
-        map_network(&net_type, &net_model, &net_bridge, &mut import_notes);
-
-    // Map disk interface from first disk
-    let disk_interface = disk_buses
-        .first()
-        .map(|bus| map_disk_bus(bus))
-        .unwrap_or_else(|| "ide".to_string());
-
-    // Check disk readability
-    let disks_readable: Vec<bool> = disk_paths
-        .iter()
-        .map(|p| p.exists() && fs::File::open(p).is_ok())
-        .collect();
-
-    // Add notes for unreadable/missing disks
-    for (i, (path, readable)) in disk_paths.iter().zip(disks_readable.iter()).enumerate() {
-        if !readable && path.exists() {
-            import_notes.push(format!(
-                "Disk {}: {} is not readable by current user. You may need: sudo chmod +r {}",
-                i + 1,
-                path.display(),
-                path.display()
-            ));
-        } else if !path.exists() {
-            import_notes.push(format!("Disk {}: {} does not exist", i + 1, path.display()));
-        }
-    }
-
-    let enable_kvm = domain_type == "kvm";
-
-    let qemu_config = WizardQemuConfig {
-        emulator,
-        memory_mb: (memory_kb / 1024) as u32,
-        cpu_cores: if vcpu == 0 { 1 } else { vcpu },
-        cpu_model: if enable_kvm {
-            Some("host".to_string())
-        } else {
-            None
-        },
-        machine: if machine.is_empty() {
-            None
-        } else {
-            Some(machine)
-        },
-        vga,
-        audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-        network_model,
-        disk_interface,
-        enable_kvm,
-        gl_acceleration: false,
-        uefi: has_uefi,
-        tpm: has_tpm,
-        rtc_localtime: false,
-        usb_tablet: true,
-        display,
-        network_backend,
-        port_forwards: Vec::new(),
-        bridge_name,
-        mac_address: None,
-        extra_args: Vec::new(),
-        bios_path: None,
-    };
-
-    let detected_os_profile = detect_os_profile(&vm_name);
-
-    Ok(ImportableVm {
-        name: vm_name,
-        config_path: config_path.to_path_buf(),
-        source: ImportSource::Libvirt,
-        qemu_config,
-        disk_paths,
-        detected_os_profile,
-        import_notes,
-        disks_readable,
-    })
+    state.into_importable_vm(config_path)
 }
 
 /// Helper: extract attribute value as String

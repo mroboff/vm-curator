@@ -223,6 +223,71 @@ fn test_convert_memory_to_kib() {
 }
 
 #[test]
+fn test_parse_libvirt_xml_name_falls_back_to_file_stem() {
+    // No <name> element: the VM name should derive from the config file stem.
+    let xml = r#"
+<domain type='qemu'>
+  <memory unit='MiB'>1024</memory>
+  <vcpu>1</vcpu>
+  <os>
+    <type arch='x86_64'>hvm</type>
+  </os>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+  </devices>
+</domain>
+"#;
+
+    let vm = parse_libvirt_xml_str(xml, Path::new("/etc/libvirt/qemu/my-domain.xml")).unwrap();
+    assert_eq!(vm.name, "my-domain");
+    // domain type 'qemu' is supported but not KVM.
+    assert!(!vm.qemu_config.enable_kvm);
+    assert_eq!(vm.qemu_config.cpu_model, None);
+    assert_eq!(vm.qemu_config.memory_mb, 1024);
+}
+
+#[test]
+fn test_parse_libvirt_xml_multiple_disks_skips_sourceless() {
+    // Three <disk> elements but the middle one has no <source>; it must be
+    // skipped so disk order and bus mapping stay aligned.
+    let xml = r#"
+<domain type='kvm'>
+  <name>multi-disk</name>
+  <memory unit='KiB'>1048576</memory>
+  <vcpu>2</vcpu>
+  <os>
+    <type arch='x86_64'>hvm</type>
+  </os>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <source file='/images/a.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <target dev='sdb' bus='sata'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <source file='/images/c.qcow2'/>
+      <target dev='vdc' bus='scsi'/>
+    </disk>
+  </devices>
+</domain>
+"#;
+
+    let vm = parse_libvirt_xml_str(xml, Path::new("/test.xml")).unwrap();
+    assert_eq!(
+        vm.disk_paths,
+        vec![
+            PathBuf::from("/images/a.qcow2"),
+            PathBuf::from("/images/c.qcow2"),
+        ]
+    );
+    // disk_interface comes from the first disk's bus (virtio).
+    assert_eq!(vm.qemu_config.disk_interface, "virtio");
+}
+
+#[test]
 fn test_parse_libvirt_xml_with_tpm() {
     let xml = r#"
 <domain type='kvm'>
