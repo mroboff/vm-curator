@@ -1186,15 +1186,7 @@ fn extract_qemu_command_for_passthrough(
 
     // Add passthrough args to the QEMU command
     let passthrough_str = passthrough_args.join(" \\\n    ");
-
-    // Find the end of the QEMU command and insert our args
-    if let Some(last_backslash) = qemu_cmd.rfind('\\') {
-        let (before, _) = qemu_cmd.split_at(last_backslash);
-        qemu_cmd = format!("{} \\\n    {}", before.trim_end(), passthrough_str);
-    } else {
-        // No continuation, just append
-        qemu_cmd = format!("{} \\\n    {}", qemu_cmd.trim_end(), passthrough_str);
-    }
+    qemu_cmd = append_passthrough_args(&qemu_cmd, &passthrough_str);
 
     // Replace -cpu host with NVIDIA flags if needed
     if let Some(flags) = nvidia_cpu_flags {
@@ -1220,6 +1212,22 @@ fn extract_qemu_command_for_passthrough(
     qemu_cmd = RE_BOOT_D.replace(&qemu_cmd, "-boot order=c").to_string();
 
     Ok(qemu_cmd)
+}
+
+/// Append passthrough arguments to the end of an extracted QEMU command.
+///
+/// We must NOT split at the last backslash and discard the remainder: the final
+/// argument's value may live on its own continuation line (e.g. `-qmp \`
+/// followed by `unix:$VM_DIR/qemu.sock,...`). Dropping that line leaves a
+/// dangling flag with no value, so QEMU treats the next token as the value and
+/// aborts — `-qmp -device: '-device' is not a valid char driver` (issue #48).
+///
+/// Instead, strip any single trailing continuation backslash left over from
+/// earlier argument removals (display/vga/audio), then append the new args.
+fn append_passthrough_args(qemu_cmd: &str, passthrough_str: &str) -> String {
+    let tail = qemu_cmd.trim_end();
+    let tail = tail.strip_suffix('\\').unwrap_or(tail).trim_end();
+    format!("{} \\\n    {}", tail, passthrough_str)
 }
 
 /// Generate a basic QEMU command when the launch script can't be parsed
@@ -1404,4 +1412,55 @@ pub fn regenerate_from_saved_config(vm: &DiscoveredVm) -> Result<bool> {
     // Regenerate scripts
     generate_single_gpu_scripts(vm, &config)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for issue #48: when the extracted QEMU command ends with
+    /// a flag whose value is on its own continuation line (the QMP socket, which
+    /// `create.rs` appends last as two separate `\`-joined arguments), the
+    /// passthrough args must be appended *after* the value, not in place of it.
+    #[test]
+    fn append_keeps_qmp_value_intact() {
+        let qemu_cmd = "qemu-system-x86_64 \\\n        -m 2048 \\\n        -qmp \\\n        unix:$VM_DIR/qemu.sock,server=on,wait=off";
+        let result = append_passthrough_args(qemu_cmd, "-device vfio-pci,host=01:00.0,multifunction=on \\\n    -display none");
+
+        // The QMP value must survive...
+        assert!(
+            result.contains("-qmp \\\n        unix:$VM_DIR/qemu.sock,server=on,wait=off"),
+            "QMP socket value was dropped:\n{result}"
+        );
+        // ...and -qmp must never be immediately followed by -device (the crash).
+        assert!(
+            !result.contains("-qmp \\\n    -device"),
+            "-qmp left dangling before -device:\n{result}"
+        );
+        // Passthrough args are present.
+        assert!(result.contains("-device vfio-pci,host=01:00.0,multifunction=on"));
+    }
+
+    /// A trailing continuation backslash (left when the final arg, e.g. -display,
+    /// was stripped) should be collapsed rather than producing a dangling `\`.
+    #[test]
+    fn append_strips_trailing_backslash() {
+        let qemu_cmd = "qemu-system-x86_64 \\\n        -m 2048 \\";
+        let result = append_passthrough_args(qemu_cmd, "-display none");
+        assert_eq!(
+            result,
+            "qemu-system-x86_64 \\\n        -m 2048 \\\n    -display none"
+        );
+        // No double backslash / empty continuation line.
+        assert!(!result.contains("\\\n\\"));
+    }
+
+    /// A command ending in a normal argument (no trailing backslash) keeps that
+    /// argument and gets the new args appended.
+    #[test]
+    fn append_preserves_final_argument() {
+        let qemu_cmd = "qemu-system-x86_64 \\\n        -device virtio-net-pci,netdev=net0";
+        let result = append_passthrough_args(qemu_cmd, "-display none");
+        assert!(result.contains("-device virtio-net-pci,netdev=net0 \\\n    -display none"));
+    }
 }
