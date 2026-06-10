@@ -141,7 +141,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: appimage
-          path: "*.AppImage"
+          # Scope to our artifact so the downloaded appimagetool-x86_64.AppImage
+          # build tool isn't published as a release asset.
+          path: "vm-curator-*.AppImage"
 
   release:
     needs: [build-linux, build-appimage]
