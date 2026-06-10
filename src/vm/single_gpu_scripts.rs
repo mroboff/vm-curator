@@ -1425,7 +1425,10 @@ mod tests {
     #[test]
     fn append_keeps_qmp_value_intact() {
         let qemu_cmd = "qemu-system-x86_64 \\\n        -m 2048 \\\n        -qmp \\\n        unix:$VM_DIR/qemu.sock,server=on,wait=off";
-        let result = append_passthrough_args(qemu_cmd, "-device vfio-pci,host=01:00.0,multifunction=on \\\n    -display none");
+        let result = append_passthrough_args(
+            qemu_cmd,
+            "-device vfio-pci,host=01:00.0,multifunction=on \\\n    -display none",
+        );
 
         // The QMP value must survive...
         assert!(

@@ -631,7 +631,10 @@ fn test_spice_agent_channel_with_gl_acceleration() {
     let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
 
     assert!(cmd.contains("-device virtio-vga-gl"), "GL device present");
-    assert!(cmd.contains("-display spice-app,gl=on"), "gl display present");
+    assert!(
+        cmd.contains("-display spice-app,gl=on"),
+        "gl display present"
+    );
     for arg in SPICE_AGENT_ARGS {
         assert!(cmd.contains(arg), "agent arg `{}` present with GL", arg);
     }
@@ -648,7 +651,10 @@ fn test_set_spice_agent_args_add_remove_roundtrip() {
     }
     let display_idx = enabled.find("-display gtk").unwrap();
     let agent_idx = enabled.find(SPICE_AGENT_ARGS[0]).unwrap();
-    assert!(agent_idx > display_idx, "agent args inserted after -display");
+    assert!(
+        agent_idx > display_idx,
+        "agent args inserted after -display"
+    );
 
     // Enabling again must not duplicate.
     let enabled_twice = set_spice_agent_args(&enabled, true);
