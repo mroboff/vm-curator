@@ -711,7 +711,8 @@ pub fn execute_import(
     disk_action: ImportDiskAction,
 ) -> Result<PathBuf> {
     use crate::vm::create::{
-        create_vm_directory, generate_launch_script_with_os, write_launch_script, write_vm_metadata,
+        create_vm_directory, detect_existing_disk_image_format, generate_launch_script_with_os,
+        write_launch_script, write_vm_metadata,
     };
 
     let vm_dir = create_vm_directory(library_path, folder_name)?;
@@ -723,10 +724,11 @@ pub fn execute_import(
             continue;
         }
 
+        let disk_format = detect_existing_disk_image_format(disk_path);
         let disk_filename = if i == 0 {
-            format!("{}.qcow2", folder_name)
+            format!("{}.{}", folder_name, disk_format.extension())
         } else {
-            format!("{}-disk{}.qcow2", folder_name, i + 1)
+            format!("{}-disk{}.{}", folder_name, i + 1, disk_format.extension())
         };
 
         let dest = vm_dir.join(&disk_filename);

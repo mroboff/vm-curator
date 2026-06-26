@@ -10,9 +10,11 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{App, WizardField, WizardQemuConfig, WizardStep};
+use crate::app::{
+    App, DiskAction, DiskImageFormat, FileBrowserMode, WizardField, WizardQemuConfig, WizardStep,
+};
 use crate::metadata::QemuProfileStore;
-use crate::vm::create_vm;
+use crate::vm::create::create_vm_with_disk_format;
 
 /// Parse a size string with optional suffix (KB, MB, GB, case-insensitive)
 /// Returns value normalized to target unit.
@@ -1516,8 +1518,10 @@ fn render_step_configure_disk(app: &App, frame: &mut Frame, area: Rect) {
             "[Enter] Done  [Backspace] Delete  [0-9] Enter size"
         } else if state.field_focus == 0 {
             "[←/→] Toggle mode  [j/k] Navigate  [Enter] Next  [Esc] Back"
-        } else {
+        } else if state.field_focus == 1 {
             "[Tab] Edit size  [←/→] Adjust  [Enter] Next  [Esc] Back"
+        } else {
+            "[←/→] Toggle format  [j/k] Navigate  [Enter] Next  [Esc] Back"
         }
     };
     let help = Paragraph::new(help_text)
@@ -1534,6 +1538,8 @@ fn render_new_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Disk size input
+            Constraint::Length(1), // Spacer
+            Constraint::Length(1), // Disk format toggle
             Constraint::Length(1), // Spacer
             Constraint::Min(5),    // Disk info
         ])
@@ -1582,6 +1588,46 @@ fn render_new_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
         .block(size_block);
     frame.render_widget(size_text, sub_chunks[0]);
 
+    let format_focused = state.field_focus == 2;
+    let disk_format = app.create_wizard_disk_format;
+    let qcow2_style = if matches!(disk_format, DiskImageFormat::Qcow2) {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let raw_style = if matches!(disk_format, DiskImageFormat::Raw) {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let prefix = if format_focused { "> " } else { "  " };
+    let format_line = Line::from(vec![
+        Span::styled(
+            prefix,
+            if format_focused {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            },
+        ),
+        Span::styled("Format: ", Style::default().fg(Color::Yellow)),
+        Span::styled("[ ", Style::default()),
+        Span::styled("qcow2", qcow2_style),
+        Span::styled(" ] [ ", Style::default()),
+        Span::styled("raw", raw_style),
+        Span::styled(" ]", Style::default()),
+        if format_focused {
+            Span::styled("  [←/→] toggle", Style::default().fg(Color::DarkGray))
+        } else {
+            Span::raw("")
+        },
+    ]);
+    frame.render_widget(Paragraph::new(format_line), sub_chunks[2]);
+
     // Disk info box
     let info_block = Block::default()
         .title(" Disk Info ")
@@ -1590,18 +1636,18 @@ fn render_new_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
 
     let disk_path = app
         .wizard_vm_path()
-        .map(|p| p.join(format!("{}.qcow2", state.folder_name)))
+        .map(|p| p.join(format!("{}.{}", state.folder_name, disk_format.extension())))
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~/vm-space/<vm-name>/<vm-name>.qcow2".to_string());
+        .unwrap_or_else(|| format!("~/vm-space/<vm-name>/<vm-name>.{}", disk_format.extension()));
 
     let info_text = vec![
         Line::from(vec![
             Span::styled("Format: ", Style::default().fg(Color::Yellow)),
-            Span::raw("qcow2 (copy-on-write, snapshots supported)"),
+            Span::raw(disk_format.description()),
         ]),
         Line::from(vec![
             Span::styled("Type: ", Style::default().fg(Color::Yellow)),
-            Span::raw("Expandable (only uses space as needed)"),
+            Span::raw(disk_format.storage_description()),
         ]),
         Line::from(vec![
             Span::styled("Location: ", Style::default().fg(Color::Yellow)),
@@ -1612,13 +1658,11 @@ fn render_new_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
     let info = Paragraph::new(info_text)
         .block(info_block)
         .wrap(Wrap { trim: false });
-    frame.render_widget(info, sub_chunks[2]);
+    frame.render_widget(info, sub_chunks[4]);
 }
 
 /// Render the "Use Existing" disk mode content
 fn render_existing_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
-    use crate::app::DiskAction;
-
     let state = app.wizard_state.as_ref().unwrap();
 
     let sub_chunks = Layout::default()
@@ -1660,13 +1704,11 @@ fn render_existing_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
         Paragraph::new(display).style(Style::default().fg(Color::Green))
     } else {
         let prefix = if browse_focused { "> " } else { "  " };
-        Paragraph::new(format!("{}( ) Browse for qcow2 disk file...", prefix)).style(
-            if browse_focused {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        )
+        Paragraph::new(format!("{}( ) Browse for disk image...", prefix)).style(if browse_focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        })
     };
     frame.render_widget(browse_text, browse_inner);
 
@@ -1709,7 +1751,7 @@ fn render_existing_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
 
     // Note about renaming
     let note_text = format!(
-        "Note: The disk will be renamed to {}.qcow2",
+        "Note: The disk will be renamed to match its detected format under {}",
         state.folder_name
     );
     let note = Paragraph::new(note_text).style(Style::default().fg(Color::DarkGray));
@@ -1717,8 +1759,6 @@ fn render_existing_disk_mode(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
-    use crate::app::{DiskAction, FileBrowserMode};
-
     let (editing, use_existing, field_focus) = app
         .wizard_state
         .as_ref()
@@ -1786,7 +1826,7 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(ref mut state) = app.wizard_state {
-                let max_focus = if state.use_existing_disk { 2 } else { 1 };
+                let max_focus = 2;
                 if state.field_focus < max_focus {
                     state.field_focus += 1;
                 }
@@ -1813,6 +1853,10 @@ fn handle_step_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
                         } else {
                             state.disk_size_gb = (state.disk_size_gb + 8).min(10000);
                         }
+                    }
+                    2 if !state.use_existing_disk => {
+                        // Toggle new disk image format
+                        app.create_wizard_disk_format = app.create_wizard_disk_format.toggle();
                     }
                     2 if state.use_existing_disk => {
                         // Toggle copy/move action
@@ -3322,31 +3366,51 @@ fn render_step_confirm(app: &App, frame: &mut Frame, area: Rect) {
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "None".to_string());
+    let disk_summary = if state.use_existing_disk {
+        let action = match state.existing_disk_action {
+            DiskAction::Copy => "copy",
+            DiskAction::Move => "move",
+        };
+        let format = state
+            .existing_disk_path
+            .as_deref()
+            .and_then(DiskImageFormat::from_path)
+            .map(|format| format.label())
+            .unwrap_or("detected");
+        format!("existing disk ({action}, {format})")
+    } else {
+        format!(
+            "{} GB {}",
+            state.disk_size_gb,
+            app.create_wizard_disk_format.summary()
+        )
+    };
 
     let config = &state.qemu_config;
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("VM Name:        ", Style::default().fg(Color::Yellow)),
-        Span::raw(&state.vm_name),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Folder:         ", Style::default().fg(Color::Yellow)),
-        Span::raw(vm_path),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("OS Type:        ", Style::default().fg(Color::Yellow)),
-        Span::raw(os_name),
-    ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("Disk:           ", Style::default().fg(Color::Yellow)),
-        Span::raw(format!("{} GB qcow2 (expandable)", state.disk_size_gb)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("ISO:            ", Style::default().fg(Color::Yellow)),
-        Span::raw(iso_str),
-    ]));
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("VM Name:        ", Style::default().fg(Color::Yellow)),
+            Span::raw(&state.vm_name),
+        ]),
+        Line::from(vec![
+            Span::styled("Folder:         ", Style::default().fg(Color::Yellow)),
+            Span::raw(vm_path),
+        ]),
+        Line::from(vec![
+            Span::styled("OS Type:        ", Style::default().fg(Color::Yellow)),
+            Span::raw(os_name),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Disk:           ", Style::default().fg(Color::Yellow)),
+            Span::raw(disk_summary),
+        ]),
+        Line::from(vec![
+            Span::styled("ISO:            ", Style::default().fg(Color::Yellow)),
+            Span::raw(iso_str),
+        ]),
+    ];
     if let Some(ref floppy_path) = state.floppy_path {
         lines.push(Line::from(vec![
             Span::styled("Floppy:         ", Style::default().fg(Color::Yellow)),
@@ -3470,7 +3534,7 @@ fn handle_step_confirm(app: &mut App, key: KeyEvent) -> Result<()> {
             let state = app.wizard_state.as_ref().unwrap().clone();
             let vm_name = state.vm_name.clone();
 
-            match create_vm(&library_path, &state) {
+            match create_vm_with_disk_format(&library_path, &state, app.create_wizard_disk_format) {
                 Ok(created) => {
                     // Cancel wizard first (closes screens)
                     app.cancel_wizard();

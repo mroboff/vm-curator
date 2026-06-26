@@ -3,7 +3,107 @@
 
 use crate::vm::qemu_config::{PortForward, PortProtocol};
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Disk image format to create for new VMs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiskImageFormat {
+    #[default]
+    Qcow2,
+    Raw,
+}
+
+impl DiskImageFormat {
+    /// Format name accepted by `qemu-img`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "qcow2",
+            Self::Raw => "raw",
+        }
+    }
+
+    /// File extension used for newly-created or imported disks.
+    #[must_use]
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "qcow2",
+            Self::Raw => "raw",
+        }
+    }
+
+    /// Short label for compact UI summaries.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "qcow2",
+            Self::Raw => "raw",
+        }
+    }
+
+    /// Human-readable description for format selection UI.
+    #[must_use]
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "qcow2 (copy-on-write, snapshots supported)",
+            Self::Raw => "raw (plain disk image, no snapshots)",
+        }
+    }
+
+    /// Human-readable storage behavior summary.
+    #[must_use]
+    pub fn storage_description(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "Expandable (only uses space as needed)",
+            Self::Raw => "Plain sparse file (guest sees full size)",
+        }
+    }
+
+    /// Compact summary for confirmation screens.
+    #[must_use]
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::Qcow2 => "qcow2 (expandable)",
+            Self::Raw => "raw (no snapshots)",
+        }
+    }
+
+    /// Alternate between the supported creation formats.
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Qcow2 => Self::Raw,
+            Self::Raw => Self::Qcow2,
+        }
+    }
+
+    /// Map a `qemu-img info` format string into a supported wizard format.
+    #[must_use]
+    pub fn from_qemu_format(format: &str) -> Option<Self> {
+        match format.to_lowercase().as_str() {
+            "qcow2" | "qcow" => Some(Self::Qcow2),
+            "raw" => Some(Self::Raw),
+            _ => None,
+        }
+    }
+
+    /// Infer the disk format from a path extension.
+    #[must_use]
+    pub fn from_path(path: &Path) -> Option<Self> {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .and_then(Self::from_extension)
+    }
+
+    #[must_use]
+    fn from_extension(ext: &str) -> Option<Self> {
+        match ext.to_lowercase().as_str() {
+            "qcow2" | "qcow" => Some(Self::Qcow2),
+            "raw" | "img" => Some(Self::Raw),
+            _ => None,
+        }
+    }
+}
 
 /// Action to take with an existing disk when using it for a new VM
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -506,5 +606,57 @@ impl Default for ImportWizardState {
             editing_name: false,
             warnings_acknowledged: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_image_format_strings_match_qemu_and_filenames() {
+        assert_eq!(DiskImageFormat::Qcow2.as_str(), "qcow2");
+        assert_eq!(DiskImageFormat::Qcow2.extension(), "qcow2");
+        assert_eq!(DiskImageFormat::Raw.as_str(), "raw");
+        assert_eq!(DiskImageFormat::Raw.extension(), "raw");
+    }
+
+    #[test]
+    fn disk_image_format_toggles_between_supported_formats() {
+        assert_eq!(DiskImageFormat::Qcow2.toggle(), DiskImageFormat::Raw);
+        assert_eq!(DiskImageFormat::Raw.toggle(), DiskImageFormat::Qcow2);
+    }
+
+    #[test]
+    fn disk_image_format_parses_qemu_formats_case_insensitively() {
+        assert_eq!(
+            DiskImageFormat::from_qemu_format("QCOW2"),
+            Some(DiskImageFormat::Qcow2)
+        );
+        assert_eq!(
+            DiskImageFormat::from_qemu_format("qcow"),
+            Some(DiskImageFormat::Qcow2)
+        );
+        assert_eq!(
+            DiskImageFormat::from_qemu_format("RAW"),
+            Some(DiskImageFormat::Raw)
+        );
+        assert_eq!(DiskImageFormat::from_qemu_format("vmdk"), None);
+    }
+
+    #[test]
+    fn disk_image_format_parses_supported_extensions() {
+        assert_eq!(
+            DiskImageFormat::from_path(Path::new("/vms/debian.QCOW2")),
+            Some(DiskImageFormat::Qcow2)
+        );
+        assert_eq!(
+            DiskImageFormat::from_path(Path::new("/vms/debian.img")),
+            Some(DiskImageFormat::Raw)
+        );
+        assert_eq!(
+            DiskImageFormat::from_path(Path::new("/vms/debian.vmdk")),
+            None
+        );
     }
 }
