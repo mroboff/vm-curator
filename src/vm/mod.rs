@@ -8,6 +8,7 @@ pub mod qemu_config;
 pub mod single_gpu_scripts;
 pub mod snapshot;
 
+#[allow(unused_imports)]
 pub use create::create_vm;
 pub use discovery::{discover_vms, group_vms_by_category, DiscoveredVm};
 pub use lifecycle::{

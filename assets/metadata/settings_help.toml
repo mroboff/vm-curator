@@ -32,8 +32,8 @@ core count minus 1-2 for host stability."""
 [default_disk_size]
 title = "Default Disk Size"
 description = """
-Virtual disk size (in GB). Disks use qcow2 format and grow as needed, \
-so larger sizes don't immediately use space."""
+Virtual disk size (in GB). New VMs default to qcow2, and you can switch \
+the disk format to raw in the creation wizard."""
 
 [default_display]
 title = "Default Display"
