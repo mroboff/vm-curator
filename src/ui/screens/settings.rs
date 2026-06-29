@@ -16,6 +16,7 @@ use crate::hardware::{
     MultiGpuPassthroughStatus, SingleGpuSupport,
 };
 use crate::vm::single_gpu_scripts::{run_system_setup, SystemSetupResult};
+use crate::vm::WindowSize;
 
 /// GPU passthrough validation result
 #[derive(Debug)]
@@ -34,6 +35,7 @@ pub enum SettingsItem {
     DefaultCpuCores,
     DefaultDiskSize,
     DefaultDisplay,
+    DefaultWindowSize,
     DefaultEnableKvm,
     ConfirmBeforeLaunch,
     // GPU Passthrough section header (not selectable, just a label)
@@ -74,6 +76,7 @@ impl SettingsItem {
             SettingsItem::DefaultCpuCores => "Default CPU Cores",
             SettingsItem::DefaultDiskSize => "Default Disk Size (GB)",
             SettingsItem::DefaultDisplay => "Default Display",
+            SettingsItem::DefaultWindowSize => "Default Window Size",
             SettingsItem::DefaultEnableKvm => "Enable KVM by Default",
             SettingsItem::ConfirmBeforeLaunch => "Confirm Before Launch",
             // GPU Passthrough
@@ -103,6 +106,10 @@ impl SettingsItem {
             SettingsItem::DefaultCpuCores => config.default_cpu_cores.to_string(),
             SettingsItem::DefaultDiskSize => config.default_disk_size_gb.to_string(),
             SettingsItem::DefaultDisplay => config.default_display.clone(),
+            SettingsItem::DefaultWindowSize => config
+                .default_window_size
+                .map(|size| size.to_string())
+                .unwrap_or_default(),
             SettingsItem::DefaultEnableKvm => bool_to_yes_no(config.default_enable_kvm),
             SettingsItem::ConfirmBeforeLaunch => bool_to_yes_no(config.confirm_before_launch),
             // GPU Passthrough
@@ -176,6 +183,7 @@ impl SettingsItem {
             SettingsItem::DefaultCpuCores => "default_cpu_cores",
             SettingsItem::DefaultDiskSize => "default_disk_size",
             SettingsItem::DefaultDisplay => "default_display",
+            SettingsItem::DefaultWindowSize => "default_window_size",
             SettingsItem::DefaultEnableKvm => "default_enable_kvm",
             SettingsItem::ConfirmBeforeLaunch => "confirm_before_launch",
             SettingsItem::GpuPassthroughHeader => "gpu_passthrough_header",
@@ -217,6 +225,7 @@ fn build_visible_items(config: &Config) -> Vec<VisibleItem> {
         make_visible(SettingsItem::DefaultCpuCores, 0),
         make_visible(SettingsItem::DefaultDiskSize, 0),
         make_visible(SettingsItem::DefaultDisplay, 0),
+        make_visible(SettingsItem::DefaultWindowSize, 0),
         make_visible(SettingsItem::DefaultEnableKvm, 0),
     ];
     items.push(make_visible(SettingsItem::ConfirmBeforeLaunch, 0));
@@ -893,6 +902,21 @@ fn cycle_setting(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
     Ok(())
 }
 
+const INVALID_WINDOW_SIZE_STATUS: &str = "Invalid size. Use WIDTHxHEIGHT, for example 1280x800.";
+
+fn parse_default_window_size_setting(
+    value: &str,
+) -> std::result::Result<Option<WindowSize>, &'static str> {
+    let value = value.trim();
+    if value.is_empty() || value.eq_ignore_ascii_case("none") || value.eq_ignore_ascii_case("off") {
+        Ok(None)
+    } else {
+        WindowSize::parse(value)
+            .map(Some)
+            .ok_or(INVALID_WINDOW_SIZE_STATUS)
+    }
+}
+
 /// Apply an edit to a setting
 fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
     let value = app.settings_edit_buffer.trim();
@@ -974,6 +998,15 @@ fn apply_edit(app: &mut App, item: SettingsItem) -> anyhow::Result<()> {
         SettingsItem::DefaultDisplay => {
             app.config.default_display = value.to_string();
         }
+        SettingsItem::DefaultWindowSize => match parse_default_window_size_setting(value) {
+            Ok(size) => {
+                app.config.default_window_size = size;
+            }
+            Err(message) => {
+                app.set_status(message);
+                return Ok(());
+            }
+        },
         SettingsItem::MultiGpuIvshmemSize => {
             if let Ok(mb) = value.parse::<u32>() {
                 // Clamp to reasonable range (16-512 MB)
@@ -1038,4 +1071,35 @@ fn save_config(app: &mut App) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_default_window_size_setting_accepts_clear_values() {
+        assert_eq!(parse_default_window_size_setting(""), Ok(None));
+        assert_eq!(parse_default_window_size_setting(" none "), Ok(None));
+        assert_eq!(parse_default_window_size_setting("OFF"), Ok(None));
+    }
+
+    #[test]
+    fn parse_default_window_size_setting_accepts_sizes() {
+        assert_eq!(
+            parse_default_window_size_setting(" 1920X1080 "),
+            Ok(Some(WindowSize {
+                width: 1920,
+                height: 1080
+            }))
+        );
+    }
+
+    #[test]
+    fn parse_default_window_size_setting_rejects_bad_sizes() {
+        assert_eq!(
+            parse_default_window_size_setting("100x100"),
+            Err(INVALID_WINDOW_SIZE_STATUS)
+        );
+    }
 }

@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -33,6 +35,62 @@ pub struct LaunchOptions {
     pub boot_mode: BootMode,
     pub extra_args: Vec<String>,
     pub usb_devices: Vec<UsbPassthrough>,
+    pub window_size: Option<WindowSize>,
+}
+
+/// Requested VM display size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl WindowSize {
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        let (width, height) = value.split_once('x').or_else(|| value.split_once('X'))?;
+        let width = width.trim().parse::<u32>().ok()?;
+        let height = height.trim().parse::<u32>().ok()?;
+
+        if (320..=16384).contains(&width) && (200..=16384).contains(&height) {
+            Some(Self { width, height })
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for WindowSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}x{}", self.width, self.height)
+    }
+}
+
+impl Serialize for WindowSize {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for WindowSize {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value)
+            .ok_or_else(|| serde::de::Error::custom("expected window size in WIDTHxHEIGHT format"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VideoOverrideSpec {
+    default_flag: &'static str,
+    default_value: &'static str,
+    override_device: &'static str,
 }
 
 /// USB device for passthrough
@@ -67,6 +125,113 @@ impl UsbPassthrough {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchInvocation {
+    program: String,
+    current_dir: PathBuf,
+    args: Vec<String>,
+    env: Vec<(String, Option<String>)>,
+}
+
+impl LaunchInvocation {
+    fn command(&self) -> Command {
+        let mut cmd = Command::new(&self.program);
+        cmd.current_dir(&self.current_dir).args(&self.args);
+        for (name, value) in &self.env {
+            if let Some(value) = value {
+                cmd.env(name, value);
+            } else {
+                cmd.env_remove(name);
+            }
+        }
+        cmd
+    }
+}
+
+fn build_launch_invocation(
+    vm: &DiscoveredVm,
+    options: &LaunchOptions,
+) -> std::result::Result<LaunchInvocation, String> {
+    let mut invocation = LaunchInvocation {
+        program: "bash".to_string(),
+        current_dir: vm.path.clone(),
+        args: vec![vm.launch_script.to_string_lossy().to_string()],
+        env: vec![(
+            "VM_CURATOR_WINDOW_SIZE".to_string(),
+            options.window_size.map(|size| size.to_string()),
+        )],
+    };
+
+    match &options.boot_mode {
+        BootMode::Normal => {}
+        BootMode::Install => {
+            invocation.args.push("--install".to_string());
+        }
+        BootMode::Cdrom(iso_path) => {
+            if !iso_path.exists() {
+                return Err(format!("ISO file not found: {}", iso_path.display()));
+            }
+            if !iso_path.is_file() {
+                return Err(format!("ISO path is not a file: {}", iso_path.display()));
+            }
+            invocation.args.push("--cdrom".to_string());
+            invocation.args.push(iso_path.to_string_lossy().to_string());
+        }
+        BootMode::Recovery(dmg_path) => {
+            if !dmg_path.exists() {
+                return Err(format!("Recovery image not found: {}", dmg_path.display()));
+            }
+            if !dmg_path.is_file() {
+                return Err(format!(
+                    "Recovery image path is not a file: {}",
+                    dmg_path.display()
+                ));
+            }
+            invocation.args.push("--recovery".to_string());
+            invocation.args.push(dmg_path.to_string_lossy().to_string());
+        }
+        BootMode::Floppy(floppy_path) => {
+            if !floppy_path.exists() {
+                return Err(format!("Floppy image not found: {}", floppy_path.display()));
+            }
+            if !floppy_path.is_file() {
+                return Err(format!(
+                    "Floppy path is not a file: {}",
+                    floppy_path.display()
+                ));
+            }
+            invocation.args.push("--floppy".to_string());
+            invocation
+                .args
+                .push(floppy_path.to_string_lossy().to_string());
+        }
+        BootMode::Network => {
+            invocation.args.push("--netboot".to_string());
+        }
+    }
+
+    invocation.args.extend(options.extra_args.clone());
+
+    if !options.usb_devices.is_empty() {
+        invocation.args.push("-usb".to_string());
+
+        let has_usb3 = options.usb_devices.iter().any(|d| d.is_usb3());
+        if has_usb3 {
+            invocation.args.push("-device".to_string());
+            invocation
+                .args
+                .push("qemu-xhci,id=xhci,p2=8,p3=8".to_string());
+        }
+
+        for usb in &options.usb_devices {
+            let bus = if usb.is_usb3() { Some("xhci.0") } else { None };
+            invocation.args.extend(usb.to_qemu_args(bus));
+        }
+    }
+
+    Ok(invocation)
+}
+
 /// Launch a VM and monitor for immediate errors
 ///
 /// This function spawns the VM process and monitors stderr for a brief period
@@ -75,106 +240,26 @@ impl UsbPassthrough {
 pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) -> LaunchResult {
     let vm_name = vm.display_name();
 
-    let mut cmd = Command::new("bash");
-    cmd.current_dir(&vm.path);
+    let invocation = match build_launch_invocation(vm, options) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            return LaunchResult {
+                success: false,
+                error: Some(error),
+                vm_name,
+            };
+        }
+    };
 
-    let mut args = vec![vm.launch_script.to_string_lossy().to_string()];
-
-    match &options.boot_mode {
-        BootMode::Normal => {}
-        BootMode::Install => {
-            args.push("--install".to_string());
-        }
-        BootMode::Cdrom(iso_path) => {
-            // Validate ISO path exists before attempting to launch
-            if !iso_path.exists() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!("ISO file not found: {}", iso_path.display())),
-                    vm_name,
-                };
-            }
-            if !iso_path.is_file() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!("ISO path is not a file: {}", iso_path.display())),
-                    vm_name,
-                };
-            }
-            args.push("--cdrom".to_string());
-            args.push(iso_path.to_string_lossy().to_string());
-        }
-        BootMode::Recovery(dmg_path) => {
-            // Validate DMG path exists before attempting to launch
-            if !dmg_path.exists() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!("Recovery image not found: {}", dmg_path.display())),
-                    vm_name,
-                };
-            }
-            if !dmg_path.is_file() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!(
-                        "Recovery image path is not a file: {}",
-                        dmg_path.display()
-                    )),
-                    vm_name,
-                };
-            }
-            args.push("--recovery".to_string());
-            args.push(dmg_path.to_string_lossy().to_string());
-        }
-        BootMode::Floppy(floppy_path) => {
-            if !floppy_path.exists() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!("Floppy image not found: {}", floppy_path.display())),
-                    vm_name,
-                };
-            }
-            if !floppy_path.is_file() {
-                return LaunchResult {
-                    success: false,
-                    error: Some(format!(
-                        "Floppy path is not a file: {}",
-                        floppy_path.display()
-                    )),
-                    vm_name,
-                };
-            }
-            args.push("--floppy".to_string());
-            args.push(floppy_path.to_string_lossy().to_string());
-        }
-        BootMode::Network => {
-            args.push("--netboot".to_string());
+    if options.window_size.is_some() {
+        if let Err(e) = ensure_window_size_override_in_script(&vm.launch_script) {
+            log::warn!(
+                "launch_vm_with_error_check: could not patch window-size override into launch.sh: {e}"
+            );
         }
     }
 
-    args.extend(options.extra_args.clone());
-
-    // Add USB passthrough arguments
-    if !options.usb_devices.is_empty() {
-        args.push("-usb".to_string());
-
-        // Check if any USB 3.0 devices are present
-        let has_usb3 = options.usb_devices.iter().any(|d| d.is_usb3());
-
-        // Add xHCI controller if USB 3.0 devices are present
-        if has_usb3 {
-            args.push("-device".to_string());
-            args.push("qemu-xhci,id=xhci,p2=8,p3=8".to_string());
-        }
-
-        // Add each USB device, attaching USB 3.0 devices to xHCI controller
-        for usb in &options.usb_devices {
-            let bus = if usb.is_usb3() { Some("xhci.0") } else { None };
-            args.extend(usb.to_qemu_args(bus));
-        }
-    }
-
-    cmd.args(&args);
+    let mut cmd = invocation.command();
 
     // Capture stderr to detect errors, but let stdout go to null
     cmd.stdin(Stdio::null())
@@ -319,8 +404,8 @@ pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> 
 /// with -display dbus (session bus). Returns the child process PID on success.
 #[allow(dead_code)]
 pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
-    let tmp = vm.path.join(".launch_dbus_tmp.sh");
-    let _ = std::fs::remove_file(&tmp); // stale temp script from prior crash
+    let tmp = vm.path.join(".launch_dbus_override.sh");
+    let _ = std::fs::remove_file(&tmp); // stale override script from prior crash
     let _ = std::fs::remove_file(vm.path.join("qemu.sock")); // stale socket from unclean shutdown
 
     if let Err(e) = ensure_qmp_in_script(&vm.path) {
@@ -332,7 +417,7 @@ pub fn launch_vm_dbus(vm: &DiscoveredVm) -> Result<u32> {
 
     let modified = replace_display_for_dbus(&content, "-display dbus");
 
-    std::fs::write(&tmp, &modified).context("Failed to write temp launch script")?;
+    std::fs::write(&tmp, &modified).context("Failed to write D-Bus launch override script")?;
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
 
@@ -1237,6 +1322,205 @@ bind_vfio || exit 1
 
     let new_content = insert_args_section(&cleaned, &section, "$PCI_PASSTHROUGH_ARGS");
     std::fs::write(&vm.launch_script, new_content).context("Failed to write launch script")?;
+    Ok(())
+}
+
+// ── Window size launch override ─────────────────────────────────────────────
+const WINDOW_SIZE_MARKER_START: &str = "# >>> Window size override (managed by vm-curator) >>>";
+const WINDOW_SIZE_MARKER_END: &str = "# <<< Window size override (managed by vm-curator) <<<";
+const VIDEO_ARGS_ARRAY_REF: &str = r#""${VM_CURATOR_VIDEO_ARGS[@]}""#;
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ',' | '='))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn strip_matching_quotes(value: &str) -> &str {
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
+fn parse_supported_video_arg_line(line: &str) -> Option<VideoOverrideSpec> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+
+    let command = trimmed.strip_suffix('\\').unwrap_or(trimmed).trim_end();
+
+    if let Some(rest) = command.strip_prefix("-vga ") {
+        let mut parts = rest.split_whitespace();
+        let vga = strip_matching_quotes(parts.next()?);
+        if parts.next().is_some() {
+            return None;
+        }
+
+        let (default_value, override_device) = match vga {
+            "std" => ("std", "VGA"),
+            "virtio" => ("virtio", "virtio-vga"),
+            "qxl" => ("qxl", "qxl-vga"),
+            _ => return None,
+        };
+
+        return Some(VideoOverrideSpec {
+            default_flag: "-vga",
+            default_value,
+            override_device,
+        });
+    }
+
+    if let Some(rest) = command.strip_prefix("-device ") {
+        let mut parts = rest.split_whitespace();
+        let device = strip_matching_quotes(parts.next()?);
+        if parts.next().is_some() {
+            return None;
+        }
+
+        let (default_value, override_device) = match device {
+            "VGA" => ("VGA", "VGA"),
+            "virtio-vga" => ("virtio-vga", "virtio-vga"),
+            "virtio-vga-gl" => ("virtio-vga-gl", "virtio-vga-gl"),
+            "qxl-vga" => ("qxl-vga", "qxl-vga"),
+            _ => return None,
+        };
+
+        return Some(VideoOverrideSpec {
+            default_flag: "-device",
+            default_value,
+            override_device,
+        });
+    }
+
+    None
+}
+
+fn window_size_setup_block(spec: &VideoOverrideSpec) -> String {
+    format!(
+        r#"{WINDOW_SIZE_MARKER_START}
+VM_CURATOR_VIDEO_DEVICE={}
+VM_CURATOR_VIDEO_ARGS={}
+if [[ -n "${{VM_CURATOR_WINDOW_SIZE:-}}" && -n "$VM_CURATOR_VIDEO_DEVICE" ]]; then
+    if [[ "$VM_CURATOR_WINDOW_SIZE" =~ ^([0-9]+)[xX]([0-9]+)$ ]]; then
+        VM_CURATOR_WIDTH="${{BASH_REMATCH[1]}}"
+        VM_CURATOR_HEIGHT="${{BASH_REMATCH[2]}}"
+        if (( VM_CURATOR_WIDTH >= 320 && VM_CURATOR_WIDTH <= 16384 && VM_CURATOR_HEIGHT >= 200 && VM_CURATOR_HEIGHT <= 16384 )); then
+            VM_CURATOR_VIDEO_ARGS=(-device "${{VM_CURATOR_VIDEO_DEVICE}},xres=${{VM_CURATOR_WIDTH}},yres=${{VM_CURATOR_HEIGHT}}")
+        fi
+    fi
+fi
+{WINDOW_SIZE_MARKER_END}"#,
+        shell_quote(spec.override_device),
+        shell_array_literal(spec)
+    )
+}
+
+fn shell_array_literal(spec: &VideoOverrideSpec) -> String {
+    format!(
+        "({} {})",
+        shell_quote(spec.default_flag),
+        shell_quote(spec.default_value)
+    )
+}
+
+fn push_video_args_reference_line(output: &mut String, line: &str) {
+    let indent_len = line.len() - line.trim_start().len();
+    let indent = &line[..indent_len];
+    let has_continuation = line.trim_end().ends_with('\\');
+    output.push_str(indent);
+    output.push_str(VIDEO_ARGS_ARRAY_REF);
+    if has_continuation {
+        output.push_str(" \\");
+    }
+}
+
+fn patch_window_size_override(content: &str) -> Option<String> {
+    if content.contains("VM_CURATOR_VIDEO_ARGS") {
+        return None;
+    }
+
+    let mut first_case_line = None;
+    let mut first_qemu_line = None;
+    let mut first_spec = None;
+    let mut matching_line_indices = Vec::new();
+
+    for (index, line) in content.lines().enumerate() {
+        if first_case_line.is_none() && line.trim_start().starts_with("case ") {
+            first_case_line = Some(index);
+        }
+        if first_qemu_line.is_none() && line.contains("qemu-system") {
+            first_qemu_line = Some(index);
+        }
+
+        if let Some(spec) = parse_supported_video_arg_line(line) {
+            if let Some(existing) = first_spec {
+                if spec != existing {
+                    return None;
+                }
+            } else {
+                first_spec = Some(spec);
+            }
+            matching_line_indices.push(index);
+        }
+    }
+
+    let first_spec = first_spec?;
+    let insert_before = first_case_line.or(first_qemu_line)?;
+
+    let setup_block = window_size_setup_block(&first_spec);
+    let mut matching_line_indices = matching_line_indices.into_iter().peekable();
+    let mut patched = String::with_capacity(content.len() + setup_block.len() + 1);
+    let mut wrote_line = false;
+
+    for (index, line) in content.lines().enumerate() {
+        if index == insert_before {
+            if wrote_line {
+                patched.push('\n');
+            }
+            patched.push_str(&setup_block);
+            wrote_line = true;
+        }
+
+        if wrote_line {
+            patched.push('\n');
+        }
+
+        if matches!(matching_line_indices.peek(), Some(line_index) if *line_index == index) {
+            matching_line_indices.next();
+            push_video_args_reference_line(&mut patched, line);
+        } else {
+            patched.push_str(line);
+        }
+        wrote_line = true;
+    }
+
+    if content.ends_with('\n') {
+        patched.push('\n');
+    }
+    Some(patched)
+}
+
+fn ensure_window_size_override_in_script(script_path: &Path) -> Result<()> {
+    let content = std::fs::read_to_string(script_path)
+        .with_context(|| format!("Failed to read launch script: {}", script_path.display()))?;
+
+    let Some(patched) = patch_window_size_override(&content) else {
+        return Ok(());
+    };
+
+    std::fs::write(script_path, patched)
+        .with_context(|| format!("Failed to write launch script: {}", script_path.display()))?;
     Ok(())
 }
 

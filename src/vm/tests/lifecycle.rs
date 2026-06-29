@@ -20,6 +20,301 @@ fn test_replace_display_for_dbus_strips_spice_agent_channel() {
 }
 
 #[test]
+fn test_window_size_parse_accepts_common_format() {
+    assert_eq!(
+        WindowSize::parse(" 1440x900 "),
+        Some(WindowSize {
+            width: 1440,
+            height: 900,
+        })
+    );
+    assert_eq!(
+        WindowSize::parse("1920X1080"),
+        Some(WindowSize {
+            width: 1920,
+            height: 1080,
+        })
+    );
+}
+
+#[test]
+fn test_window_size_parse_rejects_invalid_values() {
+    assert_eq!(WindowSize::parse("1440"), None);
+    assert_eq!(WindowSize::parse("1440x"), None);
+    assert_eq!(WindowSize::parse("100x100"), None);
+}
+
+fn test_vm(vm_dir: &std::path::Path) -> DiscoveredVm {
+    DiscoveredVm {
+        id: "test-vm".to_string(),
+        path: vm_dir.to_path_buf(),
+        launch_script: vm_dir.join("launch.sh"),
+        config: crate::vm::QemuConfig::default(),
+        custom_name: None,
+        os_profile: None,
+        notes: None,
+    }
+}
+
+#[test]
+fn test_build_launch_invocation_sets_window_size_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let vm = test_vm(dir.path());
+    let options = LaunchOptions {
+        window_size: WindowSize::parse("1440x900"),
+        extra_args: vec!["--dry-run".to_string()],
+        ..LaunchOptions::default()
+    };
+
+    let invocation = build_launch_invocation(&vm, &options).unwrap();
+
+    assert_eq!(invocation.program, "bash");
+    assert_eq!(invocation.current_dir, vm.path);
+    assert_eq!(
+        invocation.args[0],
+        vm.launch_script.to_string_lossy().to_string()
+    );
+    assert!(invocation.args.contains(&"--dry-run".to_string()));
+    assert_eq!(
+        invocation.env,
+        vec![(
+            "VM_CURATOR_WINDOW_SIZE".to_string(),
+            Some("1440x900".to_string())
+        )]
+    );
+}
+
+#[test]
+fn test_build_launch_invocation_removes_window_size_env_when_unset() {
+    let dir = tempfile::tempdir().unwrap();
+    let vm = test_vm(dir.path());
+
+    let invocation = build_launch_invocation(&vm, &LaunchOptions::default()).unwrap();
+
+    assert_eq!(
+        invocation.env,
+        vec![("VM_CURATOR_WINDOW_SIZE".to_string(), None)]
+    );
+}
+
+#[test]
+fn test_build_launch_invocation_validates_boot_media_before_spawning() {
+    let dir = tempfile::tempdir().unwrap();
+    let vm = test_vm(dir.path());
+    let options = LaunchOptions {
+        boot_mode: BootMode::Cdrom(dir.path().join("missing.iso")),
+        ..LaunchOptions::default()
+    };
+
+    let err = build_launch_invocation(&vm, &options).unwrap_err();
+
+    assert!(err.contains("ISO file not found"));
+}
+
+#[test]
+fn test_patch_window_size_override_migrates_existing_vga_script() {
+    let script = r#"#!/bin/bash
+VM_DIR="$(dirname "$(readlink -f "$0")")"
+DISK="$VM_DIR/test.qcow2"
+
+case "$1" in
+    "")
+        qemu-system-x86_64 \
+        -m 2048M \
+        -vga std \
+        -display gtk
+        ;;
+esac
+"#;
+    let expected = r#"#!/bin/bash
+VM_DIR="$(dirname "$(readlink -f "$0")")"
+DISK="$VM_DIR/test.qcow2"
+
+# >>> Window size override (managed by vm-curator) >>>
+VM_CURATOR_VIDEO_DEVICE=VGA
+VM_CURATOR_VIDEO_ARGS=(-vga std)
+if [[ -n "${VM_CURATOR_WINDOW_SIZE:-}" && -n "$VM_CURATOR_VIDEO_DEVICE" ]]; then
+    if [[ "$VM_CURATOR_WINDOW_SIZE" =~ ^([0-9]+)[xX]([0-9]+)$ ]]; then
+        VM_CURATOR_WIDTH="${BASH_REMATCH[1]}"
+        VM_CURATOR_HEIGHT="${BASH_REMATCH[2]}"
+        if (( VM_CURATOR_WIDTH >= 320 && VM_CURATOR_WIDTH <= 16384 && VM_CURATOR_HEIGHT >= 200 && VM_CURATOR_HEIGHT <= 16384 )); then
+            VM_CURATOR_VIDEO_ARGS=(-device "${VM_CURATOR_VIDEO_DEVICE},xres=${VM_CURATOR_WIDTH},yres=${VM_CURATOR_HEIGHT}")
+        fi
+    fi
+fi
+# <<< Window size override (managed by vm-curator) <<<
+case "$1" in
+    "")
+        qemu-system-x86_64 \
+        -m 2048M \
+        "${VM_CURATOR_VIDEO_ARGS[@]}" \
+        -display gtk
+        ;;
+esac
+"#;
+
+    let patched = patch_window_size_override(script).expect("vga script should be patchable");
+
+    assert_eq!(patched, expected);
+    assert!(patch_window_size_override(&patched).is_none());
+}
+
+#[test]
+fn test_patch_window_size_override_migrates_existing_gl_device_script() {
+    let script = r#"#!/bin/bash
+qemu-system-x86_64 \
+    -device virtio-vga-gl \
+    -display gtk,gl=on
+"#;
+    let expected = r#"#!/bin/bash
+# >>> Window size override (managed by vm-curator) >>>
+VM_CURATOR_VIDEO_DEVICE=virtio-vga-gl
+VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)
+if [[ -n "${VM_CURATOR_WINDOW_SIZE:-}" && -n "$VM_CURATOR_VIDEO_DEVICE" ]]; then
+    if [[ "$VM_CURATOR_WINDOW_SIZE" =~ ^([0-9]+)[xX]([0-9]+)$ ]]; then
+        VM_CURATOR_WIDTH="${BASH_REMATCH[1]}"
+        VM_CURATOR_HEIGHT="${BASH_REMATCH[2]}"
+        if (( VM_CURATOR_WIDTH >= 320 && VM_CURATOR_WIDTH <= 16384 && VM_CURATOR_HEIGHT >= 200 && VM_CURATOR_HEIGHT <= 16384 )); then
+            VM_CURATOR_VIDEO_ARGS=(-device "${VM_CURATOR_VIDEO_DEVICE},xres=${VM_CURATOR_WIDTH},yres=${VM_CURATOR_HEIGHT}")
+        fi
+    fi
+fi
+# <<< Window size override (managed by vm-curator) <<<
+qemu-system-x86_64 \
+    "${VM_CURATOR_VIDEO_ARGS[@]}" \
+    -display gtk,gl=on
+"#;
+
+    let patched =
+        patch_window_size_override(script).expect("virtio-vga-gl script should be patchable");
+
+    assert_eq!(patched, expected);
+    assert!(patch_window_size_override(&patched).is_none());
+}
+
+#[test]
+fn test_patch_window_size_override_leaves_unsupported_or_mixed_video_unchanged() {
+    let unsupported = r#"#!/bin/bash
+qemu-system-x86_64 \
+    -vga cirrus \
+    -display gtk
+"#;
+    assert!(patch_window_size_override(unsupported).is_none());
+
+    let mixed = r#"#!/bin/bash
+case "$1" in
+    --install)
+        qemu-system-x86_64 \
+        -vga std
+        ;;
+    "")
+        qemu-system-x86_64 \
+        -vga virtio
+        ;;
+esac
+"#;
+    assert!(patch_window_size_override(mixed).is_none());
+}
+
+#[test]
+fn test_parse_supported_video_arg_line_parses_supported_video_forms() {
+    let cases = [
+        ("-vga std", "-vga", "std", "VGA"),
+        ("        -vga virtio \\", "-vga", "virtio", "virtio-vga"),
+        ("-vga 'qxl'", "-vga", "qxl", "qxl-vga"),
+        ("-device VGA", "-device", "VGA", "VGA"),
+        (
+            "    -device virtio-vga \\",
+            "-device",
+            "virtio-vga",
+            "virtio-vga",
+        ),
+        (
+            "-device \"virtio-vga-gl\"",
+            "-device",
+            "virtio-vga-gl",
+            "virtio-vga-gl",
+        ),
+        ("-device 'qxl-vga'", "-device", "qxl-vga", "qxl-vga"),
+    ];
+
+    for (line, default_flag, default_value, override_device) in cases {
+        let spec = parse_supported_video_arg_line(line)
+            .unwrap_or_else(|| panic!("expected supported video arg line: {line}"));
+
+        assert_eq!(spec.default_flag, default_flag);
+        assert_eq!(spec.default_value, default_value);
+        assert_eq!(spec.override_device, override_device);
+    }
+}
+
+#[test]
+fn test_parse_supported_video_arg_line_rejects_unsupported_forms() {
+    for line in [
+        "",
+        "   ",
+        "# -vga std",
+        "-vga cirrus",
+        "-vga std extra",
+        "-device cirrus-vga",
+        "-device virtio-vga,hostmem=256M",
+        "-device virtio-vga extra",
+    ] {
+        assert!(
+            parse_supported_video_arg_line(line).is_none(),
+            "expected unsupported video arg line: {line}"
+        );
+    }
+}
+
+#[test]
+fn test_ensure_window_size_override_in_script_writes_patched_script() {
+    let script = r#"#!/bin/bash
+qemu-system-x86_64 \
+    -vga std \
+    -display gtk
+"#;
+    let expected = patch_window_size_override(script).expect("vga script should be patchable");
+    let dir = tempfile::tempdir().expect("create temp dir for launch script");
+    let script_path = dir.path().join("launch.sh");
+    std::fs::write(&script_path, script).expect("write launch script fixture");
+
+    ensure_window_size_override_in_script(&script_path).expect("patch launch script on disk");
+
+    let patched = std::fs::read_to_string(&script_path).expect("read patched launch script");
+    assert_eq!(patched, expected);
+}
+
+#[test]
+fn test_ensure_window_size_override_in_script_leaves_unsupported_script_unchanged() {
+    let script = r#"#!/bin/bash
+qemu-system-x86_64 \
+    -vga cirrus \
+    -display gtk
+"#;
+    let dir = tempfile::tempdir().expect("create temp dir for launch script");
+    let script_path = dir.path().join("launch.sh");
+    std::fs::write(&script_path, script).expect("write launch script fixture");
+
+    ensure_window_size_override_in_script(&script_path)
+        .expect("leave unsupported script unchanged");
+
+    let actual = std::fs::read_to_string(&script_path).expect("read launch script");
+    assert_eq!(actual, script);
+}
+
+#[test]
+fn test_ensure_window_size_override_in_script_reports_missing_script() {
+    let dir = tempfile::tempdir().expect("create temp dir for launch script");
+    let script_path = dir.path().join("missing-launch.sh");
+
+    let err = ensure_window_size_override_in_script(&script_path)
+        .expect_err("missing launch script should return an error");
+
+    assert!(err.to_string().contains("Failed to read launch script"));
+}
+
+#[test]
 fn test_generate_shared_folders_section_empty() {
     let section = generate_shared_folders_section(&[], "virtio-9p-pci");
     assert!(section.is_empty());
