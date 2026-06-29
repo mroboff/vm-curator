@@ -808,6 +808,7 @@ impl App {
             boot_mode: self.boot_mode.clone(),
             extra_args: Vec::new(),
             usb_devices,
+            window_size: self.config.default_window_size,
         }
     }
 

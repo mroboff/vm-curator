@@ -65,6 +65,101 @@ fn test_generate_launch_script() {
     assert!(script.contains("--install"));
     assert!(script.contains("--cdrom"));
     assert!(script.contains("--recovery"));
+    assert!(script.contains("VM_CURATOR_WINDOW_SIZE"));
+    assert!(script.contains("VM_CURATOR_VIDEO_ARGS=(-vga std)"));
+    assert!(script.contains("\"${VM_CURATOR_VIDEO_ARGS[@]}\""));
+}
+
+#[test]
+fn test_generate_video_args_setup_overrides_supported_vga() {
+    let config = WizardQemuConfig {
+        vga: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+    let setup = generate_video_args_setup(&config);
+
+    assert!(setup.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga"));
+    assert!(setup.contains("VM_CURATOR_VIDEO_ARGS=(-vga virtio)"));
+    assert!(
+        setup.contains(
+            "VM_CURATOR_VIDEO_ARGS=(-device \"${VM_CURATOR_VIDEO_DEVICE},xres=${VM_CURATOR_WIDTH},yres=${VM_CURATOR_HEIGHT}\")"
+        ),
+        "{setup}"
+    );
+}
+
+#[test]
+fn test_generate_video_args_setup_keeps_unsupported_vga_without_override_device() {
+    let config = WizardQemuConfig {
+        vga: "cirrus".to_string(),
+        ..WizardQemuConfig::default()
+    };
+    let setup = generate_video_args_setup(&config);
+
+    assert!(setup.contains("VM_CURATOR_VIDEO_DEVICE=\n"));
+    assert!(setup.contains("VM_CURATOR_VIDEO_ARGS=(-vga cirrus)"));
+}
+
+#[test]
+fn test_generate_video_args_setup_uses_gl_device_when_enabled() {
+    let config = WizardQemuConfig {
+        vga: "virtio".to_string(),
+        gl_acceleration: true,
+        ..WizardQemuConfig::default()
+    };
+    let setup = generate_video_args_setup(&config);
+
+    assert!(setup.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga-gl"));
+    assert!(setup.contains("VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)"));
+}
+
+fn eval_video_args_setup(setup: &str, window_size: Option<&str>) -> Vec<String> {
+    let script = format!("{setup}\nprintf '%s\\n' \"${{VM_CURATOR_VIDEO_ARGS[@]}}\"\n");
+    let mut command = std::process::Command::new("bash");
+    command.arg("-c").arg(script);
+    if let Some(window_size) = window_size {
+        command.env("VM_CURATOR_WINDOW_SIZE", window_size);
+    } else {
+        command.env_remove("VM_CURATOR_WINDOW_SIZE");
+    }
+
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn test_generate_video_args_setup_runtime_override_behavior() {
+    let config = WizardQemuConfig {
+        vga: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+    let setup = generate_video_args_setup(&config);
+
+    assert_eq!(
+        eval_video_args_setup(&setup, Some("1600x900")),
+        vec![
+            "-device".to_string(),
+            "virtio-vga,xres=1600,yres=900".to_string()
+        ]
+    );
+    assert_eq!(
+        eval_video_args_setup(&setup, Some("100x100")),
+        vec!["-vga".to_string(), "virtio".to_string()]
+    );
+    assert_eq!(
+        eval_video_args_setup(&setup, None),
+        vec!["-vga".to_string(), "virtio".to_string()]
+    );
 }
 
 #[test]
@@ -100,7 +195,7 @@ fn test_build_qemu_command_basic() {
     assert!(cmd.contains("-enable-kvm"));
     assert!(cmd.contains("-m 2048M"));
     assert!(cmd.contains("-smp 2"));
-    assert!(cmd.contains("-vga std"));
+    assert!(cmd.contains("\"${VM_CURATOR_VIDEO_ARGS[@]}\""));
     assert!(cmd.contains("-display gtk"));
     assert!(cmd.contains("-device e1000"));
     assert!(cmd.contains("-usb"));
@@ -777,8 +872,10 @@ fn test_spice_agent_channel_with_gl_acceleration() {
         ..WizardQemuConfig::default()
     };
     let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
+    let setup = generate_video_args_setup(&config);
 
-    assert!(cmd.contains("-device virtio-vga-gl"), "GL device present");
+    assert!(cmd.contains("\"${VM_CURATOR_VIDEO_ARGS[@]}\""));
+    assert!(setup.contains("VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)"));
     assert!(
         cmd.contains("-display spice-app,gl=on"),
         "gl display present"
