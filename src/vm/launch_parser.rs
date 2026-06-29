@@ -197,7 +197,7 @@ fn extract_vga(content: &str) -> Option<VgaType> {
             let rest = &line[idx + 5..];
             let vga: String = rest
                 .chars()
-                .take_while(|c| !c.is_whitespace() && *c != '\\')
+                .take_while(|c| !c.is_whitespace() && *c != '\\' && *c != ')')
                 .collect();
             if !vga.is_empty() {
                 return Some(VgaType::from_str(&vga));

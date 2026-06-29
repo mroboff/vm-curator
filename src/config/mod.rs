@@ -1,3 +1,4 @@
+use crate::vm::WindowSize;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,9 @@ pub struct Config {
     pub default_disk_size_gb: u32,
     /// Default display backend (gtk, sdl, spice)
     pub default_display: String,
+    /// Default VM display size when launching (e.g. "1280x800"); None disables override
+    #[serde(default)]
+    pub default_window_size: Option<WindowSize>,
     /// Enable KVM acceleration by default
     pub default_enable_kvm: bool,
 
@@ -76,6 +80,7 @@ impl Default for Config {
             default_cpu_cores: 2,
             default_disk_size_gb: 64,
             default_display: "gtk".to_string(),
+            default_window_size: None,
             default_enable_kvm: true,
 
             // Behavior
@@ -170,6 +175,7 @@ mod tests {
             snapshot_prefix: "custom-prefix".to_string(),
             default_memory_mb: 8192,
             default_iso_path: Some(PathBuf::from("/tmp/isos")),
+            default_window_size: WindowSize::parse("1440x900"),
             single_gpu_enabled: true,
             ..Config::default()
         };
@@ -182,6 +188,7 @@ mod tests {
         assert_eq!(loaded.snapshot_prefix, "custom-prefix");
         assert_eq!(loaded.default_memory_mb, 8192);
         assert_eq!(loaded.default_iso_path, Some(PathBuf::from("/tmp/isos")));
+        assert_eq!(loaded.default_window_size, WindowSize::parse("1440x900"));
         assert!(loaded.single_gpu_enabled);
     }
 
@@ -200,6 +207,26 @@ mod tests {
             loaded.default_cpu_cores,
             Config::default().default_cpu_cores
         );
+    }
+
+    #[test]
+    fn window_size_serializes_as_string() {
+        let cfg = Config {
+            default_window_size: WindowSize::parse("1440x900"),
+            ..Config::default()
+        };
+
+        let content = toml::to_string_pretty(&cfg).unwrap();
+        assert!(content.contains("default_window_size = \"1440x900\""));
+    }
+
+    #[test]
+    fn load_from_invalid_window_size_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "default_window_size = \"tiny\"\n").unwrap();
+
+        assert!(Config::load_from(&path).is_err());
     }
 
     #[test]
