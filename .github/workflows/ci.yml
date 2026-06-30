@@ -20,7 +20,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        # libusb (used by the `rusb` crate for USB enumeration) — pkg-config lets
+        # rusb link the system library instead of vendoring it.
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,6 +34,34 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Clippy (warnings denied)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+  check-macos:
+    runs-on: macos-14 # Apple Silicon
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        # rusb vendors libusb by default, but installing it lets the build link
+        # the system library and keeps pkg-config-based detection happy.
+        run: brew install libusb pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --all-targets --locked
 
       - name: Clippy (warnings denied)
         run: cargo clippy --all-targets --locked -- -D warnings

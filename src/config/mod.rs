@@ -75,7 +75,7 @@ impl Default for Config {
             default_memory_mb: 4096,
             default_cpu_cores: 2,
             default_disk_size_gb: 64,
-            default_display: "gtk".to_string(),
+            default_display: crate::platform::default_display().to_string(),
             default_enable_kvm: true,
 
             // Behavior

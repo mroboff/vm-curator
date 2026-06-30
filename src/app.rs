@@ -462,13 +462,13 @@ impl App {
     /// Returns detected display backends for the emulator, preferring `spice-app`
     /// over `spice`. Falls back to a default list if detection returned nothing.
     pub fn get_display_options_for_emulator(&self, emulator: &str) -> Vec<String> {
-        // Preferred order of display backends
-        let preferred_order = ["gtk", "sdl", "spice-app", "vnc", "none"];
+        // Preferred order of display backends (host-native backend leads)
+        let preferred_order = crate::platform::preferred_display_order();
 
         if let Some(detected) = self.display_capabilities.get(emulator) {
             let mut result = Vec::new();
             // Add backends in preferred order if they were detected
-            for &pref in &preferred_order {
+            for &pref in preferred_order {
                 if detected.iter().any(|d| d == pref) {
                     result.push(pref.to_string());
                 }

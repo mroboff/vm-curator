@@ -97,7 +97,8 @@ fn test_build_qemu_command_basic() {
     let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
 
     assert!(cmd.contains("qemu-system-x86_64"));
-    assert!(cmd.contains("-enable-kvm"));
+    // Acceleration flag is platform-specific: -enable-kvm on Linux, -accel hvf on macOS.
+    assert!(cmd.contains(crate::platform::acceleration_flag()));
     assert!(cmd.contains("-m 2048M"));
     assert!(cmd.contains("-smp 2"));
     assert!(cmd.contains("-vga std"));

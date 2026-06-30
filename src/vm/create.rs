@@ -130,7 +130,10 @@ fn find_ovmf_code_path() -> Option<String> {
             return Some(path.to_string());
         }
     }
-    None
+    // Platform-specific extras (e.g. Homebrew/MacPorts edk2 on macOS).
+    crate::platform::ovmf_code_candidates()
+        .into_iter()
+        .find(|path| Path::new(path).exists())
 }
 
 /// Known OVMF Secure Boot firmware paths across different Linux distributions
@@ -544,7 +547,10 @@ fn find_ovmf_vars_template() -> Option<String> {
             return Some(path.to_string());
         }
     }
-    None
+    // Platform-specific extras (e.g. Homebrew/MacPorts edk2 vars on macOS).
+    crate::platform::ovmf_vars_candidates()
+        .into_iter()
+        .find(|path| Path::new(path).exists())
 }
 
 /// Generate the launch.sh script content with OS profile awareness
@@ -855,9 +861,9 @@ fn build_qemu_command_with_os(
     // Emulator
     args.push(config.emulator.clone());
 
-    // KVM acceleration
+    // Hardware acceleration (KVM on Linux, HVF on macOS)
     if config.enable_kvm {
-        args.push("-enable-kvm".to_string());
+        args.push(crate::platform::acceleration_flag().to_string());
     }
 
     // BIOS/ROM file (skip for macOS UEFI — OpenCore is handled as an AHCI drive)
@@ -871,7 +877,7 @@ fn build_qemu_command_with_os(
         let needs_secboot = needs_tpm && needs_uefi;
         let mut machine_opts = vec![safe_machine.to_string()];
         if config.enable_kvm {
-            machine_opts.push("accel=kvm".to_string());
+            machine_opts.push(format!("accel={}", crate::platform::acceleration_name()));
         }
         if needs_secboot {
             machine_opts.push("smm=on".to_string());

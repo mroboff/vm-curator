@@ -11,6 +11,7 @@ mod config;
 mod fs;
 mod hardware;
 mod metadata;
+mod platform;
 mod ui;
 mod vm;
 mod wizard_types;

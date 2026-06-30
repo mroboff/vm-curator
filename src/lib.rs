@@ -16,6 +16,7 @@
 //! - [`hardware`] — USB / PCI / GPU passthrough enumeration and configuration
 //! - [`metadata`] — OS profiles, QEMU profiles, family hierarchy, ASCII art
 //! - [`config`] — user settings persisted under `~/.config/vm-curator/`
+//! - [`platform`] — OS-specific behavior (acceleration, display, firmware, URL opening)
 //! - [`wizard_types`] — front-end-agnostic state types for the creation/import flows
 //! - [`fs`] — small filesystem helpers
 //!
@@ -29,5 +30,6 @@ pub mod config;
 pub mod fs;
 pub mod hardware;
 pub mod metadata;
+pub mod platform;
 pub mod vm;
 pub mod wizard_types;

@@ -13,7 +13,12 @@ pub enum UsbVersion {
 }
 
 impl UsbVersion {
-    /// Parse USB version from sysfs speed attribute value (in Mbps)
+    /// Parse USB version from a sysfs speed attribute value (in Mbps).
+    ///
+    /// Retained as tested public API; the `rusb` enumeration path now reads the
+    /// link speed directly via [`rusb::Speed`], so this is no longer called by
+    /// the binary itself.
+    #[allow(dead_code)]
     pub fn from_speed(speed: &str) -> Self {
         match speed.trim() {
             "1.5" | "12" => UsbVersion::Usb1,
@@ -79,201 +84,110 @@ impl UsbDevice {
     }
 }
 
-/// Enumerate USB devices using libudev
+/// Enumerate USB devices using libusb (via the cross-platform `rusb` crate).
+///
+/// Works on Linux, macOS, and Windows. The QEMU passthrough arguments derived
+/// from the returned devices use only vendor/product IDs, which are independent
+/// of the host OS.
 pub fn enumerate_usb_devices() -> Result<Vec<UsbDevice>> {
-    // Try using libudev, fall back to sysfs
-    let mut devices = match enumerate_via_udev() {
-        Ok(devs) => devs,
-        Err(e) => {
-            // Log the fallback for debugging purposes
-            eprintln!(
-                "vm-curator: libudev enumeration failed ({}), falling back to sysfs",
-                e
-            );
-            enumerate_via_sysfs().unwrap_or_default()
-        }
-    };
-
-    // Filter out hubs and root hubs
-    devices.retain(|d| !d.is_hub());
-
-    Ok(devices)
-}
-
-/// Enumerate using libudev
-fn enumerate_via_udev() -> Result<Vec<UsbDevice>> {
-    use libudev::Context;
-
-    let context = Context::new().context("Failed to create udev context")?;
-    let mut enumerator =
-        libudev::Enumerator::new(&context).context("Failed to create udev enumerator")?;
-
-    enumerator
-        .match_subsystem("usb")
-        .context("Failed to match USB subsystem")?;
+    let device_list = rusb::devices().context("Failed to enumerate USB devices via libusb")?;
 
     let mut devices = Vec::new();
 
-    for device in enumerator.scan_devices()? {
-        // Only process USB devices (not interfaces)
-        if device.devtype().map(|t| t == "usb_device").unwrap_or(false) {
-            let vendor_id = device
-                .attribute_value("idVendor")
-                .and_then(|v| v.to_str())
-                .and_then(|s| u16::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
+    for device in device_list.iter() {
+        let descriptor = match device.device_descriptor() {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
 
-            let product_id = device
-                .attribute_value("idProduct")
-                .and_then(|v| v.to_str())
-                .and_then(|s| u16::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
+        let vendor_id = descriptor.vendor_id();
+        let product_id = descriptor.product_id();
 
-            // Skip root hubs (usually vendor 0x1d6b)
-            if vendor_id == 0x1d6b {
-                continue;
-            }
-
-            let vendor_name = device
-                .attribute_value("manufacturer")
-                .and_then(|v| v.to_str())
-                .unwrap_or("")
-                .to_string();
-
-            let product_name = device
-                .attribute_value("product")
-                .and_then(|v| v.to_str())
-                .unwrap_or("")
-                .to_string();
-
-            let bus_num = device
-                .attribute_value("busnum")
-                .and_then(|v| v.to_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-
-            let dev_num = device
-                .attribute_value("devnum")
-                .and_then(|v| v.to_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-
-            let device_class = device
-                .attribute_value("bDeviceClass")
-                .and_then(|v| v.to_str())
-                .and_then(|s| u8::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
-
-            // Detect USB version from speed attribute first, fall back to bcdUSB
-            let usb_version = device
-                .attribute_value("speed")
-                .and_then(|v| v.to_str())
-                .map(UsbVersion::from_speed)
-                .unwrap_or_else(|| {
-                    // Fall back to bcdUSB attribute (USB protocol version, not bcdDevice which is firmware version)
-                    device
-                        .attribute_value("bcdUSB")
-                        .and_then(|v| v.to_str())
-                        .and_then(|s| u16::from_str_radix(s, 16).ok())
-                        .map(UsbVersion::from_bcd_usb)
-                        .unwrap_or_default()
-                });
-
-            devices.push(UsbDevice {
-                vendor_id,
-                product_id,
-                vendor_name,
-                product_name,
-                bus_num,
-                dev_num,
-                device_class,
-                usb_version,
-            });
-        }
-    }
-
-    Ok(devices)
-}
-
-/// Fallback enumeration via /sys/bus/usb/devices
-fn enumerate_via_sysfs() -> Result<Vec<UsbDevice>> {
-    let mut devices = Vec::new();
-    let sysfs_path = std::path::Path::new("/sys/bus/usb/devices");
-
-    if !sysfs_path.exists() {
-        return Ok(devices);
-    }
-
-    for entry in std::fs::read_dir(sysfs_path)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        // Skip entries that look like interfaces (contain ':')
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.contains(':') {
-            continue;
-        }
-
-        // Try to read device attributes
-        let vendor_id = read_sysfs_hex(&path, "idVendor").unwrap_or(0);
-        let product_id = read_sysfs_hex(&path, "idProduct").unwrap_or(0);
-
-        // Skip if no valid IDs
-        if vendor_id == 0 && product_id == 0 {
-            continue;
-        }
-
-        // Skip root hubs
+        // Skip Linux virtual root hubs (vendor 0x1d6b); harmless on other OSes.
         if vendor_id == 0x1d6b {
             continue;
         }
 
-        let vendor_name = read_sysfs_string(&path, "manufacturer").unwrap_or_default();
-        let product_name = read_sysfs_string(&path, "product").unwrap_or_default();
-        let bus_num = read_sysfs_decimal(&path, "busnum").unwrap_or(0) as u8;
-        let dev_num = read_sysfs_decimal(&path, "devnum").unwrap_or(0) as u8;
-        let device_class = read_sysfs_hex(&path, "bDeviceClass").unwrap_or(0) as u8;
-
-        // Detect USB version from speed attribute first, fall back to bcdUSB
-        let usb_version = read_sysfs_string(&path, "speed")
-            .map(|s| UsbVersion::from_speed(&s))
-            .unwrap_or_else(|| {
-                // Fall back to bcdUSB (USB protocol version, not bcdDevice which is firmware version)
-                read_sysfs_hex(&path, "bcdUSB")
-                    .map(UsbVersion::from_bcd_usb)
-                    .unwrap_or_default()
-            });
+        let device_class = descriptor.class_code();
+        let usb_version = usb_version_from_device(&device, &descriptor);
+        let (vendor_name, product_name) = read_device_strings(&device, &descriptor);
 
         devices.push(UsbDevice {
             vendor_id,
             product_id,
             vendor_name,
             product_name,
-            bus_num,
-            dev_num,
+            bus_num: device.bus_number(),
+            dev_num: device.address(),
             device_class,
             usb_version,
         });
     }
 
+    // Filter out hubs and root hubs.
+    devices.retain(|d| !d.is_hub());
+
     Ok(devices)
 }
 
-fn read_sysfs_hex(path: &std::path::Path, attr: &str) -> Option<u16> {
-    let value = std::fs::read_to_string(path.join(attr)).ok()?;
-    u16::from_str_radix(value.trim(), 16).ok()
+/// Determine the USB version from the negotiated link speed, falling back to the
+/// `bcdUSB` field of the device descriptor when the speed is unknown.
+fn usb_version_from_device(
+    device: &rusb::Device<rusb::GlobalContext>,
+    descriptor: &rusb::DeviceDescriptor,
+) -> UsbVersion {
+    use rusb::Speed;
+
+    match device.speed() {
+        Speed::Low | Speed::Full => UsbVersion::Usb1,
+        Speed::High => UsbVersion::Usb2,
+        Speed::Super | Speed::SuperPlus => UsbVersion::Usb3,
+        _ => {
+            // bcdUSB is the USB protocol version (e.g. 0x0300 for USB 3.0).
+            let v = descriptor.usb_version();
+            let bcd = ((v.major() as u16) << 8)
+                | (((v.minor() & 0x0f) as u16) << 4)
+                | (v.sub_minor() & 0x0f) as u16;
+            UsbVersion::from_bcd_usb(bcd)
+        }
+    }
 }
 
-fn read_sysfs_decimal(path: &std::path::Path, attr: &str) -> Option<u32> {
-    let value = std::fs::read_to_string(path.join(attr)).ok()?;
-    value.trim().parse().ok()
-}
+/// Read the manufacturer and product string descriptors.
+///
+/// Reading string descriptors requires opening the device, which can fail
+/// without sufficient privileges (common on macOS). On failure we return empty
+/// strings; [`UsbDevice::display_name`] then degrades to the `VID:PID` form.
+fn read_device_strings(
+    device: &rusb::Device<rusb::GlobalContext>,
+    descriptor: &rusb::DeviceDescriptor,
+) -> (String, String) {
+    let handle = match device.open() {
+        Ok(h) => h,
+        Err(_) => return (String::new(), String::new()),
+    };
 
-fn read_sysfs_string(path: &std::path::Path, attr: &str) -> Option<String> {
-    std::fs::read_to_string(path.join(attr))
-        .ok()
-        .map(|s| s.trim().to_string())
+    let timeout = std::time::Duration::from_millis(100);
+    let lang = match handle.read_languages(timeout) {
+        Ok(langs) => match langs.first().copied() {
+            Some(lang) => lang,
+            None => return (String::new(), String::new()),
+        },
+        Err(_) => return (String::new(), String::new()),
+    };
+
+    let vendor_name = handle
+        .read_manufacturer_string(lang, descriptor, timeout)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let product_name = handle
+        .read_product_string(lang, descriptor, timeout)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    (vendor_name, product_name)
 }
 
 /// Result of udev rule installation

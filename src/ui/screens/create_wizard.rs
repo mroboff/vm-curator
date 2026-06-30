@@ -3541,25 +3541,9 @@ fn launch_created_vm(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-/// Open a URL in the default browser
+/// Open a URL in the default browser (host-native opener first).
 fn open_url_in_browser(url: &str) -> Result<()> {
-    use std::process::Command;
-
-    // Try xdg-open first (standard on Linux)
-    let result = Command::new("xdg-open").arg(url).spawn();
-
-    match result {
-        Ok(_) => Ok(()),
-        Err(_) => {
-            // Fallback to other openers
-            for opener in &["firefox", "chromium", "google-chrome", "open"] {
-                if Command::new(opener).arg(url).spawn().is_ok() {
-                    return Ok(());
-                }
-            }
-            anyhow::bail!("No browser found. Please visit: {}", url)
-        }
-    }
+    crate::platform::open_url(url)
 }
 
 // =============================================================================

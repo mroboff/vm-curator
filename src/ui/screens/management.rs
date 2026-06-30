@@ -147,6 +147,19 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     let _has_gpu_script = vm.path.join("launch-with-gpu-passthrough.sh").exists();
     // Future: Add "Launch with GPU Passthrough" or "Remove GPU Passthrough" based on this
 
+    // PCI and GPU passthrough rely on VFIO/IOMMU, which only exist on Linux.
+    // Hide those entries entirely on platforms that can't support them.
+    if !crate::platform::passthrough_supported() {
+        items.retain(|i| {
+            !matches!(
+                i.action,
+                MenuAction::PciPassthrough
+                    | MenuAction::MultiGpuPassthrough
+                    | MenuAction::SingleGpuPassthrough
+            )
+        });
+    }
+
     items
 }
 

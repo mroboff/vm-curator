@@ -44,9 +44,9 @@ pub fn list_available_emulators() -> Vec<String> {
         .collect()
 }
 
-/// Check KVM availability
+/// Check hardware-acceleration availability (KVM on Linux, HVF on macOS)
 pub fn is_kvm_available() -> bool {
-    Path::new("/dev/kvm").exists()
+    crate::platform::is_acceleration_available()
 }
 
 /// Get supported display backends for a QEMU emulator
@@ -136,22 +136,9 @@ pub fn is_spice_viewer_available() -> bool {
     false
 }
 
-/// Get KVM module info
+/// Get hardware-acceleration info (KVM module variant on Linux, "hvf" on macOS)
 pub fn get_kvm_info() -> Option<String> {
-    if !is_kvm_available() {
-        return None;
-    }
-
-    let output = Command::new("lsmod").output().ok()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if line.starts_with("kvm_intel") || line.starts_with("kvm_amd") {
-            return Some(line.split_whitespace().next()?.to_string());
-        }
-    }
-
-    Some("kvm".to_string())
+    crate::platform::acceleration_info()
 }
 
 /// Information about available network backends

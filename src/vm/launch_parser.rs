@@ -43,8 +43,12 @@ pub fn parse_launch_script(script_path: &Path, content: &str) -> Result<QemuConf
     // Extract audio devices
     config.audio_devices = extract_audio_devices(content);
 
-    // Check for KVM
-    config.enable_kvm = content.contains("-enable-kvm") || content.contains("-accel kvm");
+    // Check for hardware acceleration (KVM on Linux, HVF on macOS)
+    config.enable_kvm = content.contains("-enable-kvm")
+        || content.contains("-accel kvm")
+        || content.contains("-accel hvf")
+        || content.contains("accel=kvm")
+        || content.contains("accel=hvf");
 
     // Check for UEFI
     config.uefi = content.contains("OVMF") || content.contains("-bios") && content.contains("efi");
