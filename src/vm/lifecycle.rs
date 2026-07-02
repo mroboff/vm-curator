@@ -32,6 +32,8 @@ fn path_to_str(path: &Path) -> Result<&str> {
 pub struct LaunchOptions {
     pub boot_mode: BootMode,
     pub extra_args: Vec<String>,
+    /// USB passthrough is persisted in the VM's launch script. Runtime devices
+    /// are ignored so QEMU flags are not passed to the script as shell options.
     pub usb_devices: Vec<UsbPassthrough>,
 }
 
@@ -44,23 +46,6 @@ pub struct UsbPassthrough {
 }
 
 impl UsbPassthrough {
-    /// Generate QEMU device arguments for this USB device
-    /// If `bus` is provided, attach to that specific bus (e.g., "xhci.0" for USB 3.0)
-    pub fn to_qemu_args(&self, bus: Option<&str>) -> Vec<String> {
-        let device_spec = if let Some(bus_name) = bus {
-            format!(
-                "usb-host,bus={},vendorid=0x{:04x},productid=0x{:04x}",
-                bus_name, self.vendor_id, self.product_id
-            )
-        } else {
-            format!(
-                "usb-host,vendorid=0x{:04x},productid=0x{:04x}",
-                self.vendor_id, self.product_id
-            )
-        };
-        vec!["-device".to_string(), device_spec]
-    }
-
     /// Check if this device is USB 3.0 or higher
     pub fn is_usb3(&self) -> bool {
         self.usb_version.is_usb3()
@@ -154,24 +139,10 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
 
     args.extend(options.extra_args.clone());
 
-    // Add USB passthrough arguments
     if !options.usb_devices.is_empty() {
-        args.push("-usb".to_string());
-
-        // Check if any USB 3.0 devices are present
-        let has_usb3 = options.usb_devices.iter().any(|d| d.is_usb3());
-
-        // Add xHCI controller if USB 3.0 devices are present
-        if has_usb3 {
-            args.push("-device".to_string());
-            args.push("qemu-xhci,id=xhci,p2=8,p3=8".to_string());
-        }
-
-        // Add each USB device, attaching USB 3.0 devices to xHCI controller
-        for usb in &options.usb_devices {
-            let bus = if usb.is_usb3() { Some("xhci.0") } else { None };
-            args.extend(usb.to_qemu_args(bus));
-        }
+        log::warn!(
+            "Ignoring LaunchOptions::usb_devices; save USB passthrough to launch.sh before launching"
+        );
     }
 
     cmd.args(&args);

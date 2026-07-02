@@ -864,21 +864,10 @@ impl App {
 
     /// Get launch options based on current state
     pub fn get_launch_options(&self) -> LaunchOptions {
-        let usb_devices = self
-            .selected_usb_devices
-            .iter()
-            .filter_map(|&i| self.usb_devices.get(i))
-            .map(|d| crate::vm::UsbPassthrough {
-                vendor_id: d.vendor_id,
-                product_id: d.product_id,
-                usb_version: d.usb_version,
-            })
-            .collect();
-
         LaunchOptions {
             boot_mode: self.boot_mode.clone(),
             extra_args: Vec::new(),
-            usb_devices,
+            usb_devices: Vec::new(),
         }
     }
 
