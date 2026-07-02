@@ -101,6 +101,8 @@ struct LaunchScriptComponents {
     has_uefi: bool,
     /// SMBIOS_OPTS array definition
     smbios_opts: Option<String>,
+    /// Shared folders QEMU args array/scalar definition
+    shared_folders_args: Option<String>,
 }
 
 /// Parse the launch.sh script to extract important components
@@ -120,6 +122,28 @@ fn parse_launch_script(content: &str) -> LaunchScriptComponents {
         // Check for ISO variable
         if trimmed.starts_with("ISO=") {
             components.iso_var = Some(trimmed.to_string());
+        }
+
+        // Check for shared folders args (new multi-line array, or legacy scalar)
+        if trimmed.starts_with("SHARED_FOLDERS_ARGS=(") {
+            let mut shared_block = String::new();
+            shared_block.push_str(lines[i]);
+            shared_block.push('\n');
+
+            if !line_closes_shell_array(lines[i]) {
+                i += 1;
+                while i < lines.len() {
+                    shared_block.push_str(lines[i]);
+                    shared_block.push('\n');
+                    if line_closes_shell_array(lines[i]) {
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            components.shared_folders_args = Some(shared_block);
+        } else if trimmed.starts_with("SHARED_FOLDERS_ARGS=") {
+            components.shared_folders_args = Some(trimmed.to_string());
         }
 
         // Check for OVMF paths
@@ -179,6 +203,57 @@ fn parse_launch_script(content: &str) -> LaunchScriptComponents {
     }
 
     components
+}
+
+fn line_closes_shell_array(line: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let line = line.trim_end();
+    let mut quote = Quote::None;
+    let mut escaped = false;
+    let mut close_idx = None;
+
+    for (idx, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            Quote::None => match c {
+                '\\' => escaped = true,
+                '\'' => quote = Quote::Single,
+                '"' => quote = Quote::Double,
+                ')' => close_idx = Some(idx),
+                _ => {}
+            },
+            Quote::Single => {
+                if c == '\'' {
+                    quote = Quote::None;
+                }
+            }
+            Quote::Double => match c {
+                '\\' => escaped = true,
+                '"' => quote = Quote::None,
+                _ => {}
+            },
+        }
+    }
+
+    if quote != Quote::None {
+        return false;
+    }
+
+    let Some(close_idx) = close_idx else {
+        return false;
+    };
+    let trailing = line[close_idx + 1..].trim();
+    trailing.is_empty() || trailing.starts_with('#')
 }
 
 /// Extract a quoted value from a variable assignment
@@ -617,10 +692,24 @@ fn generate_variable_definitions(vm: &DiscoveredVm, components: &LaunchScriptCom
         vars.push(smbios.clone());
     }
 
+    // Add shared folder args if present.
+    if let Some(ref shared_folders) = components.shared_folders_args {
+        vars.push(shared_folders.trim_end().to_string());
+    }
+
     if vars.is_empty() {
         String::new()
     } else {
         vars.join("\n") + "\n"
+    }
+}
+
+fn shared_folders_args_ref(components: &LaunchScriptComponents) -> Option<&'static str> {
+    let args = components.shared_folders_args.as_deref()?;
+    if args.trim_start().starts_with("SHARED_FOLDERS_ARGS=(") {
+        Some(r#""${SHARED_FOLDERS_ARGS[@]}""#)
+    } else {
+        Some("$SHARED_FOLDERS_ARGS")
     }
 }
 
@@ -1357,6 +1446,15 @@ fn generate_basic_qemu_command(
         ));
     }
 
+    // Add shared folders.
+    if let Some(shared_ref) = shared_folders_args_ref(components) {
+        cmd.push_str(&format!(
+            r#" \
+    {}"#,
+            shared_ref
+        ));
+    }
+
     // Boot from disk
     cmd.push_str(
         r#" \
@@ -1465,5 +1563,84 @@ mod tests {
         let qemu_cmd = "qemu-system-x86_64 \\\n        -device virtio-net-pci,netdev=net0";
         let result = append_passthrough_args(qemu_cmd, "-display none");
         assert!(result.contains("-device virtio-net-pci,netdev=net0 \\\n    -display none"));
+    }
+
+    #[test]
+    fn parse_launch_script_preserves_shared_folders_array() {
+        let script = r#"#!/bin/bash
+# >>> Shared Folders (managed by vm-curator) >>>
+SHARED_FOLDERS_ARGS=(
+    -fsdev
+    'local,id=fsdev0,path=/home/user/My Documents,security_model=mapped-xattr'
+    -device
+    'virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents'
+)
+# <<< Shared Folders <<<
+qemu-system-x86_64 "${SHARED_FOLDERS_ARGS[@]}"
+"#;
+
+        let components = parse_launch_script(script);
+        let shared = components
+            .shared_folders_args
+            .as_deref()
+            .expect("shared folder args should be extracted");
+        assert!(shared.contains("SHARED_FOLDERS_ARGS=("));
+        assert!(shared.contains("path=/home/user/My Documents"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let vm = DiscoveredVm {
+            id: "test-vm".to_string(),
+            path: dir.path().to_path_buf(),
+            launch_script: dir.path().join("launch.sh"),
+            config: crate::vm::QemuConfig::default(),
+            custom_name: None,
+            os_profile: None,
+            notes: None,
+        };
+
+        let vars = generate_variable_definitions(&vm, &components);
+        assert!(vars.contains("SHARED_FOLDERS_ARGS=("));
+        assert!(vars.contains("path=/home/user/My Documents"));
+    }
+
+    #[test]
+    fn parse_launch_script_stops_shared_folders_array_on_final_arg_line_close() {
+        let script = r#"#!/bin/bash
+# >>> Shared Folders (managed by vm-curator) >>>
+SHARED_FOLDERS_ARGS=(
+    -fsdev
+    'local,id=fsdev0,path=/home/user/My Documents,security_model=mapped-xattr'
+    -device
+    'virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents' )
+# <<< Shared Folders <<<
+qemu-system-x86_64 "${SHARED_FOLDERS_ARGS[@]}"
+echo after
+"#;
+
+        let components = parse_launch_script(script);
+        let shared = components
+            .shared_folders_args
+            .as_deref()
+            .expect("shared folder args should be extracted");
+        assert!(shared.contains("SHARED_FOLDERS_ARGS=("));
+        assert!(shared.contains("mount_tag=host_my_documents"));
+        assert!(!shared.contains("# <<< Shared Folders <<<"));
+        assert!(!shared.contains("qemu-system-x86_64"));
+        assert!(!shared.contains("echo after"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let vm = DiscoveredVm {
+            id: "test-vm".to_string(),
+            path: dir.path().to_path_buf(),
+            launch_script: dir.path().join("launch.sh"),
+            config: crate::vm::QemuConfig::default(),
+            custom_name: None,
+            os_profile: None,
+            notes: None,
+        };
+
+        let vars = generate_variable_definitions(&vm, &components);
+        assert!(!vars.contains("qemu-system-x86_64"));
+        assert!(!vars.contains("echo after"));
     }
 }

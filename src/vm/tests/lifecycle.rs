@@ -329,6 +329,7 @@ fn test_generate_shared_folders_section_single() {
     let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
     assert!(section.contains(SHARED_FOLDERS_MARKER_START));
     assert!(section.contains(SHARED_FOLDERS_MARKER_END));
+    assert!(section.contains("SHARED_FOLDERS_ARGS=("));
     assert!(section.contains("path=/home/user/Documents"));
     assert!(section.contains("mount_tag=host_documents"));
     assert!(section.contains("virtio-9p-pci"));
@@ -372,7 +373,8 @@ fn test_generate_shared_folders_section_path_with_spaces() {
         mount_tag: "host_my_documents".to_string(),
     }];
     let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
-    assert!(section.contains("'/home/user/My Documents'"));
+    assert!(section.contains("path=/home/user/My Documents"));
+    assert!(section.contains("SHARED_FOLDERS_ARGS=("));
 }
 
 #[test]
@@ -391,6 +393,30 @@ fn test_parse_shared_folders_section() {
 fn test_parse_shared_folders_section_quoted_path() {
     let content = format!(
         "{}\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path='/home/user/My Documents',security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents\"\n{}\n",
+        SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
+    );
+    let folders = parse_shared_folders_section(&content);
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].host_path, "/home/user/My Documents");
+    assert_eq!(folders[0].mount_tag, "host_my_documents");
+}
+
+#[test]
+fn test_parse_shared_folders_section_array() {
+    let content = format!(
+        "{}\nSHARED_FOLDERS_ARGS=(\n    -fsdev\n    'local,id=fsdev0,path=/home/user/My Documents,security_model=mapped-xattr'\n    -device\n    'virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents'\n)\n{}\n",
+        SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
+    );
+    let folders = parse_shared_folders_section(&content);
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].host_path, "/home/user/My Documents");
+    assert_eq!(folders[0].mount_tag, "host_my_documents");
+}
+
+#[test]
+fn test_parse_shared_folders_section_array_closes_on_final_arg_line() {
+    let content = format!(
+        "{}\nSHARED_FOLDERS_ARGS=(\n    -fsdev\n    'local,id=fsdev0,path=/home/user/My Documents,security_model=mapped-xattr'\n    -device\n    'virtio-9p-pci,fsdev=fsdev0,mount_tag=host_my_documents' )\n{}\nqemu-system-x86_64 \"${{SHARED_FOLDERS_ARGS[@]}}\"\n",
         SHARED_FOLDERS_MARKER_START, SHARED_FOLDERS_MARKER_END
     );
     let folders = parse_shared_folders_section(&content);
@@ -425,10 +451,14 @@ fn test_remove_shared_folders_section() {
 #[test]
 fn test_insert_shared_folders_section_simple() {
     let content = "#!/bin/bash\nqemu-system-x86_64 -m 2048\n";
-    let section = "# >>> Shared Folders (managed by vm-curator) >>>\nSHARED_FOLDERS_ARGS=\"-fsdev local,id=fsdev0,path=/tmp,security_model=mapped-xattr -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_tmp\"\n# <<< Shared Folders <<<\n";
-    let result = insert_shared_folders_section(content, section);
+    let folders = vec![SharedFolder {
+        host_path: "/tmp".to_string(),
+        mount_tag: "host_tmp".to_string(),
+    }];
+    let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+    let result = insert_shared_folders_section(content, &section);
     assert!(result.contains(SHARED_FOLDERS_MARKER_START));
-    assert!(result.contains("$SHARED_FOLDERS_ARGS"));
+    assert!(result.contains(SHARED_FOLDERS_ARGS_REF));
     // Section should appear before QEMU command
     let marker_pos = result.find(SHARED_FOLDERS_MARKER_START).unwrap();
     let qemu_pos = result.find("qemu-system-x86_64").unwrap();
@@ -453,8 +483,8 @@ fn test_insert_section_before_case_statement() {
         case_pos
     );
 
-    // Both QEMU commands should have $SHARED_FOLDERS_ARGS appended
-    let count = result.matches("$SHARED_FOLDERS_ARGS").count();
+    // Both QEMU commands should have the shared-folder array expansion appended.
+    let count = result.matches(SHARED_FOLDERS_ARGS_REF).count();
     assert_eq!(
         count, 2,
         "Expected 2 appended refs (one per QEMU command), got {}",
@@ -481,6 +511,50 @@ fn test_roundtrip_shared_folders() {
     assert_eq!(parsed[0].mount_tag, "host_documents");
     assert_eq!(parsed[1].host_path, "/home/user/My Pictures");
     assert_eq!(parsed[1].mount_tag, "host_my_pictures");
+}
+
+#[test]
+fn test_shared_folders_array_survives_shell_expansion() {
+    let folders = vec![SharedFolder {
+        host_path: "/home/user/O'Brien Documents".to_string(),
+        mount_tag: "host_obrien_documents".to_string(),
+    }];
+    let section = generate_shared_folders_section(&folders, "virtio-9p-pci");
+    let script = format!(
+        "{}\nset -- qemu-system-x86_64 {}\nprintf '%s\\0' \"$@\"\n",
+        section, SHARED_FOLDERS_ARGS_REF
+    );
+
+    let output = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .expect("bash should run shared-folder expansion test");
+
+    assert!(
+        output.status.success(),
+        "bash failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let args: Vec<String> = output
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8(part.to_vec()).unwrap())
+        .collect();
+
+    assert_eq!(
+        args,
+        vec![
+            "qemu-system-x86_64".to_string(),
+            "-fsdev".to_string(),
+            "local,id=fsdev0,path=/home/user/O'Brien Documents,security_model=mapped-xattr"
+                .to_string(),
+            "-device".to_string(),
+            "virtio-9p-pci,fsdev=fsdev0,mount_tag=host_obrien_documents".to_string(),
+        ]
+    );
 }
 
 #[test]
