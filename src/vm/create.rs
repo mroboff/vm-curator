@@ -891,12 +891,13 @@ fi
         script.push_str("        start_tpm\n");
     }
 
-    let floppy_cmd = build_qemu_command_with_os(
+    let floppy_cmd = build_qemu_command_with_os_impl(
         config,
         disk_filename,
         &InstallMedia::None,
         os_profile,
         Some("\"$2\""),
+        true,
     );
     script.push_str(&format!("        {}\n", floppy_cmd));
     script.push_str("        ;;\n");
@@ -948,12 +949,32 @@ fn build_qemu_command_with_os(
     os_profile: Option<&str>,
     floppy_path: Option<&str>,
 ) -> String {
+    build_qemu_command_with_os_impl(
+        config,
+        disk_filename,
+        install_media,
+        os_profile,
+        floppy_path,
+        false,
+    )
+}
+
+fn build_qemu_command_with_os_impl(
+    config: &WizardQemuConfig,
+    disk_filename: &str,
+    install_media: &InstallMedia,
+    os_profile: Option<&str>,
+    floppy_path: Option<&str>,
+    boot_from_floppy: bool,
+) -> String {
     let mut args: Vec<String> = Vec::new();
 
     let is_windows = is_windows_10_or_11(os_profile);
     let is_intel_macos_vm = is_intel_macos(os_profile, &config.emulator);
     let needs_tpm = config.tpm || is_windows_11(os_profile);
     let needs_uefi = config.uefi || is_windows_11(os_profile);
+    let normal_uefi_disk_boot =
+        needs_uefi && matches!(install_media, InstallMedia::None) && !boot_from_floppy;
 
     // Emulator
     args.push(config.emulator.clone());
@@ -1036,6 +1057,7 @@ fn build_qemu_command_with_os(
     // but on Q35 machines, if=ide routes through the AHCI controller (giving SATA behavior)
     let disk_format = disk_format_for_filename(disk_filename);
     let machine_name = config.machine.as_deref().unwrap_or("");
+    let mut disk_has_bootindex = false;
     match machine_name {
         "q800" => {
             // q800: explicit SCSI device attachment for built-in ESP controller
@@ -1079,6 +1101,10 @@ fn build_qemu_command_with_os(
                 } else {
                     &config.disk_interface
                 };
+                if normal_uefi_disk_boot && disk_if == "virtio" {
+                    args.push("-global virtio-blk-pci.bootindex=0".to_string());
+                    disk_has_bootindex = true;
+                }
                 args.push(format!(
                     "-drive file=\"$DISK\",format={},if={},index=0,media=disk",
                     disk_format,
@@ -1168,12 +1194,25 @@ fn build_qemu_command_with_os(
     // Floppy disk image
     if let Some(floppy_ref) = floppy_path {
         args.push(format!("-fda {}", floppy_ref));
-        // When floppy is present with ISO, boot from floppy (which accesses CD)
-        if matches!(install_media, InstallMedia::Iso(_)) {
+        if boot_from_floppy && matches!(install_media, InstallMedia::None) {
+            args.push("-boot a".to_string());
+        } else if matches!(install_media, InstallMedia::Iso(_)) {
+            // When floppy is present with ISO, boot from floppy (which accesses CD)
             // Replace the -boot d we just added with -boot a
             if let Some(pos) = args.iter().position(|a| a == "-boot d") {
                 args[pos] = "-boot a".to_string();
             }
+        }
+    }
+
+    // OVMF can preserve guest-controlled NVRAM boot entries. For normal UEFI
+    // launches, explicitly constrain booting to the disk so stale PXE/HTTP
+    // entries do not delay every boot.
+    if normal_uefi_disk_boot {
+        if disk_has_bootindex {
+            args.push("-boot strict=on".to_string());
+        } else {
+            args.push("-boot order=c,strict=on".to_string());
         }
     }
 

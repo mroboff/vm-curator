@@ -575,6 +575,47 @@ fn test_insert_section_before_case_statement() {
 }
 
 #[test]
+fn test_save_shared_folders_preserves_uefi_disk_boot_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let vm = test_vm(dir.path());
+    std::fs::write(
+        &vm.launch_script,
+        r#"#!/bin/bash
+VM_DIR="$(dirname "$(readlink -f "$0")")"
+DISK="$VM_DIR/linux.raw"
+OVMF_VARS="$VM_DIR/OVMF_VARS.fd"
+case "$1" in
+    "")
+        qemu-system-x86_64 \
+        -drive if=pflash,format=raw,file="$OVMF_VARS" \
+        -global virtio-blk-pci.bootindex=0 \
+        -drive file="$DISK",format=raw,if=virtio,index=0,media=disk \
+        -boot strict=on \
+        -qmp \
+        unix:$VM_DIR/qemu.sock,server=on,wait=off
+        ;;
+esac
+"#,
+    )
+    .unwrap();
+    let folders = vec![SharedFolder {
+        host_path: "/home/user/shared".to_string(),
+        mount_tag: "host_shared".to_string(),
+    }];
+
+    save_shared_folders(&vm, &folders).unwrap();
+
+    let script = std::fs::read_to_string(&vm.launch_script).unwrap();
+    assert_eq!(
+        script.matches("-global virtio-blk-pci.bootindex=0").count(),
+        1
+    );
+    assert_eq!(script.matches("-boot strict=on").count(), 1);
+    assert!(script.contains("-drive file=\"$DISK\",format=raw,if=virtio,index=0,media=disk"));
+    assert!(script.contains("\"${SHARED_FOLDERS_ARGS[@]}\""));
+}
+
+#[test]
 fn test_roundtrip_shared_folders() {
     let folders = vec![
         SharedFolder {

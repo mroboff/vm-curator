@@ -213,6 +213,86 @@ fn test_build_qemu_command_with_cdrom() {
 }
 
 #[test]
+fn test_build_qemu_command_uefi_normal_boot_prefers_disk() {
+    let config = WizardQemuConfig {
+        uefi: true,
+        disk_interface: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+
+    let cmd = build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::None, None, None);
+
+    assert!(cmd.contains("-drive if=pflash,format=raw,file=\"$OVMF_VARS\""));
+    assert!(cmd.contains("-global virtio-blk-pci.bootindex=0"));
+    assert!(cmd.contains("-drive file=\"$DISK\",format=qcow2,if=virtio,index=0,media=disk"));
+    assert!(cmd.contains("-boot strict=on"));
+    assert!(!cmd.contains("-boot order=c,strict=on"));
+}
+
+#[test]
+fn test_build_qemu_command_uefi_normal_boot_with_attached_floppy_prefers_disk() {
+    let config = WizardQemuConfig {
+        uefi: true,
+        disk_interface: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+
+    let cmd = build_qemu_command_with_os(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        None,
+        Some("\"$FLOPPY\""),
+    );
+
+    assert!(cmd.contains("-fda \"$FLOPPY\""));
+    assert!(cmd.contains("-global virtio-blk-pci.bootindex=0"));
+    assert!(cmd.contains("-boot strict=on"));
+    assert!(!cmd.contains("-boot a"));
+}
+
+#[test]
+fn test_build_qemu_command_uefi_explicit_floppy_boot_does_not_force_disk() {
+    let config = WizardQemuConfig {
+        uefi: true,
+        disk_interface: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+
+    let cmd = build_qemu_command_with_os_impl(
+        &config,
+        "disk.qcow2",
+        &InstallMedia::None,
+        None,
+        Some("\"$2\""),
+        true,
+    );
+
+    assert!(cmd.contains("-fda \"$2\""));
+    assert!(cmd.contains("-boot a"));
+    assert!(!cmd.contains("-global virtio-blk-pci.bootindex=0"));
+    assert!(!cmd.contains("-boot strict=on"));
+    assert!(!cmd.contains("-boot order=c,strict=on"));
+}
+
+#[test]
+fn test_build_qemu_command_uefi_cdrom_still_prefers_cdrom() {
+    let config = WizardQemuConfig {
+        uefi: true,
+        disk_interface: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+
+    let cmd =
+        build_qemu_command_with_os(&config, "disk.qcow2", &InstallMedia::Iso(None), None, None);
+
+    assert!(cmd.contains("-boot d"));
+    assert!(!cmd.contains("-global virtio-blk-pci.bootindex=0"));
+    assert!(!cmd.contains("-boot order=c,strict=on"));
+    assert!(!cmd.contains("-boot strict=on"));
+}
+
+#[test]
 fn test_generate_network_args_user_with_portfwd() {
     let forwards = vec![
         PortForward {
@@ -519,6 +599,33 @@ fn test_generate_launch_script_iso_unchanged() {
         script.contains("-boot d"),
         "Install mode should boot from CD-ROM"
     );
+}
+
+#[test]
+fn test_generate_launch_script_uefi_with_floppy_keeps_normal_disk_boot() {
+    let config = WizardQemuConfig {
+        uefi: true,
+        disk_interface: "virtio".to_string(),
+        ..WizardQemuConfig::default()
+    };
+    let script = generate_launch_script_with_os(
+        "Linux VM",
+        "disk.qcow2",
+        None,
+        false,
+        &config,
+        None,
+        Some(Path::new("/tmp/boot.img")),
+    );
+
+    assert!(script.contains("FLOPPY=/tmp/boot.img"));
+    assert_eq!(
+        script.matches("-global virtio-blk-pci.bootindex=0").count(),
+        1
+    );
+    assert_eq!(script.matches("-boot strict=on").count(), 1);
+    assert!(script.contains("-fda \"$FLOPPY\""));
+    assert!(script.contains("-boot a"));
 }
 
 fn existing_disk_state(
