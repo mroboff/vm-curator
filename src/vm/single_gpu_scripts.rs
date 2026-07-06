@@ -28,6 +28,17 @@ static RE_DISPLAY: Lazy<Regex> =
 static RE_VGA: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"-vga\s+\S+").expect("Invalid regex: RE_VGA"));
 
+/// Regex to match emulated graphics `-device` arguments (virtio-vga-gl, qxl, VGA,
+/// etc.). In single-GPU passthrough the physical card drives the display, so any
+/// emulated graphics device must be removed — otherwise QEMU aborts because a GL
+/// display device is requested with `-display none`/`-vga none` (#58).
+static RE_GRAPHICS_DEVICE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"-device\s+(virtio-vga-gl|virtio-vga|virtio-gpu-gl-pci|virtio-gpu-gl|virtio-gpu-pci|virtio-gpu|qxl-vga|qxl|cirrus-vga|vmware-svga|ati-vga|bochs-display|ramfb|secondary-vga|VGA)[^\s\\]*",
+    )
+    .expect("Invalid regex: RE_GRAPHICS_DEVICE")
+});
+
 /// Regex to match -audiodev arguments
 static RE_AUDIODEV: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"-audiodev\s+\S+(,\S+)*").expect("Invalid regex: RE_AUDIODEV"));
@@ -275,7 +286,8 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
     let pci_passthrough_args = load_pci_passthrough(vm);
 
     // Extract extra PCI addresses for binding (NICs, USB controllers, NVMe, etc.)
-    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs =
+        filter_bindable_pci_addresses(extract_pci_addresses(&pci_passthrough_args));
     let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
         "EXTRA_PCI_ADDRS=()".to_string()
     } else {
@@ -686,6 +698,29 @@ fn extract_pci_addresses(pci_args: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Drop PCI addresses that must never be bound to vfio-pci — host/PCI bridges and
+/// other infrastructure devices. The host bridge (`0000:00:00.0`) in particular
+/// makes the kernel reject the bind with "Invalid argument", which aborts the
+/// passthrough script and can leave the machine without a display (#58).
+///
+/// Addresses are classified against the live PCI enumeration; the host bridge is
+/// dropped unconditionally as a safety net in case enumeration is unavailable.
+fn filter_bindable_pci_addresses(addrs: Vec<String>) -> Vec<String> {
+    let devices = crate::hardware::enumerate_pci_devices().unwrap_or_default();
+    addrs
+        .into_iter()
+        .filter(|addr| {
+            if addr == "0000:00:00.0" {
+                return false;
+            }
+            match devices.iter().find(|d| &d.address == addr) {
+                Some(dev) => !dev.is_infrastructure(),
+                None => true,
+            }
+        })
+        .collect()
+}
+
 /// Generate USB passthrough arguments
 fn generate_usb_passthrough_args(devices: &[crate::vm::UsbPassthrough]) -> String {
     if devices.is_empty() {
@@ -738,7 +773,8 @@ fn generate_restore_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Strin
 
     // Load PCI passthrough for extra devices
     let pci_passthrough_args = load_pci_passthrough(vm);
-    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs =
+        filter_bindable_pci_addresses(extract_pci_addresses(&pci_passthrough_args));
     let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
         "EXTRA_PCI_ADDRS=()".to_string()
     } else {
@@ -1146,6 +1182,11 @@ fn extract_qemu_command_for_passthrough(
     // Remove existing -vga if present
     qemu_cmd = RE_VGA.replace_all(&qemu_cmd, "").to_string();
 
+    // Remove emulated graphics devices (virtio-vga-gl, qxl, etc.) — the physical
+    // passed-through GPU handles the display, and QEMU aborts if such a device is
+    // present alongside -display none/-vga none (#58).
+    qemu_cmd = RE_GRAPHICS_DEVICE.replace_all(&qemu_cmd, "").to_string();
+
     // Remove existing audio devices (no user session available for audio)
     qemu_cmd = RE_AUDIODEV.replace_all(&qemu_cmd, "").to_string();
     qemu_cmd = RE_SOUNDHW.replace_all(&qemu_cmd, "").to_string();
@@ -1488,5 +1529,56 @@ mod tests {
         let qemu_cmd = "qemu-system-x86_64 \\\n        -device virtio-net-pci,netdev=net0";
         let result = append_passthrough_args(qemu_cmd, "-display none");
         assert!(result.contains("-device virtio-net-pci,netdev=net0 \\\n    -display none"));
+    }
+
+    #[test]
+    fn graphics_device_regex_removes_emulated_gpus() {
+        // Bare and option-suffixed emulated graphics devices are stripped (#58).
+        for arg in [
+            "-device virtio-vga-gl",
+            "-device virtio-vga-gl,id=gpu0",
+            "-device virtio-vga",
+            "-device qxl-vga",
+            "-device qxl",
+            "-device VGA",
+            "-device bochs-display",
+        ] {
+            assert_eq!(
+                RE_GRAPHICS_DEVICE.replace_all(arg, "").trim(),
+                "",
+                "expected {arg:?} to be fully removed"
+            );
+        }
+    }
+
+    #[test]
+    fn graphics_device_regex_keeps_passthrough_and_other_devices() {
+        // Must not touch the passed-through GPU or unrelated devices.
+        for arg in [
+            "-device vfio-pci,host=0000:01:00.0,multifunction=on",
+            "-device virtio-net-pci,netdev=net0",
+            "-device virtio-rng-pci",
+            "-device qemu-xhci,id=xhci",
+        ] {
+            assert_eq!(
+                RE_GRAPHICS_DEVICE.replace_all(arg, ""),
+                arg,
+                "expected {arg:?} to be left unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn filter_bindable_drops_host_bridge() {
+        // The host bridge must never reach EXTRA_PCI_ADDRS regardless of host
+        // enumeration; a clearly-bogus (non-infrastructure, non-enumerated)
+        // address is kept (#58).
+        let addrs = vec![
+            "0000:00:00.0".to_string(), // host bridge -> dropped unconditionally
+            "0000:ee:1f.7".to_string(), // not present on any host -> kept
+        ];
+        let filtered = filter_bindable_pci_addresses(addrs);
+        assert!(!filtered.iter().any(|a| a == "0000:00:00.0"));
+        assert!(filtered.iter().any(|a| a == "0000:ee:1f.7"));
     }
 }

@@ -176,24 +176,12 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     // Filter devices to show useful passthrough candidates
+    let gpu_enabled = app.config.enable_multi_gpu_passthrough;
     let relevant_devices: Vec<(usize, &PciDevice)> = app
         .pci_devices
         .iter()
         .enumerate()
-        .filter(|(_, d)| {
-            // Always show useful passthrough candidates (USB, network, storage, audio)
-            if d.is_passthrough_candidate() {
-                return true;
-            }
-            // When GPU passthrough is enabled, also show GPUs and GPU-related devices
-            if app.config.enable_multi_gpu_passthrough {
-                d.is_gpu()
-                    || d.is_audio()
-                    || d.iommu_group.is_some() && is_device_in_gpu_group(d, &app.pci_devices)
-            } else {
-                false
-            }
-        })
+        .filter(|(_, d)| is_relevant_pci_device(d, gpu_enabled, &app.pci_devices))
         .collect();
 
     let items: Vec<ListItem> = relevant_devices
@@ -477,6 +465,31 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
     frame.render_widget(para, inner);
 }
 
+/// Whether a PCI device should appear in the passthrough list.
+///
+/// Standard passthrough candidates (USB/network/storage/audio) always qualify.
+/// When multi-GPU passthrough is enabled, GPUs and other members of a GPU's
+/// IOMMU group are also shown — but infrastructure devices (host/PCI bridges,
+/// etc.) are always excluded, since the kernel rejects binding them to vfio-pci
+/// and doing so aborts the passthrough script (#58).
+fn is_relevant_pci_device(
+    device: &PciDevice,
+    gpu_enabled: bool,
+    all_devices: &[PciDevice],
+) -> bool {
+    if device.is_passthrough_candidate() {
+        return true;
+    }
+    if gpu_enabled {
+        !device.is_infrastructure()
+            && (device.is_gpu()
+                || device.is_audio()
+                || (device.iommu_group.is_some() && is_device_in_gpu_group(device, all_devices)))
+    } else {
+        false
+    }
+}
+
 /// Check if a device is in the same IOMMU group as any GPU
 fn is_device_in_gpu_group(device: &PciDevice, all_devices: &[PciDevice]) -> bool {
     if let Some(group) = device.iommu_group {
@@ -515,20 +528,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         .pci_devices
         .iter()
         .enumerate()
-        .filter(|(_, d)| {
-            // Always include useful passthrough candidates
-            if d.is_passthrough_candidate() {
-                return true;
-            }
-            // When GPU passthrough is enabled, also include GPUs and GPU-related devices
-            if gpu_enabled {
-                d.is_gpu()
-                    || d.is_audio()
-                    || d.iommu_group.is_some() && is_device_in_gpu_group(d, &app.pci_devices)
-            } else {
-                false
-            }
-        })
+        .filter(|(_, d)| is_relevant_pci_device(d, gpu_enabled, &app.pci_devices))
         .map(|(i, _)| i)
         .collect();
 
