@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::App;
+use crate::app::{App, ConfirmAction, Screen, UnsavedKind};
 use crate::hardware::PciDevice;
 
 /// Render the PCI passthrough screen
@@ -83,9 +83,9 @@ pub fn render(app: &App, frame: &mut Frame) {
 
     // Help text - show GPU options only when multi-GPU passthrough is enabled (not single GPU)
     let help_text = if app.config.enable_multi_gpu_passthrough && !app.config.single_gpu_enabled {
-        "[Space/Enter] Toggle  [g] Auto-select GPU  [s] Save  [p] Prerequisites  [Esc] Back"
+        "[Space] Toggle  [g] Auto-select GPU  [Enter/s] Save  [p] Prerequisites  [Esc] Back"
     } else {
-        "[Space/Enter] Toggle  [s] Save  [Esc] Back"
+        "[Space] Toggle  [Enter/s] Save  [Esc] Back"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -176,24 +176,12 @@ fn render_device_list(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     // Filter devices to show useful passthrough candidates
+    let gpu_enabled = app.config.enable_multi_gpu_passthrough;
     let relevant_devices: Vec<(usize, &PciDevice)> = app
         .pci_devices
         .iter()
         .enumerate()
-        .filter(|(_, d)| {
-            // Always show useful passthrough candidates (USB, network, storage, audio)
-            if d.is_passthrough_candidate() {
-                return true;
-            }
-            // When GPU passthrough is enabled, also show GPUs and GPU-related devices
-            if app.config.enable_multi_gpu_passthrough {
-                d.is_gpu()
-                    || d.is_audio()
-                    || d.iommu_group.is_some() && is_device_in_gpu_group(d, &app.pci_devices)
-            } else {
-                false
-            }
-        })
+        .filter(|(_, d)| is_relevant_pci_device(d, gpu_enabled, &app.pci_devices))
         .collect();
 
     let items: Vec<ListItem> = relevant_devices
@@ -477,6 +465,31 @@ pub fn render_prerequisites(app: &App, frame: &mut Frame) {
     frame.render_widget(para, inner);
 }
 
+/// Whether a PCI device should appear in the passthrough list.
+///
+/// Standard passthrough candidates (USB/network/storage/audio) always qualify.
+/// When multi-GPU passthrough is enabled, GPUs and other members of a GPU's
+/// IOMMU group are also shown — but infrastructure devices (host/PCI bridges,
+/// etc.) are always excluded, since the kernel rejects binding them to vfio-pci
+/// and doing so aborts the passthrough script (#58).
+fn is_relevant_pci_device(
+    device: &PciDevice,
+    gpu_enabled: bool,
+    all_devices: &[PciDevice],
+) -> bool {
+    if device.is_passthrough_candidate() {
+        return true;
+    }
+    if gpu_enabled {
+        !device.is_infrastructure()
+            && (device.is_gpu()
+                || device.is_audio()
+                || (device.iommu_group.is_some() && is_device_in_gpu_group(device, all_devices)))
+    } else {
+        false
+    }
+}
+
 /// Check if a device is in the same IOMMU group as any GPU
 fn is_device_in_gpu_group(device: &PciDevice, all_devices: &[PciDevice]) -> bool {
     if let Some(group) = device.iommu_group {
@@ -515,27 +528,20 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         .pci_devices
         .iter()
         .enumerate()
-        .filter(|(_, d)| {
-            // Always include useful passthrough candidates
-            if d.is_passthrough_candidate() {
-                return true;
-            }
-            // When GPU passthrough is enabled, also include GPUs and GPU-related devices
-            if gpu_enabled {
-                d.is_gpu()
-                    || d.is_audio()
-                    || d.iommu_group.is_some() && is_device_in_gpu_group(d, &app.pci_devices)
-            } else {
-                false
-            }
-        })
+        .filter(|(_, d)| is_relevant_pci_device(d, gpu_enabled, &app.pci_devices))
         .map(|(i, _)| i)
         .collect();
 
     match key.code {
         KeyCode::Esc => {
-            app.selected_menu_item = 0; // Reset for management menu
-            app.pop_screen();
+            if app.pci_selection_dirty() {
+                app.push_screen(Screen::Confirm(ConfirmAction::UnsavedChanges(
+                    UnsavedKind::Pci,
+                )));
+            } else {
+                app.selected_menu_item = 0; // Reset for management menu
+                app.pop_screen();
+            }
         }
         KeyCode::Char('j') | KeyCode::Down => {
             // Find current position in relevant devices
@@ -562,7 +568,9 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                 app.selected_menu_item = relevant_indices[0];
             }
         }
-        KeyCode::Char(' ') | KeyCode::Enter => {
+        KeyCode::Char(' ') => {
+            // Space is the sole toggle; Enter saves (see below) so pressing
+            // Enter to "confirm" a selection no longer toggles it back off (#52).
             app.toggle_pci_device(app.selected_menu_item);
         }
         KeyCode::Char('g') | KeyCode::Char('G') if gpu_enabled => {
@@ -573,51 +581,8 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                 }
             }
         }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            // Save PCI passthrough configuration
-            let save_result = save_pci_passthrough(app);
-            match save_result {
-                Ok(count) => {
-                    let mut status_msg = if count > 0 {
-                        format!("Saved {} PCI device(s) to launch.sh (will use pkexec/sudo for VFIO binding)", count)
-                    } else {
-                        "Cleared PCI passthrough from launch.sh".to_string()
-                    };
-                    // Reload script
-                    app.reload_selected_vm_script();
-
-                    // Regenerate single-GPU scripts if they exist
-                    if let Some(vm) = app.selected_vm() {
-                        if crate::hardware::scripts_exist(&vm.path) {
-                            // Try with in-memory config first, fall back to saved config
-                            let regen_result = if let Some(config) = app.single_gpu_config.as_ref()
-                            {
-                                crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
-                            } else {
-                                crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
-                            };
-
-                            match regen_result {
-                                Ok(true) => {
-                                    status_msg.push_str("; single-GPU scripts regenerated");
-                                }
-                                Ok(false) => {} // Scripts don't exist, nothing to regenerate
-                                Err(e) => {
-                                    status_msg.push_str(&format!(
-                                        "; warning: failed to regenerate single-GPU scripts: {}",
-                                        e
-                                    ));
-                                }
-                            }
-                        }
-                    }
-
-                    app.set_status(status_msg);
-                }
-                Err(e) => {
-                    app.set_status(format!("Error saving PCI config: {}", e));
-                }
-            }
+        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Enter => {
+            save_selection_and_report(app);
         }
         KeyCode::Char('p') | KeyCode::Char('P') if gpu_enabled => {
             // Refresh and show GPU prerequisites
@@ -630,6 +595,57 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
     }
 
     Ok(())
+}
+
+/// Save the current PCI selection to launch.sh and report the outcome via the
+/// status line. Shared by the `s` key and the unsaved-changes prompt.
+pub(crate) fn save_selection_and_report(app: &mut App) {
+    match save_pci_passthrough(app) {
+        Ok(count) => {
+            let mut status_msg = if count > 0 {
+                format!(
+                    "Saved {} PCI device(s) to launch.sh (will use pkexec/sudo for VFIO binding)",
+                    count
+                )
+            } else {
+                "Cleared PCI passthrough from launch.sh".to_string()
+            };
+            // Reload script
+            app.reload_selected_vm_script();
+
+            // Regenerate single-GPU scripts if they exist
+            if let Some(vm) = app.selected_vm() {
+                if crate::hardware::scripts_exist(&vm.path) {
+                    // Try with in-memory config first, fall back to saved config
+                    let regen_result = if let Some(config) = app.single_gpu_config.as_ref() {
+                        crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
+                    } else {
+                        crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
+                    };
+
+                    match regen_result {
+                        Ok(true) => {
+                            status_msg.push_str("; single-GPU scripts regenerated");
+                        }
+                        Ok(false) => {} // Scripts don't exist, nothing to regenerate
+                        Err(e) => {
+                            status_msg.push_str(&format!(
+                                "; warning: failed to regenerate single-GPU scripts: {}",
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+
+            app.set_status(status_msg);
+            // Saved state is now the baseline; no unsaved changes remain.
+            app.snapshot_pci_baseline();
+        }
+        Err(e) => {
+            app.set_status(format!("Error saving PCI config: {}", e));
+        }
+    }
 }
 
 /// Save PCI passthrough configuration to the VM's launch.sh

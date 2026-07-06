@@ -28,6 +28,17 @@ static RE_DISPLAY: Lazy<Regex> =
 static RE_VGA: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"-vga\s+\S+").expect("Invalid regex: RE_VGA"));
 
+/// Regex to match emulated graphics `-device` arguments (virtio-vga-gl, qxl, VGA,
+/// etc.). In single-GPU passthrough the physical card drives the display, so any
+/// emulated graphics device must be removed — otherwise QEMU aborts because a GL
+/// display device is requested with `-display none`/`-vga none` (#58).
+static RE_GRAPHICS_DEVICE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"-device\s+(virtio-vga-gl|virtio-vga|virtio-gpu-gl-pci|virtio-gpu-gl|virtio-gpu-pci|virtio-gpu|qxl-vga|qxl|cirrus-vga|vmware-svga|ati-vga|bochs-display|ramfb|secondary-vga|VGA)[^\s\\]*",
+    )
+    .expect("Invalid regex: RE_GRAPHICS_DEVICE")
+});
+
 /// Regex to match -audiodev arguments
 static RE_AUDIODEV: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"-audiodev\s+\S+(,\S+)*").expect("Invalid regex: RE_AUDIODEV"));
@@ -275,7 +286,8 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
     let pci_passthrough_args = load_pci_passthrough(vm);
 
     // Extract extra PCI addresses for binding (NICs, USB controllers, NVMe, etc.)
-    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs =
+        filter_bindable_pci_addresses(extract_pci_addresses(&pci_passthrough_args));
     let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
         "EXTRA_PCI_ADDRS=()".to_string()
     } else {
@@ -350,6 +362,10 @@ start_tpm
 # the display when the VM exits.
 #
 # For single-GPU passthrough, the VM's display goes directly to physical monitors.
+#
+# AMD GPUs frequently produce NO video in the guest unless a clean vBIOS ROM is
+# supplied via romfile= (set it in the Single GPU Setup screen with [r]).
+# Integrated (APU) GPUs are often unsupported for passthrough. See issue #44.
 
 set -e
 
@@ -638,7 +654,23 @@ init_tpm() {{
     if [[ ! -d "{tpm_dir}" ]]; then
         echo "Initializing TPM state directory..."
         mkdir -p "{tpm_dir}"
-        swtpm_setup --tpmstate "{tpm_dir}" --tpm2 --create-ek-cert --create-platform-cert
+
+        # Ensure a per-user swtpm CA config exists so EK/platform certificate
+        # creation does not require write access to /var/lib/swtpm-localca
+        # (issue #42). skip-if-exist never clobbers an existing user config.
+        if [[ ! -f "$HOME/.config/swtpm-localca.conf" ]]; then
+            swtpm_setup --create-config-files skip-if-exist 2>/dev/null || true
+        fi
+
+        # Try a full setup with certificates; fall back to a certificate-less
+        # setup if cert creation still fails (Windows 11 detects TPM 2.0 without
+        # an EK certificate).
+        if ! swtpm_setup --tpmstate "{tpm_dir}" --tpm2 \
+            --create-ek-cert --create-platform-cert \
+            --allow-signing --decryption --overwrite 2>/dev/null; then
+            echo "swtpm certificate creation failed; retrying without certificates..."
+            swtpm_setup --tpmstate "{tpm_dir}" --tpm2 --overwrite
+        fi
     fi
 }}
 
@@ -668,6 +700,45 @@ fn extract_pci_addresses(pci_args: &[String]) -> Vec<String> {
                 .map(|s| s.split([',', ' ']).next().unwrap_or(s).to_string())
         })
         .collect()
+}
+
+/// Drop PCI addresses that must never be bound to vfio-pci — host/PCI bridges and
+/// other infrastructure devices. The host bridge (`0000:00:00.0`) in particular
+/// makes the kernel reject the bind with "Invalid argument", which aborts the
+/// passthrough script and can leave the machine without a display (#58).
+///
+/// Addresses are classified against the live PCI enumeration; the host bridge is
+/// dropped unconditionally as a safety net in case enumeration is unavailable.
+fn filter_bindable_pci_addresses(addrs: Vec<String>) -> Vec<String> {
+    let devices = crate::hardware::enumerate_pci_devices().unwrap_or_default();
+    addrs
+        .into_iter()
+        .filter(|addr| {
+            if addr == "0000:00:00.0" {
+                return false;
+            }
+            match devices.iter().find(|d| &d.address == addr) {
+                Some(dev) => !dev.is_infrastructure(),
+                None => true,
+            }
+        })
+        .collect()
+}
+
+/// Build the `-device vfio-pci` argument for the passed-through GPU, adding a
+/// `romfile=` when a vBIOS ROM is configured. Supplying a clean vBIOS is commonly
+/// required for AMD single-GPU passthrough to produce any video output (#44).
+fn gpu_passthrough_device(config: &SingleGpuConfig) -> String {
+    match &config.gpu_rom {
+        Some(rom) if !rom.is_empty() => format!(
+            "-device vfio-pci,host={},multifunction=on,romfile=\"{}\"",
+            config.gpu.address, rom
+        ),
+        _ => format!(
+            "-device vfio-pci,host={},multifunction=on",
+            config.gpu.address
+        ),
+    }
 }
 
 /// Generate USB passthrough arguments
@@ -722,7 +793,8 @@ fn generate_restore_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Strin
 
     // Load PCI passthrough for extra devices
     let pci_passthrough_args = load_pci_passthrough(vm);
-    let extra_pci_addrs = extract_pci_addresses(&pci_passthrough_args);
+    let extra_pci_addrs =
+        filter_bindable_pci_addresses(extract_pci_addresses(&pci_passthrough_args));
     let extra_pci_addrs_str = if extra_pci_addrs.is_empty() {
         "EXTRA_PCI_ADDRS=()".to_string()
     } else {
@@ -1130,6 +1202,11 @@ fn extract_qemu_command_for_passthrough(
     // Remove existing -vga if present
     qemu_cmd = RE_VGA.replace_all(&qemu_cmd, "").to_string();
 
+    // Remove emulated graphics devices (virtio-vga-gl, qxl, etc.) — the physical
+    // passed-through GPU handles the display, and QEMU aborts if such a device is
+    // present alongside -display none/-vga none (#58).
+    qemu_cmd = RE_GRAPHICS_DEVICE.replace_all(&qemu_cmd, "").to_string();
+
     // Remove existing audio devices (no user session available for audio)
     qemu_cmd = RE_AUDIODEV.replace_all(&qemu_cmd, "").to_string();
     qemu_cmd = RE_SOUNDHW.replace_all(&qemu_cmd, "").to_string();
@@ -1149,10 +1226,7 @@ fn extract_qemu_command_for_passthrough(
     let mut passthrough_args = Vec::new();
 
     // GPU passthrough (no x-vga=on - incompatible with modern NVIDIA GPUs)
-    passthrough_args.push(format!(
-        "-device vfio-pci,host={},multifunction=on",
-        config.gpu.address
-    ));
+    passthrough_args.push(gpu_passthrough_device(config));
 
     // Audio passthrough (if present)
     if let Some(ref audio) = config.audio {
@@ -1268,13 +1342,20 @@ fn generate_basic_qemu_command(
         );
     }
 
-    // Add UEFI if present
+    // Add UEFI if present. Derive the pflash format from the firmware file
+    // extension so qcow2 OVMF images (e.g. Fedora's 4M firmware) work; the CODE
+    // and VARS files always share a format because they come from one pair.
     if components.has_uefi {
-        cmd.push_str(
+        let ovmf_format = match components.ovmf_code.as_deref() {
+            Some(path) if path.ends_with(".qcow2") => "qcow2",
+            _ => "raw",
+        };
+        cmd.push_str(&format!(
             r#" \
-    -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-    -drive if=pflash,format=raw,file="$OVMF_VARS""#,
-        );
+    -drive if=pflash,format={fmt},readonly=on,file="$OVMF_CODE" \
+    -drive if=pflash,format={fmt},file="$OVMF_VARS""#,
+            fmt = ovmf_format
+        ));
     }
 
     // Add TPM if present
@@ -1306,8 +1387,8 @@ fn generate_basic_qemu_command(
     // Add GPU passthrough (no x-vga=on - incompatible with modern NVIDIA GPUs)
     cmd.push_str(&format!(
         r#" \
-    -device vfio-pci,host={},multifunction=on"#,
-        config.gpu.address
+    {}"#,
+        gpu_passthrough_device(config)
     ));
 
     // Add audio (if present)
@@ -1465,5 +1546,100 @@ mod tests {
         let qemu_cmd = "qemu-system-x86_64 \\\n        -device virtio-net-pci,netdev=net0";
         let result = append_passthrough_args(qemu_cmd, "-display none");
         assert!(result.contains("-device virtio-net-pci,netdev=net0 \\\n    -display none"));
+    }
+
+    #[test]
+    fn graphics_device_regex_removes_emulated_gpus() {
+        // Bare and option-suffixed emulated graphics devices are stripped (#58).
+        for arg in [
+            "-device virtio-vga-gl",
+            "-device virtio-vga-gl,id=gpu0",
+            "-device virtio-vga",
+            "-device qxl-vga",
+            "-device qxl",
+            "-device VGA",
+            "-device bochs-display",
+        ] {
+            assert_eq!(
+                RE_GRAPHICS_DEVICE.replace_all(arg, "").trim(),
+                "",
+                "expected {arg:?} to be fully removed"
+            );
+        }
+    }
+
+    #[test]
+    fn graphics_device_regex_keeps_passthrough_and_other_devices() {
+        // Must not touch the passed-through GPU or unrelated devices.
+        for arg in [
+            "-device vfio-pci,host=0000:01:00.0,multifunction=on",
+            "-device virtio-net-pci,netdev=net0",
+            "-device virtio-rng-pci",
+            "-device qemu-xhci,id=xhci",
+        ] {
+            assert_eq!(
+                RE_GRAPHICS_DEVICE.replace_all(arg, ""),
+                arg,
+                "expected {arg:?} to be left unchanged"
+            );
+        }
+    }
+
+    fn amd_gpu_config(gpu_rom: Option<String>) -> SingleGpuConfig {
+        use crate::hardware::{DisplayManager, GpuDriver, PciDevice};
+        let gpu = PciDevice {
+            address: "0000:e4:00.0".to_string(),
+            vendor_id: 0x1002,
+            device_id: 0x1681,
+            vendor_name: "AMD/ATI".to_string(),
+            device_name: "Radeon 680M".to_string(),
+            class_code: 0x030000,
+            driver: Some("amdgpu".to_string()),
+            iommu_group: Some(10),
+            is_boot_vga: true,
+            subsystem_vendor_id: 0,
+            subsystem_device_id: 0,
+        };
+        SingleGpuConfig {
+            gpu,
+            audio: None,
+            iommu_group_devices: Vec::new(),
+            original_driver: GpuDriver::Amdgpu,
+            display_manager: DisplayManager::Gdm,
+            gpu_rom,
+        }
+    }
+
+    #[test]
+    fn gpu_device_includes_romfile_when_set() {
+        let cfg = amd_gpu_config(Some("/home/u/vbios.rom".to_string()));
+        assert_eq!(
+            gpu_passthrough_device(&cfg),
+            "-device vfio-pci,host=0000:e4:00.0,multifunction=on,romfile=\"/home/u/vbios.rom\""
+        );
+    }
+
+    #[test]
+    fn gpu_device_omits_romfile_when_unset_or_empty() {
+        let expected = "-device vfio-pci,host=0000:e4:00.0,multifunction=on";
+        assert_eq!(gpu_passthrough_device(&amd_gpu_config(None)), expected);
+        assert_eq!(
+            gpu_passthrough_device(&amd_gpu_config(Some(String::new()))),
+            expected
+        );
+    }
+
+    #[test]
+    fn filter_bindable_drops_host_bridge() {
+        // The host bridge must never reach EXTRA_PCI_ADDRS regardless of host
+        // enumeration; a clearly-bogus (non-infrastructure, non-enumerated)
+        // address is kept (#58).
+        let addrs = vec![
+            "0000:00:00.0".to_string(), // host bridge -> dropped unconditionally
+            "0000:ee:1f.7".to_string(), // not present on any host -> kept
+        ];
+        let filtered = filter_bindable_pci_addresses(addrs);
+        assert!(!filtered.iter().any(|a| a == "0000:00:00.0"));
+        assert!(filtered.iter().any(|a| a == "0000:ee:1f.7"));
     }
 }

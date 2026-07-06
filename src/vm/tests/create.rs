@@ -1028,3 +1028,64 @@ fn test_update_network_in_script_originally_no_network_falls_back() {
         "fallback should still inject -device:\n{updated}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// OVMF firmware pair selection (issue #42)
+// ---------------------------------------------------------------------------
+
+/// Every pair in a firmware table must be self-consistent: a `qcow2` format
+/// implies `.qcow2` CODE/VARS files, and `raw` implies non-qcow2 files. A
+/// mismatch here would emit a `-drive format=` flag that disagrees with the
+/// actual firmware image.
+fn assert_pairs_consistent(table: &[(&str, &str, &str)]) {
+    for (code, vars, format) in table {
+        match *format {
+            "qcow2" => {
+                assert!(
+                    code.ends_with(".qcow2") && vars.ends_with(".qcow2"),
+                    "qcow2 pair must use .qcow2 files: {code} / {vars}"
+                );
+            }
+            "raw" => {
+                assert!(
+                    !code.ends_with(".qcow2") && !vars.ends_with(".qcow2"),
+                    "raw pair must not use .qcow2 files: {code} / {vars}"
+                );
+            }
+            other => panic!("unexpected firmware format {other:?} for {code}"),
+        }
+    }
+}
+
+#[test]
+fn test_ovmf_pair_tables_are_format_consistent() {
+    assert_pairs_consistent(OVMF_SECBOOT_PAIRS);
+    assert_pairs_consistent(OVMF_PAIRS);
+}
+
+/// The Fedora Secure Boot 4M firmware (the fix for issue #42) must be preferred
+/// over the 2M variant, otherwise Windows 11 fails to detect TPM 2.0.
+#[test]
+fn test_fedora_4m_secboot_preferred_over_2m() {
+    let pos = |needle: &str| {
+        OVMF_SECBOOT_PAIRS
+            .iter()
+            .position(|(code, _, _)| *code == needle)
+            .unwrap_or_else(|| panic!("{needle} missing from OVMF_SECBOOT_PAIRS"))
+    };
+    let qcow2_4m = pos("/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.qcow2");
+    let raw_4m = pos("/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.fd");
+    let raw_2m = pos("/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd");
+    assert!(
+        qcow2_4m < raw_2m && raw_4m < raw_2m,
+        "Fedora 4M secboot firmware must precede the 2M variant"
+    );
+}
+
+#[test]
+fn test_default_ovmf_firmware_is_raw() {
+    let fw = default_ovmf_firmware();
+    assert_eq!(fw.format, "raw");
+    assert!(fw.code.ends_with(".fd"));
+    assert!(fw.vars_template.ends_with(".fd"));
+}

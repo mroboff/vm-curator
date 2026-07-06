@@ -868,7 +868,7 @@ const SHARED_FOLDERS_MARKER_START: &str = "# >>> Shared Folders (managed by vm-c
 const SHARED_FOLDERS_MARKER_END: &str = "# <<< Shared Folders <<<";
 
 /// A shared folder configuration for virtio-9p host-to-guest file sharing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedFolder {
     pub host_path: String,
     pub mount_tag: String,

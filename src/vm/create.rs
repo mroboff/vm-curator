@@ -96,89 +96,196 @@ fn generate_serial() -> String {
     serial
 }
 
-/// Known OVMF firmware paths across different Linux distributions
-const OVMF_SEARCH_PATHS: &[&str] = &[
-    // Arch Linux (current naming with .4m suffix for 4MB variant)
-    "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
-    "/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd",
-    "/usr/share/OVMF/x64/OVMF_CODE.4m.fd",
-    "/usr/share/ovmf/x64/OVMF_CODE.4m.fd",
-    // Arch Linux (legacy naming without .4m)
-    "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
-    "/usr/share/edk2/x64/OVMF_CODE.fd",
-    // Debian/Ubuntu
-    "/usr/share/OVMF/OVMF_CODE.fd",
-    "/usr/share/OVMF/OVMF_CODE_4M.fd",
-    // Fedora/RHEL/CentOS
-    "/usr/share/edk2/ovmf/OVMF_CODE.fd",
-    "/usr/share/edk2/ovmf/OVMF_CODE.cc.fd",
-    // openSUSE
-    "/usr/share/qemu/ovmf-x86_64.bin",
-    "/usr/share/qemu/ovmf-x86_64-code.bin",
-    // NixOS
-    "/run/libvirt/nix-ovmf/OVMF_CODE.fd",
-    // Generic/fallback paths
-    "/usr/share/ovmf/OVMF_CODE.fd",
-    "/usr/share/qemu/OVMF_CODE.fd",
-    "/usr/share/ovmf/x64/OVMF_CODE.fd",
-];
-
-/// Find the OVMF_CODE.fd firmware file by checking known paths
-fn find_ovmf_code_path() -> Option<String> {
-    for path in OVMF_SEARCH_PATHS {
-        if Path::new(path).exists() {
-            return Some(path.to_string());
-        }
-    }
-    None
+/// A matched OVMF firmware pair: read-only CODE plus its VARS template.
+///
+/// CODE and VARS must agree in both size (2M vs 4M) and on-disk format
+/// (raw vs qcow2); mixing them produces a VM that either won't boot or fails
+/// to expose Secure Boot / TPM 2.0 correctly. Selecting them as a pair (rather
+/// than via two independent searches) guarantees they always match.
+struct OvmfFirmware {
+    /// Read-only OVMF_CODE path.
+    code: String,
+    /// OVMF_VARS template to copy into the VM directory.
+    vars_template: String,
+    /// On-disk image format for the QEMU `-drive ...,format=` flag.
+    format: &'static str,
 }
 
-/// Known OVMF Secure Boot firmware paths across different Linux distributions
-const OVMF_SECBOOT_SEARCH_PATHS: &[&str] = &[
-    // Arch Linux
-    "/usr/share/edk2/x64/OVMF_CODE.secboot.4m.fd",
-    "/usr/share/OVMF/x64/OVMF_CODE.secboot.4m.fd",
-    "/usr/share/ovmf/x64/OVMF_CODE.secboot.4m.fd",
-    "/usr/share/edk2-ovmf/x64/OVMF_CODE.secboot.fd",
-    // Debian/Ubuntu
-    "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
-    "/usr/share/OVMF/OVMF_CODE_4M.ms.fd",
-    "/usr/share/OVMF/OVMF_CODE.secboot.fd",
-    "/usr/share/OVMF/OVMF_CODE.ms.fd",
-    // Fedora/RHEL
-    "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
-    // Generic/fallback
-    "/usr/share/ovmf/OVMF_CODE.secboot.fd",
-    "/usr/share/qemu/OVMF_CODE.secboot.fd",
-];
-
-/// Find the OVMF Secure Boot firmware file by checking known paths
-fn find_ovmf_secboot_code_path() -> Option<String> {
-    for path in OVMF_SECBOOT_SEARCH_PATHS {
-        if Path::new(path).exists() {
-            return Some(path.to_string());
-        }
-    }
-    None
-}
-
-/// Find OVMF_VARS template with pre-enrolled Secure Boot keys (Microsoft keys)
-fn find_ovmf_secboot_vars_template() -> Option<String> {
-    let search_paths = [
-        // Debian/Ubuntu (pre-enrolled Microsoft keys)
+/// Secure Boot OVMF pairs `(code, vars, format)` in priority order.
+///
+/// 4M variants are listed first: Fedora's 2M `OVMF_CODE.secboot.fd` does not
+/// expose TPM 2.0 correctly to the Windows 11 installer (issue #42), so we must
+/// prefer the 4M build — including Fedora's qcow2-format firmware — when present.
+const OVMF_SECBOOT_PAIRS: &[(&str, &str, &str)] = &[
+    // Fedora/RHEL — 4M qcow2 (Fedora 40+/44 ship firmware as qcow2)
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.qcow2",
+        "/usr/share/edk2/ovmf/OVMF_VARS_4M.secboot.qcow2",
+        "qcow2",
+    ),
+    // Fedora/RHEL — 4M raw
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.fd",
+        "/usr/share/edk2/ovmf/OVMF_VARS_4M.secboot.fd",
+        "raw",
+    ),
+    // Arch Linux — 4M
+    (
+        "/usr/share/edk2/x64/OVMF_CODE.secboot.4m.fd",
+        "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+        "raw",
+    ),
+    (
+        "/usr/share/OVMF/x64/OVMF_CODE.secboot.4m.fd",
+        "/usr/share/OVMF/x64/OVMF_VARS.4m.fd",
+        "raw",
+    ),
+    // Debian/Ubuntu — 4M (pre-enrolled Microsoft keys)
+    (
+        "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
         "/usr/share/OVMF/OVMF_VARS_4M.ms.fd",
-        "/usr/share/OVMF/OVMF_VARS.ms.fd",
-        // Fedora/RHEL
+        "raw",
+    ),
+    (
+        "/usr/share/OVMF/OVMF_CODE_4M.ms.fd",
+        "/usr/share/OVMF/OVMF_VARS_4M.ms.fd",
+        "raw",
+    ),
+    // --- 2M fallbacks (last resort) ---
+    // Fedora/RHEL — 2M
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
         "/usr/share/edk2/ovmf/OVMF_VARS.secboot.fd",
-    ];
+        "raw",
+    ),
+    // Debian/Ubuntu — 2M
+    (
+        "/usr/share/OVMF/OVMF_CODE.secboot.fd",
+        "/usr/share/OVMF/OVMF_VARS.ms.fd",
+        "raw",
+    ),
+    // Arch Linux — legacy 2M
+    (
+        "/usr/share/edk2-ovmf/x64/OVMF_CODE.secboot.fd",
+        "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd",
+        "raw",
+    ),
+    // Generic
+    (
+        "/usr/share/ovmf/OVMF_CODE.secboot.fd",
+        "/usr/share/ovmf/OVMF_VARS.fd",
+        "raw",
+    ),
+];
 
-    for path in search_paths {
-        if Path::new(path).exists() {
-            return Some(path.to_string());
+/// Non-Secure-Boot OVMF pairs `(code, vars, format)` in priority order (4M first).
+const OVMF_PAIRS: &[(&str, &str, &str)] = &[
+    // Fedora/RHEL — 4M qcow2
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE_4M.qcow2",
+        "/usr/share/edk2/ovmf/OVMF_VARS_4M.qcow2",
+        "qcow2",
+    ),
+    // Fedora/RHEL — 4M raw
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE_4M.fd",
+        "/usr/share/edk2/ovmf/OVMF_VARS_4M.fd",
+        "raw",
+    ),
+    // Arch Linux — 4M
+    (
+        "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+        "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
+        "raw",
+    ),
+    (
+        "/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd",
+        "/usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd",
+        "raw",
+    ),
+    (
+        "/usr/share/OVMF/x64/OVMF_CODE.4m.fd",
+        "/usr/share/OVMF/x64/OVMF_VARS.4m.fd",
+        "raw",
+    ),
+    // Debian/Ubuntu — 4M
+    (
+        "/usr/share/OVMF/OVMF_CODE_4M.fd",
+        "/usr/share/OVMF/OVMF_VARS_4M.fd",
+        "raw",
+    ),
+    // --- 2M fallbacks (last resort) ---
+    // Fedora/RHEL — 2M
+    (
+        "/usr/share/edk2/ovmf/OVMF_CODE.fd",
+        "/usr/share/edk2/ovmf/OVMF_VARS.fd",
+        "raw",
+    ),
+    // Debian/Ubuntu — 2M
+    (
+        "/usr/share/OVMF/OVMF_CODE.fd",
+        "/usr/share/OVMF/OVMF_VARS.fd",
+        "raw",
+    ),
+    // Arch Linux — legacy 2M
+    (
+        "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
+        "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd",
+        "raw",
+    ),
+    (
+        "/usr/share/edk2/x64/OVMF_CODE.fd",
+        "/usr/share/edk2/x64/OVMF_VARS.fd",
+        "raw",
+    ),
+    // NixOS
+    (
+        "/run/libvirt/nix-ovmf/OVMF_CODE.fd",
+        "/run/libvirt/nix-ovmf/OVMF_VARS.fd",
+        "raw",
+    ),
+    // Generic
+    (
+        "/usr/share/ovmf/OVMF_CODE.fd",
+        "/usr/share/ovmf/OVMF_VARS.fd",
+        "raw",
+    ),
+    (
+        "/usr/share/qemu/OVMF_CODE.fd",
+        "/usr/share/qemu/OVMF_VARS.fd",
+        "raw",
+    ),
+];
+
+/// Fallback firmware pair used when no known CODE+VARS pair exists on disk.
+fn default_ovmf_firmware() -> OvmfFirmware {
+    OvmfFirmware {
+        code: "/usr/share/OVMF/OVMF_CODE.fd".to_string(),
+        vars_template: "/usr/share/OVMF/OVMF_VARS.fd".to_string(),
+        format: "raw",
+    }
+}
+
+/// Select a matched OVMF CODE+VARS firmware pair, preferring 4M builds.
+///
+/// Both the CODE and VARS file of a candidate pair must exist on disk before it
+/// is chosen, so the returned CODE and VARS always agree in size and format.
+fn find_ovmf_firmware(secboot: bool) -> Option<OvmfFirmware> {
+    let table = if secboot {
+        OVMF_SECBOOT_PAIRS
+    } else {
+        OVMF_PAIRS
+    };
+    for &(code, vars, format) in table {
+        if Path::new(code).exists() && Path::new(vars).exists() {
+            return Some(OvmfFirmware {
+                code: code.to_string(),
+                vars_template: vars.to_string(),
+                format,
+            });
         }
     }
-    // Fall back to standard VARS template
-    find_ovmf_vars_template()
+    None
 }
 
 /// Result of creating a new VM
@@ -442,13 +549,28 @@ init_tpm() {
     if [[ ! -d "$TPM_DIR" ]]; then
         echo "Initializing TPM state directory..."
         mkdir -p "$TPM_DIR"
-        swtpm_setup --tpmstate "$TPM_DIR" \
+
+        # Ensure a per-user swtpm CA config exists so EK/platform certificate
+        # creation does not require write access to the system-wide
+        # /var/lib/swtpm-localca statedir (issue #42). skip-if-exist never
+        # clobbers an existing user config.
+        if [[ ! -f "$HOME/.config/swtpm-localca.conf" ]]; then
+            swtpm_setup --create-config-files skip-if-exist 2>/dev/null || true
+        fi
+
+        # Try a full setup with certificates; fall back to a certificate-less
+        # setup if cert creation still fails. Windows 11 detects TPM 2.0 without
+        # an EK certificate, so this keeps VM creation working regardless.
+        if ! swtpm_setup --tpmstate "$TPM_DIR" \
             --tpm2 \
             --create-ek-cert \
             --create-platform-cert \
             --allow-signing \
             --decryption \
-            --overwrite
+            --overwrite 2>/dev/null; then
+            echo "swtpm certificate creation failed; retrying without certificates..."
+            swtpm_setup --tpmstate "$TPM_DIR" --tpm2 --overwrite
+        fi
     fi
 }
 
@@ -488,20 +610,24 @@ trap cleanup EXIT
     .to_string()
 }
 
-/// Generate OVMF variables setup for UEFI
+/// Generate OVMF variables setup for UEFI.
+///
+/// Copies the VARS template from the same firmware pair the QEMU command uses
+/// (via [`find_ovmf_firmware`]) so CODE and VARS always match in size/format.
+/// The writable copy's extension mirrors the firmware format (`.qcow2` vs
+/// `.fd`) and the QEMU `-drive ...,format=` flag is derived from the same pair.
 fn generate_ovmf_vars_setup(needs_secboot: bool) -> String {
-    // Find OVMF_VARS template (prefer secboot variant with pre-enrolled keys when needed)
-    let ovmf_vars_template = if needs_secboot {
-        find_ovmf_secboot_vars_template()
-            .unwrap_or_else(|| "/usr/share/OVMF/OVMF_VARS.fd".to_string())
+    let firmware = find_ovmf_firmware(needs_secboot).unwrap_or_else(default_ovmf_firmware);
+    let vars_ext = if firmware.format == "qcow2" {
+        "qcow2"
     } else {
-        find_ovmf_vars_template().unwrap_or_else(|| "/usr/share/OVMF/OVMF_VARS.fd".to_string())
+        "fd"
     };
 
     format!(
         r#"# UEFI variables (writable copy per VM)
 OVMF_VARS_TEMPLATE="{template}"
-OVMF_VARS="$VM_DIR/OVMF_VARS.fd"
+OVMF_VARS="$VM_DIR/OVMF_VARS.{ext}"
 
 # Create a writable copy of OVMF_VARS if it doesn't exist
 if [[ ! -f "$OVMF_VARS" ]]; then
@@ -515,36 +641,9 @@ if [[ ! -f "$OVMF_VARS" ]]; then
 fi
 
 "#,
-        template = ovmf_vars_template
+        template = firmware.vars_template,
+        ext = vars_ext
     )
-}
-
-/// Find OVMF_VARS template path
-fn find_ovmf_vars_template() -> Option<String> {
-    let search_paths = [
-        // Arch Linux (4M variant for modern UEFI)
-        "/usr/share/edk2/x64/OVMF_VARS.4m.fd",
-        "/usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd",
-        "/usr/share/OVMF/x64/OVMF_VARS.4m.fd",
-        // Arch Linux (legacy)
-        "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd",
-        "/usr/share/edk2/x64/OVMF_VARS.fd",
-        // Debian/Ubuntu
-        "/usr/share/OVMF/OVMF_VARS.fd",
-        "/usr/share/OVMF/OVMF_VARS_4M.fd",
-        // Fedora/RHEL
-        "/usr/share/edk2/ovmf/OVMF_VARS.fd",
-        // Generic
-        "/usr/share/ovmf/OVMF_VARS.fd",
-        "/usr/share/qemu/OVMF_VARS.fd",
-    ];
-
-    for path in search_paths {
-        if Path::new(path).exists() {
-            return Some(path.to_string());
-        }
-    }
-    None
 }
 
 /// Generate the launch.sh script content with OS profile awareness
@@ -904,23 +1003,23 @@ fn build_qemu_command_with_os(
         args.push("-smbios type=2".to_string());
     }
 
-    // UEFI boot with writable OVMF_VARS
+    // UEFI boot with writable OVMF_VARS. The CODE path and format come from the
+    // same firmware pair that `generate_ovmf_vars_setup` copies VARS from (both
+    // call `find_ovmf_firmware` with the same flag), so CODE and VARS always
+    // agree in size and on-disk format (raw vs qcow2).
     if needs_uefi {
         let needs_secboot = needs_tpm;
-        let ovmf_code = if needs_secboot {
-            find_ovmf_secboot_code_path()
-                .or_else(find_ovmf_code_path)
-                .unwrap_or_else(|| "/usr/share/OVMF/OVMF_CODE.fd".to_string())
-        } else {
-            find_ovmf_code_path().unwrap_or_else(|| "/usr/share/OVMF/OVMF_CODE.fd".to_string())
-        };
+        let firmware = find_ovmf_firmware(needs_secboot).unwrap_or_else(default_ovmf_firmware);
         // OVMF_CODE is read-only
         args.push(format!(
-            "-drive if=pflash,format=raw,readonly=on,file={}",
-            ovmf_code
+            "-drive if=pflash,format={},readonly=on,file={}",
+            firmware.format, firmware.code
         ));
         // OVMF_VARS is writable (uses variable set up in script)
-        args.push("-drive if=pflash,format=raw,file=\"$OVMF_VARS\"".to_string());
+        args.push(format!(
+            "-drive if=pflash,format={},file=\"$OVMF_VARS\"",
+            firmware.format
+        ));
 
         // Secure Boot requires secure pflash protection
         if needs_secboot {

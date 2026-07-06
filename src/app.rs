@@ -109,6 +109,16 @@ pub enum ConfirmAction {
     DiscardNotesChanges,
     StopVm,
     ForceStopVm,
+    /// Leaving a passthrough/shared-folders screen with unsaved changes.
+    UnsavedChanges(UnsavedKind),
+}
+
+/// Which management screen has unsaved changes (see [`ConfirmAction::UnsavedChanges`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedKind {
+    Usb,
+    Pci,
+    SharedFolders,
 }
 
 /// Input mode for text entry
@@ -129,6 +139,8 @@ pub enum FileBrowserMode {
     ImportConfig,
     Bios,
     Floppy,
+    /// GPU vBIOS ROM for single-GPU passthrough (#44)
+    SingleGpuRom,
 }
 
 // DiskAction, WizardStep, WizardQemuConfig, CreateWizardState, NetworkSettingsState,
@@ -162,12 +174,18 @@ pub struct App {
     pub usb_devices: Vec<UsbDevice>,
     /// Selected USB devices for passthrough
     pub selected_usb_devices: Vec<usize>,
+    /// USB selection as it was on entry / last save, for unsaved-change detection
+    pub usb_selection_baseline: Vec<usize>,
     /// PCI devices (cached)
     pub pci_devices: Vec<PciDevice>,
     /// Selected PCI devices for passthrough
     pub selected_pci_devices: Vec<usize>,
+    /// PCI selection as it was on entry / last save, for unsaved-change detection
+    pub pci_selection_baseline: Vec<usize>,
     /// Shared folders for the current VM
     pub shared_folders: Vec<SharedFolder>,
+    /// Shared folders as they were on entry / last save, for unsaved-change detection
+    pub shared_folders_baseline: Vec<SharedFolder>,
     /// Selected shared folder index
     pub shared_folder_selected: usize,
     /// Multi-GPU passthrough status (prerequisites)
@@ -397,9 +415,12 @@ impl App {
             selected_snapshot: 0,
             usb_devices: Vec::new(),
             selected_usb_devices: Vec::new(),
+            usb_selection_baseline: Vec::new(),
             pci_devices: Vec::new(),
             selected_pci_devices: Vec::new(),
+            pci_selection_baseline: Vec::new(),
             shared_folders: Vec::new(),
+            shared_folders_baseline: Vec::new(),
             shared_folder_selected: 0,
             multi_gpu_status: None,
             selected_menu_item: 0,
@@ -667,12 +688,7 @@ impl App {
         };
         self.selected_pci_devices.clear();
         for arg in &saved_args {
-            if let Some(host_start) = arg.find("host=") {
-                let addr_start = host_start + 5;
-                let addr = arg[addr_start..]
-                    .split(|c: char| c == ',' || c.is_whitespace())
-                    .next()
-                    .unwrap_or("");
+            if let Some(addr) = pci_addr_from_arg(arg) {
                 for (i, dev) in self.pci_devices.iter().enumerate() {
                     if dev.address == addr {
                         self.selected_pci_devices.push(i);
@@ -681,6 +697,61 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Record the current USB selection as the saved baseline.
+    ///
+    /// Call after populating the selection on screen entry and after a
+    /// successful save, so [`Self::usb_selection_dirty`] reflects only changes
+    /// the user made during this visit (#52).
+    pub fn snapshot_usb_baseline(&mut self) {
+        self.usb_selection_baseline = self.selected_usb_devices.clone();
+    }
+
+    /// Record the current PCI selection as the saved baseline.
+    pub fn snapshot_pci_baseline(&mut self) {
+        self.pci_selection_baseline = self.selected_pci_devices.clone();
+    }
+
+    /// Record the current shared-folder list as the saved baseline.
+    pub fn snapshot_shared_folders_baseline(&mut self) {
+        self.shared_folders_baseline = self.shared_folders.clone();
+    }
+
+    /// True if the USB selection changed since it was last entered or saved.
+    ///
+    /// Compares against the on-entry baseline (not disk) so a saved-but-now
+    /// disconnected device doesn't register as an unsaved change (#52).
+    pub fn usb_selection_dirty(&self) -> bool {
+        let current: std::collections::BTreeSet<usize> =
+            self.selected_usb_devices.iter().copied().collect();
+        let baseline: std::collections::BTreeSet<usize> =
+            self.usb_selection_baseline.iter().copied().collect();
+        current != baseline
+    }
+
+    /// True if the PCI selection changed since it was last entered or saved.
+    pub fn pci_selection_dirty(&self) -> bool {
+        let current: std::collections::BTreeSet<usize> =
+            self.selected_pci_devices.iter().copied().collect();
+        let baseline: std::collections::BTreeSet<usize> =
+            self.pci_selection_baseline.iter().copied().collect();
+        current != baseline
+    }
+
+    /// True if the shared-folder list changed since it was last entered or saved.
+    pub fn shared_folders_dirty(&self) -> bool {
+        let current: std::collections::BTreeSet<(&str, &str)> = self
+            .shared_folders
+            .iter()
+            .map(|f| (f.host_path.as_str(), f.mount_tag.as_str()))
+            .collect();
+        let baseline: std::collections::BTreeSet<(&str, &str)> = self
+            .shared_folders_baseline
+            .iter()
+            .map(|f| (f.host_path.as_str(), f.mount_tag.as_str()))
+            .collect();
+        current != baseline
     }
 
     /// Load shared folders for the current VM
@@ -975,6 +1046,7 @@ impl App {
             FileBrowserMode::Floppy => &[
                 ".img", ".IMG", ".ima", ".IMA", ".flp", ".FLP", ".vfd", ".VFD",
             ],
+            FileBrowserMode::SingleGpuRom => &[".rom", ".ROM", ".bin", ".BIN"],
         };
 
         // For Directory mode, add a [Select This Directory] sentinel entry first
@@ -1351,6 +1423,21 @@ impl App {
     }
 }
 
+/// Extract the PCI host address (e.g. `0000:01:00.0`) from a saved passthrough
+/// arg like `-device vfio-pci,host=0000:01:00.0`.
+fn pci_addr_from_arg(arg: &str) -> Option<String> {
+    let host_start = arg.find("host=")? + 5;
+    let addr = arg[host_start..]
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
+    if addr.is_empty() {
+        None
+    } else {
+        Some(addr.to_string())
+    }
+}
+
 /// Generate a mount tag from a host directory path
 fn generate_mount_tag(path: &str) -> String {
     let folder_name = std::path::Path::new(path)
@@ -1375,4 +1462,36 @@ fn generate_mount_tag(path: &str) -> String {
             tag
         }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pci_addr_from_arg_extracts_address() {
+        assert_eq!(
+            pci_addr_from_arg("-device vfio-pci,host=0000:01:00.0"),
+            Some("0000:01:00.0".to_string())
+        );
+    }
+
+    #[test]
+    fn pci_addr_from_arg_stops_at_trailing_options() {
+        assert_eq!(
+            pci_addr_from_arg("-device vfio-pci,host=0000:01:00.1,multifunction=on"),
+            Some("0000:01:00.1".to_string())
+        );
+    }
+
+    #[test]
+    fn pci_addr_from_arg_none_without_host() {
+        assert_eq!(pci_addr_from_arg("-device qemu-xhci,id=xhci"), None);
+        assert_eq!(pci_addr_from_arg("-enable-kvm"), None);
+    }
+
+    #[test]
+    fn pci_addr_from_arg_none_for_empty_host() {
+        assert_eq!(pci_addr_from_arg("-device vfio-pci,host="), None);
+    }
 }

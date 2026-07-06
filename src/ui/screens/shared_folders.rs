@@ -13,7 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::{App, FileBrowserMode, Screen};
+use crate::app::{App, ConfirmAction, FileBrowserMode, Screen, UnsavedKind};
 
 /// Render the shared folders screen
 pub fn render(app: &App, frame: &mut Frame) {
@@ -256,7 +256,15 @@ pub fn get_mount_tier(app: &App) -> &'static str {
 /// Handle key input for the shared folders screen
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
-        KeyCode::Esc => app.pop_screen(),
+        KeyCode::Esc => {
+            if app.shared_folders_dirty() {
+                app.push_screen(Screen::Confirm(ConfirmAction::UnsavedChanges(
+                    UnsavedKind::SharedFolders,
+                )));
+            } else {
+                app.pop_screen();
+            }
+        }
         KeyCode::Char('j') | KeyCode::Down => {
             if !app.shared_folders.is_empty()
                 && app.shared_folder_selected < app.shared_folders.len() - 1
@@ -277,15 +285,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             app.remove_shared_folder();
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
-            save_shared_folders(app);
+            save_selection_and_report(app);
         }
         _ => {}
     }
     Ok(())
 }
 
-/// Save shared folders to launch.sh
-fn save_shared_folders(app: &mut App) {
+/// Save shared folders to launch.sh and report the outcome via the status line.
+/// Shared by the `s` key and the unsaved-changes prompt.
+pub(crate) fn save_selection_and_report(app: &mut App) {
     let save_result = if let Some(vm) = app.selected_vm() {
         let result = crate::vm::save_shared_folders(vm, &app.shared_folders);
         Some((result, app.shared_folders.len()))
@@ -302,6 +311,8 @@ fn save_shared_folders(app: &mut App) {
                 } else {
                     app.set_status("Cleared shared folders from launch.sh");
                 }
+                // Saved state is now the baseline; no unsaved changes remain.
+                app.snapshot_shared_folders_baseline();
             }
             Err(e) => {
                 app.set_status(format!("Error saving shared folders: {}", e));

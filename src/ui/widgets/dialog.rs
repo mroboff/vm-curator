@@ -11,6 +11,8 @@ pub struct ConfirmDialog<'a> {
     pub message: &'a str,
     pub confirm_label: &'a str,
     pub cancel_label: &'a str,
+    /// Optional middle button (e.g. "Discard") for three-way prompts.
+    pub extra_label: Option<&'a str>,
 }
 
 impl<'a> ConfirmDialog<'a> {
@@ -20,6 +22,7 @@ impl<'a> ConfirmDialog<'a> {
             message,
             confirm_label: "Yes (y)",
             cancel_label: "No (n)",
+            extra_label: None,
         }
     }
 
@@ -55,17 +58,23 @@ impl<'a> ConfirmDialog<'a> {
         message.render(chunks[0], buf);
 
         // Render buttons
-        let buttons = Line::from(vec![
-            Span::styled(
-                format!(" {} ", self.confirm_label),
-                Style::default().fg(Color::Green),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                format!(" {} ", self.cancel_label),
-                Style::default().fg(Color::Red),
-            ),
-        ]);
+        let mut button_spans = vec![Span::styled(
+            format!(" {} ", self.confirm_label),
+            Style::default().fg(Color::Green),
+        )];
+        if let Some(extra) = self.extra_label {
+            button_spans.push(Span::raw("  "));
+            button_spans.push(Span::styled(
+                format!(" {} ", extra),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        button_spans.push(Span::raw("  "));
+        button_spans.push(Span::styled(
+            format!(" {} ", self.cancel_label),
+            Style::default().fg(Color::Red),
+        ));
+        let buttons = Line::from(button_spans);
         let buttons_para = Paragraph::new(buttons).alignment(Alignment::Center);
         buttons_para.render(chunks[1], buf);
     }
