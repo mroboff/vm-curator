@@ -1,6 +1,7 @@
 # Changelog
 
 **v1.2.0**
+- **Security: bump `quick-xml` to 0.41** (RUSTSEC-2026-0194, RUSTSEC-2026-0195): resolves two high-severity advisories (quadratic-time duplicate-attribute check and unbounded namespace-declaration allocation) in the libvirt-XML import parser. Also bumps `anyhow` to 1.0.103.
 - **Fix Windows 11 TPM 2.0 Detection on Fedora** (#42): Windows 11 VMs created with TPM enabled failed the installer's "PC must support TPM 2.0" check on Fedora 44, because vm-curator selected the 2M `OVMF_CODE.secboot.fd` firmware, which does not expose TPM 2.0 correctly.
   - OVMF firmware is now chosen as a matched CODE+VARS **pair** (`find_ovmf_firmware`), preferring 4M builds — including Fedora's qcow2-format firmware (`OVMF_CODE_4M.secboot.qcow2`) — over 2M, with the 2M variants kept only as a last-resort fallback. Picking CODE and VARS from one pair guarantees they always agree in size and on-disk format.
   - The pflash `-drive` lines now emit `format=qcow2` or `format=raw` to match the selected firmware instead of a hardcoded `format=raw`, so qcow2 firmware actually works. Applies to both the standard and single-GPU-passthrough launch scripts.
