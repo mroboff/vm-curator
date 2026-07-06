@@ -106,6 +106,9 @@ pub struct SingleGpuConfig {
     pub original_driver: GpuDriver,
     /// Detected display manager
     pub display_manager: DisplayManager,
+    /// Optional path to a GPU vBIOS ROM, emitted as `romfile=` on the passed-through
+    /// GPU. Frequently required for AMD single-GPU passthrough to produce video (#44).
+    pub gpu_rom: Option<String>,
 }
 
 impl SingleGpuConfig {
@@ -122,6 +125,7 @@ impl SingleGpuConfig {
             iommu_group_devices,
             original_driver,
             display_manager,
+            gpu_rom: None,
         }
     }
 
@@ -386,6 +390,9 @@ pub fn save_config(vm_path: &Path, config: &SingleGpuConfig) -> anyhow::Result<(
         "display_manager = \"{}\"\n",
         config.display_manager.service_name()
     ));
+    if let Some(ref rom) = config.gpu_rom {
+        content.push_str(&format!("gpu_rom = \"{}\"\n", rom.replace('"', "\\\"")));
+    }
 
     fs::write(&config_path, content)?;
     Ok(())
@@ -422,6 +429,7 @@ pub fn load_config(vm_path: &Path) -> Option<SingleGpuConfig> {
 
     let mut original_driver = String::new();
     let mut display_manager = String::new();
+    let mut gpu_rom: Option<String> = None;
 
     let mut current_section = "";
 
@@ -467,6 +475,7 @@ pub fn load_config(vm_path: &Path) -> Option<SingleGpuConfig> {
                 "settings" => match key {
                     "original_driver" => original_driver = value.to_string(),
                     "display_manager" => display_manager = value.to_string(),
+                    "gpu_rom" => gpu_rom = Some(value.to_string()),
                     _ => {}
                 },
                 _ => {}
@@ -528,6 +537,7 @@ pub fn load_config(vm_path: &Path) -> Option<SingleGpuConfig> {
         iommu_group_devices: Vec::new(), // Not persisted, not needed for regeneration
         original_driver,
         display_manager,
+        gpu_rom,
     })
 }
 

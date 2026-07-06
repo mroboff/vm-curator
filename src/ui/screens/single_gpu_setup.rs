@@ -60,7 +60,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         .margin(1)
         .constraints([
             Constraint::Length(3), // System support status
-            Constraint::Length(6), // GPU info
+            Constraint::Length(9), // GPU info (incl. vBIOS ROM + AMD guidance)
             Constraint::Length(1), // Separator
             Constraint::Length(6), // Scripts info
             Constraint::Min(1),    // Spacer
@@ -216,6 +216,28 @@ fn render_gpu_info(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(Color::White),
             ),
         ]));
+
+        // vBIOS ROM (romfile) — often required for AMD single-GPU passthrough (#44)
+        let (rom_text, rom_color) = match &config.gpu_rom {
+            Some(rom) if !rom.is_empty() => (rom.clone(), Color::Green),
+            _ => ("None ([r] to set)".to_string(), Color::DarkGray),
+        };
+        lines.push(Line::from(vec![
+            Span::styled("vBIOS ROM: ", Style::default().fg(Color::White)),
+            Span::styled(rom_text, Style::default().fg(rom_color)),
+        ]));
+
+        // AMD-specific guidance: AMD GPUs usually need a clean vBIOS to output video
+        if config.gpu.is_amd() && config.gpu_rom.is_none() {
+            lines.push(Line::styled(
+                "  AMD GPU: no video without a vBIOS ROM is common. Press [r] to set one.",
+                Style::default().fg(Color::Yellow),
+            ));
+            lines.push(Line::styled(
+                "  Integrated (APU) GPUs are often unsupported for passthrough.",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
     } else {
         lines.push(Line::styled(
             "No GPU selected for passthrough",
@@ -295,9 +317,10 @@ fn render_scripts_info(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render help text
 fn render_help(_app: &App, frame: &mut Frame, area: Rect) {
-    let help = Paragraph::new("[g] Generate Scripts  [d] Delete Scripts  [Esc] Back")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+    let help =
+        Paragraph::new("[g] Generate  [d] Delete  [r] Set vBIOS ROM  [R] Clear ROM  [Esc] Back")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
     frame.render_widget(help, area);
 }
 
@@ -406,6 +429,33 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> anyhow::Result<()> {
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
             delete_scripts(app)?;
+        }
+        KeyCode::Char('r') => {
+            // Choose a GPU vBIOS ROM file (romfile=) — see #44
+            if app.single_gpu_config.is_some() {
+                app.load_file_browser(crate::app::FileBrowserMode::SingleGpuRom);
+                app.push_screen(Screen::FileBrowser);
+            } else {
+                app.set_status("No GPU configured for passthrough");
+            }
+        }
+        KeyCode::Char('R') => {
+            // Clear the configured vBIOS ROM
+            let cleared = if let Some(ref mut config) = app.single_gpu_config {
+                let had = config.gpu_rom.is_some();
+                config.gpu_rom = None;
+                had
+            } else {
+                false
+            };
+            if cleared {
+                if let (Some(vm), Some(config)) =
+                    (app.selected_vm(), app.single_gpu_config.as_ref())
+                {
+                    let _ = crate::hardware::save_config(&vm.path, config);
+                }
+                app.set_status("Cleared GPU vBIOS ROM");
+            }
         }
         _ => {}
     }
@@ -518,12 +568,19 @@ pub fn init_single_gpu_config(app: &mut App) {
         .iter()
         .find(|d| d.can_single_gpu_passthrough());
 
-    if let Some(gpu) = boot_vga {
-        let config = SingleGpuConfig::new(gpu.clone(), &app.pci_devices);
-        app.single_gpu_config = Some(config);
-    } else if let Some(gpu) = app.pci_devices.iter().find(|d| d.is_boot_vga) {
-        // Fallback to boot VGA even if it doesn't have IOMMU
-        let config = SingleGpuConfig::new(gpu.clone(), &app.pci_devices);
+    let gpu = boot_vga
+        .cloned()
+        .or_else(|| app.pci_devices.iter().find(|d| d.is_boot_vga).cloned());
+
+    if let Some(gpu) = gpu {
+        let mut config = SingleGpuConfig::new(gpu, &app.pci_devices);
+        // Carry over a previously-saved vBIOS ROM path (#44) so it survives
+        // re-entry; the rest of the config is re-detected from live hardware.
+        if let Some(vm) = app.selected_vm() {
+            if let Some(saved) = crate::hardware::load_config(&vm.path) {
+                config.gpu_rom = saved.gpu_rom;
+            }
+        }
         app.single_gpu_config = Some(config);
     }
 }

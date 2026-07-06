@@ -2016,6 +2016,7 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
         FileBrowserMode::ImportConfig => "Select Config File",
         FileBrowserMode::Bios => "Select BIOS/ROM File",
         FileBrowserMode::Floppy => "Select Floppy Image",
+        FileBrowserMode::SingleGpuRom => "Select GPU vBIOS ROM",
     };
     let title = format!(" {} - {} ", title_prefix, app.file_browser_dir.display());
     let block = Block::default()
@@ -2088,6 +2089,9 @@ fn render_file_browser(app: &App, frame: &mut Frame) {
             }
             FileBrowserMode::Floppy => {
                 "No floppy images (.img, .ima, .flp, .vfd) found in this directory."
+            }
+            FileBrowserMode::SingleGpuRom => {
+                "No vBIOS ROM files (.rom, .bin) found in this directory."
             }
         };
         let msg = ratatui::widgets::Paragraph::new(msg_text)
@@ -2224,6 +2228,24 @@ fn handle_file_browser(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.pop_screen(); // Close file browser
                             app.pop_screen(); // Close boot options
                             app.push_screen(Screen::Confirm(ConfirmAction::LaunchVm));
+                        }
+                    }
+                    FileBrowserMode::SingleGpuRom => {
+                        // Selected a GPU vBIOS ROM for single-GPU passthrough (#44)
+                        let rom = selected_path.to_string_lossy().to_string();
+                        if let Some(ref mut config) = app.single_gpu_config {
+                            config.gpu_rom = Some(rom.clone());
+                        }
+                        app.pop_screen(); // Return to single-GPU setup screen
+                                          // Persist so the ROM survives regeneration / app restart.
+                        if let (Some(vm), Some(config)) =
+                            (app.selected_vm(), app.single_gpu_config.as_ref())
+                        {
+                            if let Err(e) = crate::hardware::save_config(&vm.path, config) {
+                                app.set_status(format!("vBIOS ROM set, but failed to save: {}", e));
+                            } else {
+                                app.set_status(format!("GPU vBIOS ROM set: {}", rom));
+                            }
                         }
                     }
                     FileBrowserMode::Directory => {

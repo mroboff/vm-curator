@@ -362,6 +362,10 @@ start_tpm
 # the display when the VM exits.
 #
 # For single-GPU passthrough, the VM's display goes directly to physical monitors.
+#
+# AMD GPUs frequently produce NO video in the guest unless a clean vBIOS ROM is
+# supplied via romfile= (set it in the Single GPU Setup screen with [r]).
+# Integrated (APU) GPUs are often unsupported for passthrough. See issue #44.
 
 set -e
 
@@ -719,6 +723,22 @@ fn filter_bindable_pci_addresses(addrs: Vec<String>) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Build the `-device vfio-pci` argument for the passed-through GPU, adding a
+/// `romfile=` when a vBIOS ROM is configured. Supplying a clean vBIOS is commonly
+/// required for AMD single-GPU passthrough to produce any video output (#44).
+fn gpu_passthrough_device(config: &SingleGpuConfig) -> String {
+    match &config.gpu_rom {
+        Some(rom) if !rom.is_empty() => format!(
+            "-device vfio-pci,host={},multifunction=on,romfile=\"{}\"",
+            config.gpu.address, rom
+        ),
+        _ => format!(
+            "-device vfio-pci,host={},multifunction=on",
+            config.gpu.address
+        ),
+    }
 }
 
 /// Generate USB passthrough arguments
@@ -1206,10 +1226,7 @@ fn extract_qemu_command_for_passthrough(
     let mut passthrough_args = Vec::new();
 
     // GPU passthrough (no x-vga=on - incompatible with modern NVIDIA GPUs)
-    passthrough_args.push(format!(
-        "-device vfio-pci,host={},multifunction=on",
-        config.gpu.address
-    ));
+    passthrough_args.push(gpu_passthrough_device(config));
 
     // Audio passthrough (if present)
     if let Some(ref audio) = config.audio {
@@ -1370,8 +1387,8 @@ fn generate_basic_qemu_command(
     // Add GPU passthrough (no x-vga=on - incompatible with modern NVIDIA GPUs)
     cmd.push_str(&format!(
         r#" \
-    -device vfio-pci,host={},multifunction=on"#,
-        config.gpu.address
+    {}"#,
+        gpu_passthrough_device(config)
     ));
 
     // Add audio (if present)
@@ -1566,6 +1583,50 @@ mod tests {
                 "expected {arg:?} to be left unchanged"
             );
         }
+    }
+
+    fn amd_gpu_config(gpu_rom: Option<String>) -> SingleGpuConfig {
+        use crate::hardware::{DisplayManager, GpuDriver, PciDevice};
+        let gpu = PciDevice {
+            address: "0000:e4:00.0".to_string(),
+            vendor_id: 0x1002,
+            device_id: 0x1681,
+            vendor_name: "AMD/ATI".to_string(),
+            device_name: "Radeon 680M".to_string(),
+            class_code: 0x030000,
+            driver: Some("amdgpu".to_string()),
+            iommu_group: Some(10),
+            is_boot_vga: true,
+            subsystem_vendor_id: 0,
+            subsystem_device_id: 0,
+        };
+        SingleGpuConfig {
+            gpu,
+            audio: None,
+            iommu_group_devices: Vec::new(),
+            original_driver: GpuDriver::Amdgpu,
+            display_manager: DisplayManager::Gdm,
+            gpu_rom,
+        }
+    }
+
+    #[test]
+    fn gpu_device_includes_romfile_when_set() {
+        let cfg = amd_gpu_config(Some("/home/u/vbios.rom".to_string()));
+        assert_eq!(
+            gpu_passthrough_device(&cfg),
+            "-device vfio-pci,host=0000:e4:00.0,multifunction=on,romfile=\"/home/u/vbios.rom\""
+        );
+    }
+
+    #[test]
+    fn gpu_device_omits_romfile_when_unset_or_empty() {
+        let expected = "-device vfio-pci,host=0000:e4:00.0,multifunction=on";
+        assert_eq!(gpu_passthrough_device(&amd_gpu_config(None)), expected);
+        assert_eq!(
+            gpu_passthrough_device(&amd_gpu_config(Some(String::new()))),
+            expected
+        );
     }
 
     #[test]

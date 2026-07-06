@@ -139,6 +139,8 @@ pub enum FileBrowserMode {
     ImportConfig,
     Bios,
     Floppy,
+    /// GPU vBIOS ROM for single-GPU passthrough (#44)
+    SingleGpuRom,
 }
 
 // DiskAction, WizardStep, WizardQemuConfig, CreateWizardState, NetworkSettingsState,
@@ -1044,6 +1046,7 @@ impl App {
             FileBrowserMode::Floppy => &[
                 ".img", ".IMG", ".ima", ".IMA", ".flp", ".FLP", ".vfd", ".VFD",
             ],
+            FileBrowserMode::SingleGpuRom => &[".rom", ".ROM", ".bin", ".BIN"],
         };
 
         // For Directory mode, add a [Select This Directory] sentinel entry first
