@@ -1723,8 +1723,17 @@ fn confirm_save_and_exit(app: &mut App, kind: UnsavedKind) {
         UnsavedKind::Pci => screens::pci_passthrough::save_selection_and_report(app),
         UnsavedKind::SharedFolders => screens::shared_folders::save_selection_and_report(app),
     }
+
+    let save_failed = match kind {
+        UnsavedKind::Usb => app.usb_selection_dirty(),
+        UnsavedKind::Pci => app.pci_selection_dirty(),
+        UnsavedKind::SharedFolders => app.shared_folders_dirty(),
+    };
+
     app.pop_screen(); // close the confirm dialog
-    exit_management_screen(app, kind);
+    if !save_failed {
+        exit_management_screen(app, kind);
+    }
 }
 
 /// Pop a management screen, restoring the parent menu cursor the same way each
