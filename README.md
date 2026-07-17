@@ -71,7 +71,7 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 - 120+ pre-configured OS profiles with optimal QEMU settings (Windows, macOS, Linux, BSD, Unix, retro, and more)
 - Automatic UEFI firmware detection across Linux distributions (Arch, Debian, Fedora, NixOS, etc.)
 - ISO file browser for selecting installation media
-- Configurable disk size, memory, CPU cores, and QEMU options with direct text editing and size suffixes (e.g., "8GB")
+- Configurable disk size/format, memory, CPU cores, and QEMU options with direct text editing and size suffixes (e.g., "8GB")
 - Use existing disk images (copy or move) instead of creating new ones
 - Support for custom OS entries with user metadata
 

@@ -25,7 +25,7 @@ fn shell_escape(s: &str) -> String {
 
 use crate::commands::qemu_img;
 use crate::vm::qemu_config::{PortForward, PortProtocol};
-use crate::wizard_types::{CreateWizardState, DiskAction, WizardQemuConfig};
+use crate::wizard_types::{CreateWizardState, DiskAction, DiskImageFormat, WizardQemuConfig};
 
 /// Install media type for QEMU command generation
 pub enum InstallMedia<'a> {
@@ -302,7 +302,17 @@ pub struct CreatedVm {
 }
 
 /// Create a new VM from wizard state
+#[allow(dead_code)]
 pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<CreatedVm> {
+    create_vm_with_disk_format(library_path, state, DiskImageFormat::Qcow2)
+}
+
+/// Create a new VM from wizard state using the requested new-disk format.
+pub fn create_vm_with_disk_format(
+    library_path: &Path,
+    state: &CreateWizardState,
+    new_disk_format: DiskImageFormat,
+) -> Result<CreatedVm> {
     // Validate inputs
     if state.vm_name.trim().is_empty() {
         bail!("VM name cannot be empty");
@@ -312,32 +322,38 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
     }
 
     // Validate disk configuration
-    if state.use_existing_disk {
-        if state.existing_disk_path.is_none() {
+    let existing_disk_path = if state.use_existing_disk {
+        let Some(path) = state.existing_disk_path.as_ref() else {
             bail!("No existing disk selected");
-        }
-        let path = state.existing_disk_path.as_ref().unwrap();
+        };
         if !path.exists() {
             bail!("Selected disk does not exist: {}", path.display());
         }
-    } else if state.disk_size_gb == 0 {
-        bail!("Disk size must be greater than 0");
-    }
+        Some(path)
+    } else {
+        if state.disk_size_gb == 0 {
+            bail!("Disk size must be greater than 0");
+        }
+        None
+    };
 
     // Create VM directory
     let vm_dir = create_vm_directory(library_path, &state.folder_name)?;
 
     // Create or copy/move disk image
-    let disk_filename = format!("{}.qcow2", state.folder_name);
-    let disk_path = if state.use_existing_disk {
+    let disk_format = existing_disk_path
+        .map(|path| detect_existing_disk_image_format(path))
+        .unwrap_or(new_disk_format);
+    let disk_filename = format!("{}.{}", state.folder_name, disk_format.extension());
+    let disk_path = if let Some(existing_disk_path) = existing_disk_path {
         handle_existing_disk(
             &vm_dir,
             &disk_filename,
-            state.existing_disk_path.as_ref().unwrap(),
+            existing_disk_path,
             &state.existing_disk_action,
         )?
     } else {
-        create_disk_image(&vm_dir, &disk_filename, state.disk_size_gb)?
+        create_disk_image_with_format(&vm_dir, &disk_filename, state.disk_size_gb, disk_format)?
     };
 
     // Copy BIOS/ROM file to VM directory if provided
@@ -378,6 +394,14 @@ pub fn create_vm(library_path: &Path, state: &CreateWizardState) -> Result<Creat
         launch_script: launch_script_path,
         disk_image: disk_path,
     })
+}
+
+pub(crate) fn detect_existing_disk_image_format(path: &Path) -> DiskImageFormat {
+    qemu_img::detect_disk_format(path)
+        .as_deref()
+        .and_then(DiskImageFormat::from_qemu_format)
+        .or_else(|| DiskImageFormat::from_path(path))
+        .unwrap_or(DiskImageFormat::Qcow2)
 }
 
 /// Handle an existing disk by copying or moving it to the VM directory
@@ -475,13 +499,29 @@ pub fn create_vm_directory(library_path: &Path, folder_name: &str) -> Result<Pat
     Ok(vm_dir)
 }
 
-/// Create a new qcow2 disk image
+/// Create a new qcow2 disk image.
+#[allow(dead_code)]
 pub fn create_disk_image(vm_dir: &Path, filename: &str, size_gb: u32) -> Result<PathBuf> {
+    create_disk_image_with_format(vm_dir, filename, size_gb, DiskImageFormat::Qcow2)
+}
+
+/// Create a new disk image in the requested format.
+pub fn create_disk_image_with_format(
+    vm_dir: &Path,
+    filename: &str,
+    size_gb: u32,
+    disk_format: DiskImageFormat,
+) -> Result<PathBuf> {
     let disk_path = vm_dir.join(filename);
     let size_str = format!("{}G", size_gb);
 
-    qemu_img::create_disk(&disk_path, &size_str)
-        .with_context(|| format!("Failed to create disk image: {}", disk_path.display()))?;
+    let result = match disk_format {
+        DiskImageFormat::Qcow2 => qemu_img::create_disk(&disk_path, &size_str),
+        DiskImageFormat::Raw => {
+            qemu_img::create_disk_with_format(&disk_path, disk_format.as_str(), &size_str)
+        }
+    };
+    result.with_context(|| format!("Failed to create disk image: {}", disk_path.display()))?;
 
     Ok(disk_path)
 }
@@ -936,10 +976,16 @@ pub(crate) const SPICE_AGENT_ARGS: &[&str] = &[
     "-device virtserialport,chardev=spicechannel0,name=com.redhat.spice.0",
 ];
 
+fn disk_format_for_filename(disk_filename: &str) -> &'static str {
+    DiskImageFormat::from_path(Path::new(disk_filename))
+        .unwrap_or(DiskImageFormat::Qcow2)
+        .as_str()
+}
+
 /// Build the QEMU command string with OS-awareness
 fn build_qemu_command_with_os(
     config: &WizardQemuConfig,
-    _disk_filename: &str,
+    disk_filename: &str,
     install_media: &InstallMedia,
     os_profile: Option<&str>,
     floppy_path: Option<&str>,
@@ -1030,16 +1076,23 @@ fn build_qemu_command_with_os(
     // Disk (interface escaped to prevent injection)
     // Map "sata" to "ide" for backwards compatibility — QEMU doesn't support if=sata,
     // but on Q35 machines, if=ide routes through the AHCI controller (giving SATA behavior)
+    let disk_format = disk_format_for_filename(disk_filename);
     let machine_name = config.machine.as_deref().unwrap_or("");
     match machine_name {
         "q800" => {
             // q800: explicit SCSI device attachment for built-in ESP controller
-            args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=hd0".to_string());
+            args.push(format!(
+                "-drive file=\"$DISK\",format={},if=none,id=hd0",
+                disk_format
+            ));
             args.push("-device scsi-hd,drive=hd0".to_string());
         }
         "mac99" => {
             // mac99: explicit IDE device attachment with bus specification
-            args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=hd0".to_string());
+            args.push(format!(
+                "-drive file=\"$DISK\",format={},if=none,id=hd0",
+                disk_format
+            ));
             args.push("-device ide-hd,drive=hd0,bus=ide.0".to_string());
         }
         _ => {
@@ -1057,7 +1110,10 @@ fn build_qemu_command_with_os(
                 } else {
                     "sata.0"
                 };
-                args.push("-drive file=\"$DISK\",format=qcow2,if=none,id=maindisk".to_string());
+                args.push(format!(
+                    "-drive file=\"$DISK\",format={},if=none,id=maindisk",
+                    disk_format
+                ));
                 args.push(format!("-device ide-hd,drive=maindisk,bus={}", disk_bus));
             } else {
                 let disk_if = if config.disk_interface == "sata" {
@@ -1066,7 +1122,8 @@ fn build_qemu_command_with_os(
                     &config.disk_interface
                 };
                 args.push(format!(
-                    "-drive file=\"$DISK\",format=qcow2,if={},index=0,media=disk",
+                    "-drive file=\"$DISK\",format={},if={},index=0,media=disk",
+                    disk_format,
                     shell_escape(disk_if)
                 ));
             }

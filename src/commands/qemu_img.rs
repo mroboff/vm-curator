@@ -14,9 +14,14 @@ fn path_to_str(path: &Path) -> Result<&str> {
 
 /// Create a new qcow2 disk image
 pub fn create_disk(path: &Path, size: &str) -> Result<()> {
+    create_disk_with_format(path, "qcow2", size)
+}
+
+/// Create a new disk image in the requested qemu-img format
+pub fn create_disk_with_format(path: &Path, format: &str, size: &str) -> Result<()> {
     let path_str = path_to_str(path)?;
     let output = Command::new("qemu-img")
-        .args(["create", "-f", "qcow2", path_str, size])
+        .args(["create", "-f", format, path_str, size])
         .output()
         .context("Failed to run qemu-img create")?;
 

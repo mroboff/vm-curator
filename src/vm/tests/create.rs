@@ -1,5 +1,5 @@
 use super::*;
-use crate::wizard_types::CreateWizardState;
+use crate::wizard_types::{CreateWizardState, DiskAction};
 
 #[test]
 fn test_shell_escape_safe_strings() {
@@ -259,6 +259,33 @@ fn test_build_qemu_command_without_bios() {
 }
 
 #[test]
+fn test_build_qemu_command_with_raw_disk() {
+    let config = WizardQemuConfig::default();
+    let cmd = build_qemu_command_with_os(&config, "disk.raw", &InstallMedia::None, None, None);
+
+    assert!(
+        cmd.contains("-drive file=\"$DISK\",format=raw,if=ide,index=0,media=disk"),
+        "Should use raw disk format, got:\n{}",
+        cmd
+    );
+    assert!(
+        !cmd.contains("format=qcow2,if=ide,index=0,media=disk"),
+        "Should not hardcode qcow2 for raw disks, got:\n{}",
+        cmd
+    );
+}
+
+#[test]
+fn test_generate_launch_script_with_raw_disk() {
+    let config = WizardQemuConfig::default();
+    let script =
+        generate_launch_script_with_os("Raw VM", "raw-vm.raw", None, false, &config, None, None);
+
+    assert!(script.contains("DISK=\"$VM_DIR/raw-vm.raw\""));
+    assert!(script.contains("format=raw,if=ide,index=0,media=disk"));
+}
+
+#[test]
 fn test_generate_launch_script_with_rom() {
     let config = WizardQemuConfig {
         emulator: "qemu-system-m68k".to_string(),
@@ -397,6 +424,127 @@ fn test_generate_launch_script_iso_unchanged() {
         script.contains("-boot d"),
         "Install mode should boot from CD-ROM"
     );
+}
+
+fn existing_disk_state(
+    source: PathBuf,
+    action: DiskAction,
+    folder_name: &str,
+) -> CreateWizardState {
+    CreateWizardState {
+        vm_name: format!("{folder_name} display"),
+        folder_name: folder_name.to_string(),
+        use_existing_disk: true,
+        existing_disk_path: Some(source),
+        existing_disk_action: action,
+        ..CreateWizardState::default()
+    }
+}
+
+#[test]
+fn test_create_vm_requires_existing_disk_path() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let state = CreateWizardState {
+        vm_name: "Missing disk".to_string(),
+        folder_name: "missing-disk".to_string(),
+        use_existing_disk: true,
+        existing_disk_path: None,
+        ..CreateWizardState::default()
+    };
+
+    let err = create_vm(library.path(), &state).expect_err("missing disk path should fail");
+
+    assert_eq!(err.to_string(), "No existing disk selected");
+    assert!(!library.path().join("missing-disk").exists());
+    Ok(())
+}
+
+#[test]
+fn test_create_vm_rejects_missing_existing_disk_file() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let missing_disk = library.path().join("missing.raw");
+    let state = existing_disk_state(missing_disk.clone(), DiskAction::Copy, "missing-file");
+
+    let err = create_vm(library.path(), &state).expect_err("missing disk file should fail");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "Selected disk does not exist: {}",
+            missing_disk.display()
+        )),
+        "unexpected error: {err}"
+    );
+    assert!(!library.path().join("missing-file").exists());
+    Ok(())
+}
+
+#[test]
+fn test_create_vm_copies_existing_raw_disk() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let source = library.path().join("source.raw");
+    let disk_bytes = b"raw disk fixture";
+    std::fs::write(&source, disk_bytes)?;
+
+    let state = existing_disk_state(source.clone(), DiskAction::Copy, "copy-vm");
+    let created = create_vm(library.path(), &state)?;
+
+    assert_eq!(
+        created.disk_image,
+        library.path().join("copy-vm").join("copy-vm.raw")
+    );
+    assert_eq!(std::fs::read(&created.disk_image)?, disk_bytes);
+    assert_eq!(std::fs::read(&source)?, disk_bytes);
+
+    let script = std::fs::read_to_string(&created.launch_script)?;
+    assert!(script.contains("DISK=\"$VM_DIR/copy-vm.raw\""));
+    assert!(script.contains("format=raw,if=ide,index=0,media=disk"));
+    Ok(())
+}
+
+#[test]
+fn test_create_vm_treats_existing_img_disk_as_raw() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let source = library.path().join("source.img");
+    let disk_bytes = b"img raw disk fixture";
+    std::fs::write(&source, disk_bytes)?;
+
+    let state = existing_disk_state(source.clone(), DiskAction::Copy, "img-vm");
+    let created = create_vm(library.path(), &state)?;
+
+    assert_eq!(
+        created.disk_image,
+        library.path().join("img-vm").join("img-vm.raw")
+    );
+    assert_eq!(std::fs::read(&created.disk_image)?, disk_bytes);
+    assert_eq!(std::fs::read(&source)?, disk_bytes);
+
+    let script = std::fs::read_to_string(&created.launch_script)?;
+    assert!(script.contains("DISK=\"$VM_DIR/img-vm.raw\""));
+    assert!(script.contains("format=raw,if=ide,index=0,media=disk"));
+    Ok(())
+}
+
+#[test]
+fn test_create_vm_moves_existing_raw_disk() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let source = library.path().join("source.raw");
+    let disk_bytes = b"raw disk fixture to move";
+    std::fs::write(&source, disk_bytes)?;
+
+    let state = existing_disk_state(source.clone(), DiskAction::Move, "move-vm");
+    let created = create_vm(library.path(), &state)?;
+
+    assert_eq!(
+        created.disk_image,
+        library.path().join("move-vm").join("move-vm.raw")
+    );
+    assert_eq!(std::fs::read(&created.disk_image)?, disk_bytes);
+    assert!(!source.exists());
+
+    let script = std::fs::read_to_string(&created.launch_script)?;
+    assert!(script.contains("DISK=\"$VM_DIR/move-vm.raw\""));
+    assert!(script.contains("format=raw,if=ide,index=0,media=disk"));
+    Ok(())
 }
 
 // === macOS-specific tests ===

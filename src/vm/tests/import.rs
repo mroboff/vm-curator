@@ -312,3 +312,40 @@ fn test_parse_libvirt_xml_with_tpm() {
     assert!(vm.qemu_config.uefi);
     assert_eq!(vm.qemu_config.memory_mb, 4096);
 }
+
+#[test]
+fn test_execute_import_preserves_raw_img_disk_format() -> Result<()> {
+    let source_dir = tempfile::tempdir()?;
+    let library = tempfile::tempdir()?;
+    let source_disk = source_dir.path().join("source.img");
+    let disk_bytes = b"raw image fixture";
+    std::fs::write(&source_disk, disk_bytes)?;
+
+    let vm = ImportableVm {
+        name: "Imported Raw".to_string(),
+        config_path: source_dir.path().join("raw.conf"),
+        source: ImportSource::Quickemu,
+        qemu_config: WizardQemuConfig::default(),
+        disk_paths: vec![source_disk.clone()],
+        detected_os_profile: None,
+        import_notes: Vec::new(),
+        disks_readable: vec![true],
+    };
+
+    let vm_dir = execute_import(
+        library.path(),
+        &vm,
+        "Imported Raw",
+        "imported-raw",
+        ImportDiskAction::Copy,
+    )?;
+    let imported_disk = vm_dir.join("imported-raw.raw");
+
+    assert_eq!(std::fs::read(&imported_disk)?, disk_bytes);
+    assert_eq!(std::fs::read(&source_disk)?, disk_bytes);
+
+    let launch_script = std::fs::read_to_string(vm_dir.join("launch.sh"))?;
+    assert!(launch_script.contains("DISK=\"$VM_DIR/imported-raw.raw\""));
+    assert!(launch_script.contains("format=raw,if=ide,index=0,media=disk"));
+    Ok(())
+}

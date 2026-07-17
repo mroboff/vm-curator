@@ -248,6 +248,8 @@ pub struct App {
     pub shared_folders_help: SharedFoldersHelpStore,
     /// VM creation wizard state
     pub wizard_state: Option<CreateWizardState>,
+    /// Selected disk image format for the VM creation wizard
+    pub create_wizard_disk_format: DiskImageFormat,
     /// VM import wizard state
     pub import_state: Option<ImportWizardState>,
     /// Settings screen selected item
@@ -452,6 +454,7 @@ impl App {
             settings_help,
             shared_folders_help,
             wizard_state: None,
+            create_wizard_disk_format: DiskImageFormat::default(),
             import_state: None,
             settings_selected: 0,
             settings_editing: false,
@@ -1037,7 +1040,9 @@ impl App {
         let extensions: &[&str] = match mode {
             FileBrowserMode::Iso => &[".iso", ".ISO"],
             FileBrowserMode::RecoveryImage => &[".dmg", ".DMG", ".qcow2", ".QCOW2"],
-            FileBrowserMode::Disk => &[".qcow2", ".QCOW2", ".qcow", ".QCOW"],
+            FileBrowserMode::Disk => &[
+                ".qcow2", ".QCOW2", ".qcow", ".QCOW", ".raw", ".RAW", ".img", ".IMG",
+            ],
             FileBrowserMode::Directory => &[],
             FileBrowserMode::ImportConfig => &[".xml", ".XML", ".conf"],
             FileBrowserMode::Bios => &[
@@ -1258,6 +1263,7 @@ impl App {
 
     /// Start the VM creation wizard
     pub fn start_create_wizard(&mut self) {
+        self.create_wizard_disk_format = DiskImageFormat::default();
         let state = CreateWizardState {
             disk_size_gb: self.config.default_disk_size_gb,
             qemu_config: WizardQemuConfig {
