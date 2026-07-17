@@ -1041,7 +1041,10 @@ echo "[2/3] Creating modprobe configuration..."
 cat > /etc/modprobe.d/vfio.conf << 'EOF'
 # Load VFIO before GPU driver
 {softdep_line}
-options vfio_pci disable_vga=1
+# disable_idle_d3: keep vfio-pci from idling passed-through devices into
+# D3cold. Modern AMD boot GPUs can get stuck there ("vfio: Unable to power
+# on device, stuck in D3"), needing a host reboot (issue #60).
+options vfio_pci disable_vga=1 disable_idle_d3=1
 EOF
 
 echo "  Created /etc/modprobe.d/vfio.conf"
@@ -1641,5 +1644,15 @@ mod tests {
         let filtered = filter_bindable_pci_addresses(addrs);
         assert!(!filtered.iter().any(|a| a == "0000:00:00.0"));
         assert!(filtered.iter().any(|a| a == "0000:ee:1f.7"));
+    }
+
+    /// Issue #60: the generated modprobe config must set disable_idle_d3=1 so
+    /// vfio-pci never idles a passed-through boot GPU into D3cold — modern AMD
+    /// cards get stuck there ("Unable to power on device, stuck in D3") and
+    /// need a host reboot to recover.
+    #[test]
+    fn setup_script_disables_idle_d3() {
+        let script = generate_interactive_setup_script("amdgpu");
+        assert!(script.contains("options vfio_pci disable_vga=1 disable_idle_d3=1"));
     }
 }

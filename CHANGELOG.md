@@ -1,5 +1,8 @@
 # Changelog
 
+**Unreleased**
+- **Prevent Passed-Through GPUs Getting Stuck in D3cold** (#60): On modern AMD boot GPUs (reported on an RX 9070 XT), vfio-pci's runtime power management could idle the passed-through GPU into D3cold and fail to wake it — QEMU aborts with `vfio: Unable to power on device, stuck in D3`, and the host display cannot be restored without a reboot. The `/etc/modprobe.d/vfio.conf` written by System Setup now sets `options vfio_pci disable_vga=1 disable_idle_d3=1` (the standard fix; the only cost is slightly higher idle power on passed-through devices). Existing single-GPU users should re-run System Setup from Settings → Single GPU Passthrough to pick up the new option.
+
 **v1.2.0**
 - **Security: bump `quick-xml` to 0.41** (RUSTSEC-2026-0194, RUSTSEC-2026-0195): resolves two high-severity advisories (quadratic-time duplicate-attribute check and unbounded namespace-declaration allocation) in the libvirt-XML import parser. Also bumps `anyhow` to 1.0.103.
 - **Fix Windows 11 TPM 2.0 Detection on Fedora** (#42): Windows 11 VMs created with TPM enabled failed the installer's "PC must support TPM 2.0" check on Fedora 44, because vm-curator selected the 2M `OVMF_CODE.secboot.fd` firmware, which does not expose TPM 2.0 correctly.
