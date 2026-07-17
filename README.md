@@ -4,6 +4,11 @@ A fast and friendly Rust TUI for managing desktop QEMU/KVM virtual machines — 
 
 ### Changelog
 
+**v1.2.1**
+- **Raw Disk Image Support** (thanks @HenriqueCrj, #55): Choose qcow2 or raw for new disks in the creation wizard; existing and imported disks keep their detected format (`.raw`/`.img` now listed in the disk browser) and launch scripts emit the matching `format=` instead of hardcoding qcow2
+- **Fix Host Hang / Power-Off in Single-GPU Passthrough on APUs** (#61): The start script now detaches the virtual consoles and EFI framebuffer before unloading the GPU driver, aborts safely (restoring the display) if the driver won't release instead of force-unbinding it, and reattaches the consoles on cleanup/restore — AMD APUs get a prominent best-effort warning
+- **Prevent Passed-Through GPUs Getting Stuck in D3cold** (#60): System Setup's `vfio.conf` now sets `disable_idle_d3=1` so modern AMD boot GPUs (e.g. RX 9070 XT) no longer fail with `vfio: Unable to power on device, stuck in D3` — existing single-GPU users should re-run System Setup to pick it up
+
 **v1.2.0**
 - **Fix Windows 11 TPM 2.0 Detection on Fedora** (#42): Windows 11 installs no longer fail the "PC must support TPM 2.0" check on Fedora — OVMF firmware is now selected as a matched CODE+VARS pair, preferring 4M builds (including qcow2-format firmware), with the pflash `format=` emitted to match
 - **GPU vBIOS ROM support for Single-GPU Passthrough** (#44): Point the Single GPU Setup screen at a vBIOS ROM (`[r]` to set, `[R]` to clear) so the GPU is passed with `romfile=…` — commonly needed for AMD cards that otherwise output no video after the host POSTs them

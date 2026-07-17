@@ -1,6 +1,9 @@
 # Changelog
 
-**Unreleased**
+**v1.2.1**
+- **Raw Disk Image Support** (thanks @HenriqueCrj, #55): The VM creation wizard's disk step now offers a qcow2/raw format toggle for new disks, with honest trade-off labels (raw disks don't support snapshots).
+  - Existing and imported disks keep their real format: it is detected via `qemu-img info` (falling back to the file extension), the disk file is named to match (`vm.raw` vs `vm.qcow2`), and generated launch scripts emit the matching `format=` argument instead of hardcoding qcow2.
+  - The disk file browser now also lists `.raw` and `.img` images.
 - **Prevent Passed-Through GPUs Getting Stuck in D3cold** (#60): On modern AMD boot GPUs (reported on an RX 9070 XT), vfio-pci's runtime power management could idle the passed-through GPU into D3cold and fail to wake it — QEMU aborts with `vfio: Unable to power on device, stuck in D3`, and the host display cannot be restored without a reboot. The `/etc/modprobe.d/vfio.conf` written by System Setup now sets `options vfio_pci disable_vga=1 disable_idle_d3=1` (the standard fix; the only cost is slightly higher idle power on passed-through devices). Existing single-GPU users should re-run System Setup from Settings → Single GPU Passthrough to pick up the new option.
 - **Fix Host Hang / Power-Off in Single-GPU Passthrough on APUs** (#61): Launching the generated `single-gpu-start.sh` could hard-hang or power the machine off entirely — reported on a Ryzen 7735U (Radeon 680M) mini PC. The script stopped the display manager and unloaded the GPU driver while fbcon was still rendering the active TTY through the GPU; the silent `modprobe -r` failure then led to force-unbinding an in-use driver, which AMD APUs in particular do not survive.
   - The start script now detaches the framebuffer virtual consoles (`/sys/class/vtconsole/*/bind`) and the generic EFI/simple framebuffer before unloading the GPU driver — the standard single-GPU passthrough sequence that was missing.
