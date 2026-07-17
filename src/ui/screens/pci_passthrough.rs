@@ -791,19 +791,32 @@ fn generate_pci_section(devices: &[&PciDevice]) -> String {
     section.push_str("declare -A PCI_ORIG_DRIVERS\n");
     section.push('\n');
 
+    // Everything the bind/restore steps print is mirrored to passthrough.log in
+    // the VM directory. TUI launches discard the script's stdout, which left
+    // users with no way to see what the bind step was doing when it failed —
+    // the log makes the diagnostics reachable after the fact (#25).
+    section.push_str(r#"PCI_LOG="${VM_DIR:-$(dirname "$(readlink -f "$0")")}/passthrough.log"
+{ echo "=== vm-curator PCI passthrough log — $(date) ==="; } > "$PCI_LOG" 2>/dev/null || PCI_LOG=/dev/null
+_pci_log() { printf '%s\n' "$*" | tee -a "$PCI_LOG"; }
+"#);
+    section.push('\n');
+
     // Verbose mode: rerun with VM_CURATOR_DEBUG=1 ./launch.sh to trace every
     // sysfs write. Useful for diagnosing binding hangs.
-    section.push_str(r#"# Set VM_CURATOR_DEBUG=1 to trace every sysfs write done during VFIO binding.
+    section.push_str(
+        r#"# Set VM_CURATOR_DEBUG=1 to trace every sysfs write done during VFIO binding.
 if [[ "${VM_CURATOR_DEBUG:-0}" == "1" ]]; then
     set -x
 fi
-"#);
+"#,
+    );
     section.push('\n');
 
     // Helper to run sysfs commands with privilege escalation. Stderr is intentionally
     // not redirected so kernel-level errors (e.g., "Device or resource busy" from
     // unbind) reach the user.
-    section.push_str(r#"_pci_elevated() {
+    section.push_str(
+        r#"_pci_elevated() {
     if [[ $EUID -eq 0 ]]; then
         sh -c "$1"
     elif command -v pkexec >/dev/null 2>&1; then
@@ -821,7 +834,8 @@ fi
 
     // Wait for a device to land at the expected driver. The original "sleep 0.5"
     // was a guess; this polls /sys until we see vfio-pci (or a 5s timeout).
-    section.push_str(r#"_wait_driver() {
+    section.push_str(
+        r#"_wait_driver() {
     local dev="$1"
     local target="$2"
     local timeout_tenths="${3:-50}"
@@ -836,13 +850,19 @@ fi
     done
     return 1
 }
-"#);
+"#,
+    );
 
     // VFIO bind: per-device echos run inside the elevated shell so each step is
-    // visible in real time. If the kernel hangs unbinding device N, the prior
-    // "Unbinding 0000:NN..." line tells the user exactly which device hung.
-    // The bind commands are still concatenated into one elevated invocation so
-    // there is only a single auth prompt.
+    // visible in real time, and every unbind is wrapped in `timeout` — an unbind
+    // of a GPU the compositor still holds blocks in the kernel FOREVER, which
+    // showed up as "entered my password, then nothing, can't Ctrl-C" (#25).
+    // For GPU drivers we first nudge the compositor with a fake udev "remove"
+    // event (works with Mutter/KWin/wlroots) and pre-set driver_override, so if
+    // the unbind still times out we can fall back to PCI remove+rescan, which
+    // rebinds the device straight to vfio-pci.
+    // The commands are still concatenated into ONE elevated invocation so there
+    // is only a single auth prompt.
     section.push_str(r#"bind_vfio() {
     local bind_cmds=""
     local need_bind=0
@@ -850,42 +870,75 @@ fi
         local dev_path="/sys/bus/pci/devices/$dev"
         local driver_link="$dev_path/driver"
         if [[ ! -d "$dev_path" ]]; then
-            echo "Warning: PCI device $dev not found, skipping" >&2
+            _pci_log "Warning: PCI device $dev not found, skipping"
             continue
+        fi
+        if [[ "$(cat "$dev_path/boot_vga" 2>/dev/null)" == "1" ]]; then
+            _pci_log "ERROR: $dev is the boot VGA device — the GPU driving this display."
+            _pci_log "Unbinding it would freeze or kill your desktop session. Use the"
+            _pci_log "Single GPU Passthrough workflow for that GPU (it stops the display"
+            _pci_log "manager first), or select a secondary GPU here."
+            return 1
         fi
         local current=""
         if [[ -L "$driver_link" ]]; then
             current=$(basename "$(readlink "$driver_link")")
             PCI_ORIG_DRIVERS[$dev]="$current"
             if [[ "$current" == "vfio-pci" ]]; then
-                echo "$dev already bound to vfio-pci"
+                _pci_log "$dev already bound to vfio-pci"
                 continue
             fi
         fi
         need_bind=1
-        if [[ -n "$current" ]]; then
-            bind_cmds+="echo 'Unbinding $dev from $current...' >&2; "
-            bind_cmds+="echo '$dev' > '$driver_link/unbind'; "
+        if [[ -z "$current" ]]; then
+            bind_cmds+="echo 'Binding $dev to vfio-pci (no current driver)...'; "
+            bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
         else
-            bind_cmds+="echo 'Binding $dev to vfio-pci (no current driver)...' >&2; "
+            case "$current" in
+            nvidia|amdgpu|nouveau|radeon|i915|xe)
+                if [[ "$current" == "nvidia" ]]; then
+                    bind_cmds+="systemctl stop nvidia-persistenced 2>/dev/null; "
+                fi
+                bind_cmds+="echo 'Releasing GPU $dev from $current...'; "
+                bind_cmds+="for card in '$dev_path'/drm/card*; do [ -d \"\$card\" ] && echo remove > \"\$card/uevent\" 2>/dev/null; done; sleep 1; "
+                bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
+                bind_cmds+="if timeout -k 2 10 sh -c \"echo '$dev' > '$driver_link/unbind'\"; then "
+                bind_cmds+="echo 'Unbound $dev from $current'; else "
+                bind_cmds+="echo 'Unbind of $dev timed out ($current is holding it) — falling back to PCI remove+rescan...'; "
+                bind_cmds+="timeout -k 2 10 sh -c \"echo 1 > '$dev_path/remove'\" 2>/dev/null; sleep 1; "
+                bind_cmds+="echo 1 > /sys/bus/pci/rescan; sleep 2; fi; "
+                ;;
+            *)
+                bind_cmds+="echo 'Unbinding $dev from $current...'; "
+                bind_cmds+="timeout -k 2 10 sh -c \"echo '$dev' > '$driver_link/unbind'\" || echo 'Warning: unbind of $dev timed out'; "
+                bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
+                ;;
+            esac
         fi
-        bind_cmds+="echo 'vfio-pci' > '$dev_path/driver_override'; "
-        bind_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+        bind_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe 2>/dev/null; "
     done
     if (( need_bind )); then
-        echo "Binding PCI devices to vfio-pci (will require auth)..."
-        _pci_elevated "$bind_cmds" || return 1
+        _pci_log "Binding PCI devices to vfio-pci (root required — expect one auth prompt)..."
+        _pci_elevated "$bind_cmds" 2>&1 | tee -a "$PCI_LOG"
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            _pci_log "ERROR: elevated bind step failed — see $PCI_LOG"
+            return 1
+        fi
         # Confirm each device actually landed at vfio-pci. A failure here usually
-        # means the IOMMU group has unbound siblings, or another driver is racing.
+        # means the IOMMU group has unbound siblings, or a driver refused to let go.
         for dev in "${PCI_DEVICES[@]}"; do
             if [[ "${PCI_ORIG_DRIVERS[$dev]:-}" == "vfio-pci" ]]; then
                 continue
             fi
             if ! _wait_driver "$dev" "vfio-pci" 50; then
-                echo "Warning: $dev did not bind to vfio-pci within 5s" >&2
-                echo "  Current driver: $(basename "$(readlink /sys/bus/pci/devices/$dev/driver 2>/dev/null)" 2>/dev/null || echo 'none')" >&2
+                _pci_log "ERROR: $dev did not bind to vfio-pci within 5s"
+                _pci_log "  Current driver: $(basename "$(readlink /sys/bus/pci/devices/$dev/driver 2>/dev/null)" 2>/dev/null || echo 'none')"
+                _pci_log "  If this GPU is driving your display, use Single GPU Passthrough instead."
+                _pci_log "  Full diagnostics: $PCI_LOG (rerun with VM_CURATOR_DEBUG=1 for a trace)"
+                return 1
             fi
         done
+        _pci_log "All PCI devices bound to vfio-pci."
     fi
 }
 "#,
@@ -894,29 +947,54 @@ fi
     // VFIO restore: drop the silent stderr redirect so cleanup failures surface.
     // The "|| true" on unbind keeps a benign "device already unbound" from
     // killing the rest of the restore.
+    // Restore is GPU-aware: GPUs go through PCI remove+rescan (more reliable
+    // than a bare rebind for display drivers), get a udev "add" event so the
+    // compositor notices the card returning, and nvidia-persistenced is
+    // restarted. Every unbind/remove is timeout-wrapped — cleanup must never
+    // hang the exit path (#25).
     section.push_str(r#"restore_pci() {
     local restore_cmds=""
+    local restart_persistenced=0
     for dev in "${PCI_DEVICES[@]}"; do
         local dev_path="/sys/bus/pci/devices/$dev"
         local orig="${PCI_ORIG_DRIVERS[$dev]:-}"
         if [[ -z "$orig" ]] || [[ "$orig" == "vfio-pci" ]]; then
             continue
         fi
-        echo "Restoring $dev to $orig..."
-        restore_cmds+="echo '$dev' > '$dev_path/driver/unbind' || true; "
-        restore_cmds+="echo '' > '$dev_path/driver_override'; "
-        restore_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+        case "$orig" in
+        nvidia|amdgpu|nouveau|radeon|i915|xe)
+            _pci_log "Restoring GPU $dev to $orig (PCI remove+rescan)..."
+            restore_cmds+="timeout -k 2 10 sh -c \"echo '$dev' > '$dev_path/driver/unbind'\" 2>/dev/null; "
+            restore_cmds+="echo '' > '$dev_path/driver_override' 2>/dev/null; "
+            restore_cmds+="timeout -k 2 10 sh -c \"echo 1 > '$dev_path/remove'\" 2>/dev/null; sleep 1; "
+            restore_cmds+="echo 1 > /sys/bus/pci/rescan; sleep 2; "
+            restore_cmds+="for card in '$dev_path'/drm/card*; do [ -d \"\$card\" ] && echo add > \"\$card/uevent\" 2>/dev/null; done; "
+            if [[ "$orig" == "nvidia" ]]; then
+                restart_persistenced=1
+            fi
+            ;;
+        *)
+            _pci_log "Restoring $dev to $orig..."
+            restore_cmds+="timeout -k 2 10 sh -c \"echo '$dev' > '$dev_path/driver/unbind'\" || true; "
+            restore_cmds+="echo '' > '$dev_path/driver_override'; "
+            restore_cmds+="echo '$dev' > /sys/bus/pci/drivers_probe; "
+            ;;
+        esac
     done
+    if (( restart_persistenced )); then
+        restore_cmds+="systemctl start nvidia-persistenced 2>/dev/null; "
+    fi
     if [[ -n "$restore_cmds" ]]; then
+        _pci_log "Restoring PCI devices to their original drivers (auth may be requested again)..."
         if [[ $EUID -eq 0 ]]; then
-            sh -c "$restore_cmds"
+            sh -c "$restore_cmds" 2>&1 | tee -a "$PCI_LOG"
         elif sudo -n true 2>/dev/null; then
-            sudo sh -c "$restore_cmds"
+            sudo sh -c "$restore_cmds" 2>&1 | tee -a "$PCI_LOG"
         elif command -v pkexec >/dev/null 2>&1; then
-            pkexec sh -c "$restore_cmds"
+            pkexec sh -c "$restore_cmds" 2>&1 | tee -a "$PCI_LOG"
         else
-            echo "Warning: Could not restore PCI devices (no cached credentials)" >&2
-            echo "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci" >&2
+            _pci_log "Warning: Could not restore PCI devices (no cached credentials)"
+            _pci_log "Devices will be restored on next reboot, or run: sudo modprobe -r vfio-pci"
         fi
     fi
 }

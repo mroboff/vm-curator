@@ -731,8 +731,12 @@ impl App {
 
         let mut seen_groups = std::collections::HashSet::new();
         for &i in &self.selected_pci_devices {
-            let Some(dev) = self.pci_devices.get(i) else { continue };
-            let Some(group) = dev.iommu_group else { continue };
+            let Some(dev) = self.pci_devices.get(i) else {
+                continue;
+            };
+            let Some(group) = dev.iommu_group else {
+                continue;
+            };
             if !seen_groups.insert(group) {
                 continue;
             }

@@ -1,5 +1,14 @@
 # Changelog
 
+**Unreleased**
+- **Overhaul Multi-GPU Passthrough VFIO Binding** (#25): Launching a VM with PCI passthrough could hang silently forever after the auth prompt — reported on a hybrid NVIDIA + Intel MUX laptop. Unbinding a GPU that the compositor still holds blocks in the kernel indefinitely, and TUI launches discarded the script's output, so there was nothing to see and no way to recover short of killing the terminal.
+  - Every unbind/remove sysfs write in the generated bind script is now wrapped in `timeout`, so a driver that won't let go produces a clear per-device error instead of an unkillable hang.
+  - GPU drivers (nvidia/amdgpu/nouveau/radeon/i915/xe) get a compositor-release sequence before unbind: a fake udev "remove" event (works with Mutter/KWin/wlroots), `nvidia-persistenced` stop, and a PCI remove+rescan fallback with `driver_override` pre-set to vfio-pci if the unbind still times out. Restore reverses it: remove+rescan back to the original driver, udev "add" event so the compositor re-detects the card, and `nvidia-persistenced` restart. All still within a single auth prompt.
+  - The bind/restore steps now mirror everything to `passthrough.log` in the VM directory, so diagnostics survive TUI launches; `VM_CURATOR_DEBUG=1 ./launch.sh` traces every sysfs write.
+  - The script refuses to unbind the boot VGA device (the GPU rendering the current desktop) with a message pointing to Single GPU Passthrough instead of freezing the session.
+  - Selecting a PCI device now auto-includes its IOMMU-group siblings (QEMU rejects partial groups as "not viable"); `a` fills in missing siblings, saving is blocked while a group is incomplete, and selections saved by older builds are completed on next open.
+  - A `bash -n` regression test validates the generated bind script's syntax.
+
 **v1.2.1**
 - **Raw Disk Image Support** (thanks @HenriqueCrj, #55): The VM creation wizard's disk step now offers a qcow2/raw format toggle for new disks, with honest trade-off labels (raw disks don't support snapshots).
   - Existing and imported disks keep their real format: it is detected via `qemu-img info` (falling back to the file extension), the disk file is named to match (`vm.raw` vs `vm.qcow2`), and generated launch scripts emit the matching `format=` argument instead of hardcoding qcow2.
