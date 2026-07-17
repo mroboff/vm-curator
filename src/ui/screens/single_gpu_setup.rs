@@ -227,15 +227,23 @@ fn render_gpu_info(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled(rom_text, Style::default().fg(rom_color)),
         ]));
 
-        // AMD-specific guidance: AMD GPUs usually need a clean vBIOS to output video
-        if config.gpu.is_amd() && config.gpu_rom.is_none() {
+        // Integrated GPUs (APUs) are the riskiest case: unbinding them can hang
+        // or power off the host, and guest video needs a vBIOS from the
+        // machine's own BIOS image (#61).
+        if config.gpu.is_integrated_gpu() {
+            lines.push(Line::styled(
+                "  WARNING: Integrated GPU (APU) — passthrough is best-effort and",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+            lines.push(Line::styled(
+                "  may hang the host. A vBIOS from YOUR OWN BIOS image is required.",
+                Style::default().fg(Color::Red),
+            ));
+        } else if config.gpu.is_amd() && config.gpu_rom.is_none() {
+            // AMD-specific guidance: AMD GPUs usually need a clean vBIOS to output video
             lines.push(Line::styled(
                 "  AMD GPU: no video without a vBIOS ROM is common. Press [r] to set one.",
                 Style::default().fg(Color::Yellow),
-            ));
-            lines.push(Line::styled(
-                "  Integrated (APU) GPUs are often unsupported for passthrough.",
-                Style::default().fg(Color::DarkGray),
             ));
         }
     } else {

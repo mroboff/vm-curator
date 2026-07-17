@@ -49,6 +49,30 @@ pub mod class_codes {
     pub const INSTRUMENTATION: u32 = 0x130000;
 }
 
+/// Known AMD APU (integrated GPU) PCI device IDs, Carrizo through Strix Point.
+/// Used by [`PciDevice::is_integrated_gpu`] to warn before single-GPU
+/// passthrough of an iGPU. Best-effort: an APU missing from this list simply
+/// produces no warning.
+const AMD_APU_DEVICE_IDS: &[u16] = &[
+    0x9874, // Carrizo
+    0x98e4, // Stoney Ridge
+    0x15dd, // Raven Ridge (Vega 8/11)
+    0x15d8, // Picasso
+    0x1636, // Renoir
+    0x164c, // Lucienne
+    0x1638, // Cezanne
+    0x15e7, // Barcelo
+    0x163f, // Van Gogh (Steam Deck)
+    0x1435, // Sephiroth (Steam Deck OLED)
+    0x1681, // Rembrandt (Radeon 680M/660M)
+    0x1506, // Mendocino
+    0x164e, // Raphael (Ryzen 7000 desktop iGPU)
+    0x13c0, // Granite Ridge (Ryzen 9000 desktop iGPU)
+    0x15bf, // Phoenix / Hawk Point (Radeon 780M)
+    0x15c8, // Phoenix2 (Radeon 760M)
+    0x150e, // Strix Point (Radeon 890M)
+];
+
 /// Represents a PCI device discovered on the system
 #[derive(Debug, Clone)]
 pub struct PciDevice {
@@ -157,6 +181,27 @@ impl PciDevice {
     /// Check if this is an Intel device
     pub fn is_intel(&self) -> bool {
         self.vendor_id == 0x8086
+    }
+
+    /// Best-effort check whether this GPU is an integrated GPU (APU/iGPU).
+    ///
+    /// Integrated GPUs are far riskier for single-GPU passthrough: they have no
+    /// FLR, unbinding them can hard-hang or power off the host (issue #61), and
+    /// guest video usually needs a vBIOS carved out of the machine's own BIOS
+    /// image. Detection fails open — an unrecognized device produces no warning.
+    pub fn is_integrated_gpu(&self) -> bool {
+        if !self.is_gpu() {
+            return false;
+        }
+        // Intel iGPUs always sit at 00:02.0; discrete Arc cards live behind a
+        // PCIe root port at another address.
+        if self.is_intel() {
+            return self.address.ends_with(":00:02.0");
+        }
+        if self.is_amd() {
+            return AMD_APU_DEVICE_IDS.contains(&self.device_id);
+        }
+        false
     }
 
     /// Get a display string for this device

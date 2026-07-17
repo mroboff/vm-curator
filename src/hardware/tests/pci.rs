@@ -80,3 +80,42 @@ fn test_generate_passthrough_args() {
     assert!(!args[1].contains("x-vga")); // No x-vga (incompatible with modern NVIDIA)
     assert!(!args[3].contains("x-vga")); // Audio device also no x-vga
 }
+
+/// Helper for is_integrated_gpu tests
+fn gpu_device(address: &str, vendor_id: u16, device_id: u16) -> PciDevice {
+    PciDevice {
+        address: address.to_string(),
+        vendor_id,
+        device_id,
+        class_code: 0x030000,
+        vendor_name: String::new(),
+        device_name: String::new(),
+        driver: None,
+        iommu_group: Some(1),
+        is_boot_vga: true,
+        subsystem_vendor_id: 0,
+        subsystem_device_id: 0,
+    }
+}
+
+#[test]
+fn integrated_gpu_detection() {
+    // Known AMD APUs (issue #61 reporter's Rembrandt 680M among them)
+    assert!(gpu_device("0000:e4:00.0", 0x1002, 0x1681).is_integrated_gpu());
+    assert!(gpu_device("0000:04:00.0", 0x1002, 0x15bf).is_integrated_gpu());
+
+    // AMD discrete cards are not flagged
+    assert!(!gpu_device("0000:03:00.0", 0x1002, 0x744c).is_integrated_gpu());
+
+    // Intel iGPU always sits at 00:02.0; Arc dGPUs live elsewhere
+    assert!(gpu_device("0000:00:02.0", 0x8086, 0x9a49).is_integrated_gpu());
+    assert!(!gpu_device("0000:03:00.0", 0x8086, 0x56a0).is_integrated_gpu());
+
+    // NVIDIA is never integrated
+    assert!(!gpu_device("0000:01:00.0", 0x10de, 0x2684).is_integrated_gpu());
+
+    // A non-GPU AMD device with a coincidental APU device ID is not flagged
+    let mut audio = gpu_device("0000:e4:00.1", 0x1002, 0x1681);
+    audio.class_code = 0x040300;
+    assert!(!audio.is_integrated_gpu());
+}

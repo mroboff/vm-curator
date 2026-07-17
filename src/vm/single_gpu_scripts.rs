@@ -310,6 +310,17 @@ fn generate_start_script(vm: &DiscoveredVm, config: &SingleGpuConfig) -> Result<
         &pci_passthrough_args,
     )?;
 
+    // Extra header warning for integrated GPUs (APUs), the riskiest case (#61)
+    let apu_warning = if config.gpu.is_integrated_gpu() {
+        r#"#
+# WARNING: This GPU appears to be an integrated GPU (APU). APU passthrough is
+# best-effort: it may fail, hang, or power off the host, and guest video
+# requires a vBIOS extracted from THIS machine's own BIOS image (issue #61).
+"#
+    } else {
+        ""
+    };
+
     // Generate variable definitions
     let variable_defs = generate_variable_definitions(vm, &components);
 
@@ -366,7 +377,7 @@ start_tpm
 # AMD GPUs frequently produce NO video in the guest unless a clean vBIOS ROM is
 # supplied via romfile= (set it in the Single GPU Setup screen with [r]).
 # Integrated (APU) GPUs are often unsupported for passthrough. See issue #44.
-
+{apu_warning}
 set -e
 
 # ============================================================================
@@ -412,14 +423,8 @@ fi
 # Cleanup Function
 # ============================================================================
 
-cleanup() {{
-    local exit_code=$?
-    echo ""
-    echo "Cleaning up and restoring display..."
-
-    # Kill any lingering QEMU processes for this VM
-    pkill -f "qemu.*$VM_NAME" 2>/dev/null || true
-{tpm_cleanup}
+# Return the GPU to its original driver via PCI remove+rescan
+rebind_gpu() {{
     # Unbind from vfio-pci using PCI remove+rescan pattern
     if [[ -e "/sys/bus/pci/devices/$GPU_ADDR" ]]; then
         echo "Removing GPU from PCI bus..."
@@ -454,6 +459,37 @@ cleanup() {{
         echo "Manual bind to $ORIGINAL_DRIVER..."
         echo "$GPU_ADDR" > /sys/bus/pci/drivers/$ORIGINAL_DRIVER/bind 2>/dev/null || true
     fi
+}}
+
+cleanup() {{
+    local exit_code=$?
+    echo ""
+    echo "Cleaning up and restoring display..."
+
+    # Kill any lingering QEMU processes for this VM
+    pkill -f "qemu.*$VM_NAME" 2>/dev/null || true
+{tpm_cleanup}
+    # If the GPU never left its original driver (the abort path), skip the
+    # PCI remove/rescan teardown — removing an in-use GPU from the bus risks
+    # the same hard hang we are avoiding (issue #61).
+    gpu_driver=""
+    if [[ -e "/sys/bus/pci/devices/$GPU_ADDR/driver" ]]; then
+        gpu_driver=$(basename "$(readlink "/sys/bus/pci/devices/$GPU_ADDR/driver")")
+    fi
+
+    if [[ "$gpu_driver" == "$ORIGINAL_DRIVER" ]]; then
+        echo "GPU is still bound to $ORIGINAL_DRIVER; skipping PCI rebind."
+    else
+        rebind_gpu
+    fi
+
+    # Reattach the EFI framebuffer and virtual consoles (issue #61)
+    echo "efi-framebuffer.0" > /sys/bus/platform/drivers/efi-framebuffer/bind 2>/dev/null || true
+    for vtcon in /sys/class/vtconsole/vtcon*; do
+        if grep -q "frame buffer" "$vtcon/name" 2>/dev/null; then
+            echo 1 > "$vtcon/bind" 2>/dev/null || true
+        fi
+    done
 
     # Restart display manager
     echo "Starting display manager..."
@@ -491,14 +527,34 @@ for proc in Xorg Xwayland gnome-shell kwin_wayland plasmashell sway hyprland; do
 done
 sleep 2
 
+# Detach virtual consoles from the GPU framebuffer. Unloading the GPU driver
+# while fbcon still renders the active TTY through it can hard-hang or even
+# power off the machine — especially on AMD APUs (issue #61).
+echo "Detaching virtual consoles from GPU framebuffer..."
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    if grep -q "frame buffer" "$vtcon/name" 2>/dev/null; then
+        echo 0 > "$vtcon/bind" 2>/dev/null || true
+    fi
+done
+
+# Unbind the generic EFI/simple framebuffer if still present
+echo "efi-framebuffer.0" > /sys/bus/platform/drivers/efi-framebuffer/unbind 2>/dev/null || true
+echo "simple-framebuffer.0" > /sys/bus/platform/drivers/simple-framebuffer/unbind 2>/dev/null || true
+sleep 1
+
 # Unload driver modules
 {unload_modules_cmd}
 
-# Verify driver is unloaded
+# The GPU driver must have released the device by now. Force-unbinding a
+# driver that is still in use can hard-hang or power off the machine
+# (issue #61), so abort gracefully instead — the cleanup trap restores
+# the display.
 if [[ -e "/sys/bus/pci/devices/$GPU_ADDR/driver" ]]; then
-    current_driver=$(basename $(readlink /sys/bus/pci/devices/$GPU_ADDR/driver))
+    current_driver=$(basename "$(readlink "/sys/bus/pci/devices/$GPU_ADDR/driver")")
     if [[ "$current_driver" != "vfio-pci" ]]; then
-        echo "$GPU_ADDR" > /sys/bus/pci/drivers/$current_driver/unbind 2>/dev/null || true
+        echo "ERROR: GPU is still bound to '$current_driver' — driver did not unload."
+        echo "Something is still using the GPU. Aborting and restoring the display."
+        exit 1
     fi
 fi
 
@@ -575,6 +631,7 @@ echo "VM has exited."
         display_manager = display_manager,
         extra_pci_addrs = extra_pci_addrs_str,
         variable_defs = variable_defs,
+        apu_warning = apu_warning,
         tpm_functions = tpm_functions,
         tpm_cleanup = if components.has_tpm {
             r#"
@@ -914,6 +971,14 @@ if [[ -n "$ORIGINAL_DRIVER" ]] && [[ "$ORIGINAL_DRIVER" != "vfio-pci" ]]; then
         echo "$GPU_ADDR" > /sys/bus/pci/drivers/$ORIGINAL_DRIVER/bind 2>/dev/null || true
     fi
 fi
+
+# Reattach the EFI framebuffer and virtual consoles (issue #61)
+echo "efi-framebuffer.0" > /sys/bus/platform/drivers/efi-framebuffer/bind 2>/dev/null || true
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    if grep -q "frame buffer" "$vtcon/name" 2>/dev/null; then
+        echo 1 > "$vtcon/bind" 2>/dev/null || true
+    fi
+done
 
 # Restart display manager
 echo "Starting display manager..."
@@ -1627,6 +1692,91 @@ mod tests {
             gpu_passthrough_device(&amd_gpu_config(Some(String::new()))),
             expected
         );
+    }
+
+    /// Build a minimal VM directory with a parseable launch.sh
+    fn test_vm(dir: &Path) -> DiscoveredVm {
+        let launch = dir.join("launch.sh");
+        fs::write(
+            &launch,
+            "#!/bin/bash\nqemu-system-x86_64 \\\n    -machine q35,accel=kvm \\\n    -m 4096 \\\n    -display sdl,gl=on \\\n    -device virtio-net-pci,netdev=net0\n",
+        )
+        .unwrap();
+        DiscoveredVm {
+            id: "test-vm".to_string(),
+            path: dir.to_path_buf(),
+            launch_script: launch,
+            config: Default::default(),
+            custom_name: None,
+            os_profile: None,
+            notes: None,
+        }
+    }
+
+    /// Regression test for issue #61: the start script must detach fbcon and the
+    /// generic framebuffers before unloading the GPU driver — unloading while
+    /// fbcon still renders the active TTY through the GPU can hard-hang or power
+    /// off the host, especially on AMD APUs.
+    #[test]
+    fn start_script_detaches_consoles_before_driver_unload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let script = generate_start_script(&vm, &amd_gpu_config(None)).unwrap();
+
+        let detach = script
+            .find("echo 0 > \"$vtcon/bind\"")
+            .expect("vtcon detach missing");
+        let efifb = script
+            .find("efi-framebuffer/unbind 2>")
+            .expect("efifb unbind missing");
+        let unload = script
+            .find("modprobe -r amdgpu")
+            .expect("driver unload missing");
+        assert!(detach < unload, "consoles must detach before driver unload");
+        assert!(efifb < unload, "efifb must unbind before driver unload");
+    }
+
+    /// Issue #61: a GPU driver that refuses to unload must abort the script
+    /// (letting the cleanup trap restore the display), never be force-unbound.
+    #[test]
+    fn start_script_aborts_instead_of_force_unbinding_gpu() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let script = generate_start_script(&vm, &amd_gpu_config(None)).unwrap();
+
+        assert!(script.contains("driver did not unload"));
+        assert!(
+            !script.contains("echo \"$GPU_ADDR\" > /sys/bus/pci/drivers/$current_driver/unbind")
+        );
+        // The abort path must also skip the PCI remove/rescan teardown in cleanup.
+        assert!(script.contains("skipping PCI rebind"));
+    }
+
+    /// Issue #61: cleanup and the emergency restore script must reattach the
+    /// EFI framebuffer and virtual consoles so the TTY comes back.
+    #[test]
+    fn scripts_reattach_consoles_on_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let cfg = amd_gpu_config(None);
+
+        let start = generate_start_script(&vm, &cfg).unwrap();
+        assert!(start.contains("echo 1 > \"$vtcon/bind\""));
+        assert!(start.contains("efi-framebuffer/bind 2>"));
+
+        let restore = generate_restore_script(&vm, &cfg);
+        assert!(restore.contains("echo 1 > \"$vtcon/bind\""));
+        assert!(restore.contains("efi-framebuffer/bind 2>"));
+    }
+
+    /// Integrated GPUs (the amd_gpu_config fixture is a Rembrandt 680M APU)
+    /// get an extra header warning in the generated start script.
+    #[test]
+    fn start_script_warns_for_integrated_gpu() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let script = generate_start_script(&vm, &amd_gpu_config(None)).unwrap();
+        assert!(script.contains("integrated GPU (APU)"));
     }
 
     #[test]

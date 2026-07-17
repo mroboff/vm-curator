@@ -1,6 +1,11 @@
 # Changelog
 
 **v1.2.0**
+- **Fix Host Hang / Power-Off in Single-GPU Passthrough on APUs** (#61): Launching the generated `single-gpu-start.sh` could hard-hang or power the machine off entirely — reported on a Ryzen 7735U (Radeon 680M) mini PC. The script stopped the display manager and unloaded the GPU driver while fbcon was still rendering the active TTY through the GPU; the silent `modprobe -r` failure then led to force-unbinding an in-use driver, which AMD APUs in particular do not survive.
+  - The start script now detaches the framebuffer virtual consoles (`/sys/class/vtconsole/*/bind`) and the generic EFI/simple framebuffer before unloading the GPU driver — the standard single-GPU passthrough sequence that was missing.
+  - If the GPU driver still refuses to unload, the script aborts gracefully (cleanup restores the display) instead of force-unbinding an in-use driver.
+  - Cleanup skips the PCI remove/rescan teardown when the GPU never left its original driver (the abort path), and both cleanup and `single-gpu-restore.sh` reattach the EFI framebuffer and virtual consoles so the TTY comes back.
+  - Integrated GPUs (APUs) are now detected (best-effort, via a known AMD APU device-ID list plus Intel's fixed `00:02.0` iGPU address) and flagged with a prominent warning in the Single GPU Setup screen and the generated script header: APU passthrough is best-effort, and guest video requires a vBIOS extracted from that machine's own BIOS image.
 - **Security: bump `quick-xml` to 0.41** (RUSTSEC-2026-0194, RUSTSEC-2026-0195): resolves two high-severity advisories (quadratic-time duplicate-attribute check and unbounded namespace-declaration allocation) in the libvirt-XML import parser. Also bumps `anyhow` to 1.0.103.
 - **Fix Windows 11 TPM 2.0 Detection on Fedora** (#42): Windows 11 VMs created with TPM enabled failed the installer's "PC must support TPM 2.0" check on Fedora 44, because vm-curator selected the 2M `OVMF_CODE.secboot.fd` firmware, which does not expose TPM 2.0 correctly.
   - OVMF firmware is now chosen as a matched CODE+VARS **pair** (`find_ovmf_firmware`), preferring 4M builds — including Fedora's qcow2-format firmware (`OVMF_CODE_4M.secboot.qcow2`) — over 2M, with the 2M variants kept only as a last-resort fallback. Picking CODE and VARS from one pair guarantees they always agree in size and on-disk format.
