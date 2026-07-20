@@ -306,13 +306,38 @@ pub(crate) fn save_selection_and_report(app: &mut App) {
         match result {
             Ok(()) => {
                 app.reload_selected_vm_script();
-                if count > 0 {
-                    app.set_status(format!("Saved {} shared folder(s) to launch.sh", count));
+
+                let mut status_msg = if count > 0 {
+                    format!("Saved {} shared folder(s) to launch.sh", count)
                 } else {
-                    app.set_status("Cleared shared folders from launch.sh");
+                    "Cleared shared folders from launch.sh".to_string()
+                };
+
+                // Regenerate single-GPU scripts if they exist so their copied
+                // QEMU command stays in sync with launch.sh.
+                if let Some(vm) = app.selected_vm() {
+                    let regen_result = if let Some(config) = app.single_gpu_config.as_ref() {
+                        crate::vm::single_gpu_scripts::regenerate_if_exists(vm, config)
+                    } else {
+                        crate::vm::single_gpu_scripts::regenerate_from_saved_config(vm)
+                    };
+
+                    match regen_result {
+                        Ok(true) => {
+                            status_msg.push_str("; single-GPU scripts regenerated");
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            status_msg.push_str(&format!(
+                                "; warning: failed to regenerate single-GPU scripts: {}",
+                                e
+                            ));
+                        }
+                    }
                 }
                 // Saved state is now the baseline; no unsaved changes remain.
                 app.snapshot_shared_folders_baseline();
+                app.set_status(status_msg);
             }
             Err(e) => {
                 app.set_status(format!("Error saving shared folders: {}", e));

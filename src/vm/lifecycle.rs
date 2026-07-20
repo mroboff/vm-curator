@@ -32,6 +32,8 @@ fn path_to_str(path: &Path) -> Result<&str> {
 pub struct LaunchOptions {
     pub boot_mode: BootMode,
     pub extra_args: Vec<String>,
+    /// USB passthrough is persisted in the VM's launch script. Runtime devices
+    /// are ignored so QEMU flags are not passed to the script as shell options.
     pub usb_devices: Vec<UsbPassthrough>,
 }
 
@@ -44,23 +46,6 @@ pub struct UsbPassthrough {
 }
 
 impl UsbPassthrough {
-    /// Generate QEMU device arguments for this USB device
-    /// If `bus` is provided, attach to that specific bus (e.g., "xhci.0" for USB 3.0)
-    pub fn to_qemu_args(&self, bus: Option<&str>) -> Vec<String> {
-        let device_spec = if let Some(bus_name) = bus {
-            format!(
-                "usb-host,bus={},vendorid=0x{:04x},productid=0x{:04x}",
-                bus_name, self.vendor_id, self.product_id
-            )
-        } else {
-            format!(
-                "usb-host,vendorid=0x{:04x},productid=0x{:04x}",
-                self.vendor_id, self.product_id
-            )
-        };
-        vec!["-device".to_string(), device_spec]
-    }
-
     /// Check if this device is USB 3.0 or higher
     pub fn is_usb3(&self) -> bool {
         self.usb_version.is_usb3()
@@ -154,24 +139,10 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
 
     args.extend(options.extra_args.clone());
 
-    // Add USB passthrough arguments
     if !options.usb_devices.is_empty() {
-        args.push("-usb".to_string());
-
-        // Check if any USB 3.0 devices are present
-        let has_usb3 = options.usb_devices.iter().any(|d| d.is_usb3());
-
-        // Add xHCI controller if USB 3.0 devices are present
-        if has_usb3 {
-            args.push("-device".to_string());
-            args.push("qemu-xhci,id=xhci,p2=8,p3=8".to_string());
-        }
-
-        // Add each USB device, attaching USB 3.0 devices to xHCI controller
-        for usb in &options.usb_devices {
-            let bus = if usb.is_usb3() { Some("xhci.0") } else { None };
-            args.extend(usb.to_qemu_args(bus));
-        }
+        log::warn!(
+            "Ignoring LaunchOptions::usb_devices; save USB passthrough to launch.sh before launching"
+        );
     }
 
     cmd.args(&args);
@@ -866,6 +837,7 @@ fn extract_hex_value(s: &str, prefix: &str) -> Option<u16> {
 // Shared Folders section markers
 const SHARED_FOLDERS_MARKER_START: &str = "# >>> Shared Folders (managed by vm-curator) >>>";
 const SHARED_FOLDERS_MARKER_END: &str = "# <<< Shared Folders <<<";
+const SHARED_FOLDERS_ARGS_REF: &str = "\"${SHARED_FOLDERS_ARGS[@]}\"";
 
 /// A shared folder configuration for virtio-9p host-to-guest file sharing
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -936,10 +908,7 @@ fn remove_shared_folders_section(content: &str) -> String {
             continue;
         }
         if !in_section {
-            let cleaned_line = line
-                .replace(" $SHARED_FOLDERS_ARGS", "")
-                .replace("$SHARED_FOLDERS_ARGS ", "")
-                .replace("$SHARED_FOLDERS_ARGS", "");
+            let cleaned_line = remove_shared_folders_arg_ref(line);
             result.push_str(&cleaned_line);
             result.push('\n');
         }
@@ -953,6 +922,24 @@ fn remove_shared_folders_section(content: &str) -> String {
     result
 }
 
+fn remove_shared_folders_arg_ref(line: &str) -> String {
+    let mut cleaned = line.to_string();
+    for var_ref in [
+        " \"${SHARED_FOLDERS_ARGS[@]}\"",
+        "\"${SHARED_FOLDERS_ARGS[@]}\" ",
+        "\"${SHARED_FOLDERS_ARGS[@]}\"",
+        " ${SHARED_FOLDERS_ARGS[@]}",
+        "${SHARED_FOLDERS_ARGS[@]} ",
+        "${SHARED_FOLDERS_ARGS[@]}",
+        " $SHARED_FOLDERS_ARGS",
+        "$SHARED_FOLDERS_ARGS ",
+        "$SHARED_FOLDERS_ARGS",
+    ] {
+        cleaned = cleaned.replace(var_ref, "");
+    }
+    cleaned
+}
+
 fn generate_shared_folders_section(folders: &[SharedFolder], device_name: &str) -> String {
     if folders.is_empty() {
         return String::new();
@@ -961,22 +948,30 @@ fn generate_shared_folders_section(folders: &[SharedFolder], device_name: &str) 
     let mut section = String::new();
     section.push_str(SHARED_FOLDERS_MARKER_START);
     section.push('\n');
-    section.push_str("SHARED_FOLDERS_ARGS=\"");
+    section.push_str("SHARED_FOLDERS_ARGS=(\n");
 
     for (i, folder) in folders.iter().enumerate() {
         let id = format!("fsdev{}", i);
-        let escaped_path = shell_escape(&folder.host_path);
+        let fsdev_arg = format!(
+            "local,id={},path={},security_model=mapped-xattr",
+            id, folder.host_path
+        );
+        let device_arg = format!(
+            "{},fsdev={},mount_tag={}",
+            device_name, id, folder.mount_tag
+        );
 
-        if i > 0 {
-            section.push(' ');
-        }
-        section.push_str(&format!(
-            "-fsdev local,id={},path={},security_model=mapped-xattr -device {},fsdev={},mount_tag={}",
-            id, escaped_path, device_name, id, folder.mount_tag
-        ));
+        section.push_str("    -fsdev\n");
+        section.push_str("    ");
+        section.push_str(&shell_escape(&fsdev_arg));
+        section.push('\n');
+        section.push_str("    -device\n");
+        section.push_str("    ");
+        section.push_str(&shell_escape(&device_arg));
+        section.push('\n');
     }
 
-    section.push_str("\"\n");
+    section.push_str(")\n");
     section.push_str(SHARED_FOLDERS_MARKER_END);
     section.push('\n');
 
@@ -984,12 +979,14 @@ fn generate_shared_folders_section(folders: &[SharedFolder], device_name: &str) 
 }
 
 fn insert_shared_folders_section(content: &str, section: &str) -> String {
-    insert_args_section(content, section, "$SHARED_FOLDERS_ARGS")
+    insert_args_section(content, section, SHARED_FOLDERS_ARGS_REF)
 }
 
 fn parse_shared_folders_section(content: &str) -> Vec<SharedFolder> {
     let mut folders = Vec::new();
     let mut in_section = false;
+    let mut in_array = false;
+    let mut array_lines = Vec::new();
 
     for line in content.lines() {
         if line.trim() == SHARED_FOLDERS_MARKER_START {
@@ -1000,27 +997,246 @@ fn parse_shared_folders_section(content: &str) -> Vec<SharedFolder> {
             in_section = false;
             continue;
         }
-        if in_section && line.contains("SHARED_FOLDERS_ARGS=") {
-            // Parse -fsdev local,id=...,path=...,security_model=... -device ...,mount_tag=...
-            // Split on "-fsdev " to get each folder pair
-            for part in line.split("-fsdev ") {
-                if !part.contains("path=") {
-                    continue;
-                }
-                let host_path = extract_path_value(part);
-                let mount_tag = extract_simple_value(part, "mount_tag=");
+        if !in_section {
+            continue;
+        }
 
-                if let (Some(path), Some(tag)) = (host_path, mount_tag) {
-                    folders.push(SharedFolder {
-                        host_path: path,
-                        mount_tag: tag,
-                    });
+        let trimmed = line.trim();
+        if in_array {
+            if let Some(before_end) = strip_array_closing_paren(line) {
+                if !before_end.trim().is_empty() {
+                    array_lines.push(before_end.trim().to_string());
+                }
+                folders.extend(parse_shared_folders_array_lines(&array_lines));
+                array_lines.clear();
+                in_array = false;
+            } else {
+                array_lines.push(line.to_string());
+            }
+            continue;
+        }
+
+        if let Some(after_start) = trimmed.strip_prefix("SHARED_FOLDERS_ARGS=(") {
+            let inline = after_start.trim();
+            if let Some(before_end) = strip_array_closing_paren(inline) {
+                if !before_end.trim().is_empty() {
+                    array_lines.push(before_end.trim().to_string());
+                }
+                folders.extend(parse_shared_folders_array_lines(&array_lines));
+                array_lines.clear();
+            } else {
+                if !inline.is_empty() {
+                    array_lines.push(inline.to_string());
+                }
+                in_array = true;
+            }
+            continue;
+        }
+
+        if line.contains("SHARED_FOLDERS_ARGS=") {
+            folders.extend(parse_shared_folders_legacy_line(line));
+        }
+    }
+
+    if in_array {
+        folders.extend(parse_shared_folders_array_lines(&array_lines));
+    }
+
+    folders
+}
+
+fn strip_array_closing_paren(line: &str) -> Option<&str> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let line = line.trim_end();
+    let mut quote = Quote::None;
+    let mut escaped = false;
+    let mut close_idx = None;
+
+    for (idx, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            Quote::None => match c {
+                '\\' => escaped = true,
+                '\'' => quote = Quote::Single,
+                '"' => quote = Quote::Double,
+                ')' => close_idx = Some(idx),
+                _ => {}
+            },
+            Quote::Single => {
+                if c == '\'' {
+                    quote = Quote::None;
+                }
+            }
+            Quote::Double => match c {
+                '\\' => escaped = true,
+                '"' => quote = Quote::None,
+                _ => {}
+            },
+        }
+    }
+
+    if quote != Quote::None {
+        return None;
+    }
+
+    let close_idx = close_idx?;
+    let trailing = line[close_idx + 1..].trim();
+    if trailing.is_empty() || trailing.starts_with('#') {
+        Some(line[..close_idx].trim_end())
+    } else {
+        None
+    }
+}
+
+fn parse_shared_folders_legacy_line(line: &str) -> Vec<SharedFolder> {
+    let mut folders = Vec::new();
+
+    // Legacy scalar format:
+    // SHARED_FOLDERS_ARGS="-fsdev local,id=...,path=...,security_model=... -device ...,mount_tag=..."
+    for part in line.split("-fsdev ") {
+        if !part.contains("path=") {
+            continue;
+        }
+        let host_path = extract_path_value(part);
+        let mount_tag = extract_simple_value(part, "mount_tag=");
+
+        if let (Some(path), Some(tag)) = (host_path, mount_tag) {
+            folders.push(SharedFolder {
+                host_path: path,
+                mount_tag: tag,
+            });
+        }
+    }
+
+    folders
+}
+
+fn parse_shared_folders_array_lines(lines: &[String]) -> Vec<SharedFolder> {
+    let mut tokens = Vec::new();
+    for line in lines {
+        tokens.extend(parse_shell_words(line));
+    }
+    parse_shared_folder_tokens(&tokens)
+}
+
+fn parse_shared_folder_tokens(tokens: &[String]) -> Vec<SharedFolder> {
+    let mut folders = Vec::new();
+    let mut i = 0;
+
+    while i < tokens.len() {
+        if tokens[i] != "-fsdev" {
+            i += 1;
+            continue;
+        }
+
+        let Some(fsdev_arg) = tokens.get(i + 1) else {
+            break;
+        };
+
+        let mut mount_tag = None;
+        let mut j = i + 2;
+        while j + 1 < tokens.len() {
+            if tokens[j] == "-fsdev" {
+                break;
+            }
+            if tokens[j] == "-device" {
+                mount_tag = extract_simple_value(&tokens[j + 1], "mount_tag=");
+                break;
+            }
+            j += 1;
+        }
+
+        if let (Some(path), Some(tag)) = (extract_path_value(fsdev_arg), mount_tag) {
+            folders.push(SharedFolder {
+                host_path: path,
+                mount_tag: tag,
+            });
+        }
+
+        i += 2;
+    }
+
+    folders
+}
+
+fn parse_shell_words(line: &str) -> Vec<String> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut quote = Quote::None;
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            Quote::None => match c {
+                c if c.is_whitespace() => {
+                    if in_word {
+                        words.push(std::mem::take(&mut current));
+                        in_word = false;
+                    }
+                }
+                '\'' => {
+                    quote = Quote::Single;
+                    in_word = true;
+                }
+                '"' => {
+                    quote = Quote::Double;
+                    in_word = true;
+                }
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                        in_word = true;
+                    }
+                }
+                _ => {
+                    current.push(c);
+                    in_word = true;
+                }
+            },
+            Quote::Single => {
+                if c == '\'' {
+                    quote = Quote::None;
+                } else {
+                    current.push(c);
+                }
+            }
+            Quote::Double => {
+                if c == '"' {
+                    quote = Quote::None;
+                } else if c == '\\' {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    }
+                } else {
+                    current.push(c);
                 }
             }
         }
     }
 
-    folders
+    if in_word {
+        words.push(current);
+    }
+
+    words
 }
 
 /// Extract a path value from a -fsdev argument, handling shell quoting
@@ -1048,8 +1264,14 @@ fn extract_path_value(s: &str) -> Option<String> {
         }
         Some(result)
     } else {
-        // Unquoted path: ends at comma or space
-        let end = rest.find([',', ' ', '"']).unwrap_or(rest.len());
+        // Unquoted path in the array format can contain spaces because the
+        // whole fsdev option is one shell array element. It ends at the next
+        // QEMU fsdev option key.
+        let end = rest
+            .find(",security_model=")
+            .or_else(|| rest.find(",readonly="))
+            .or_else(|| rest.find([',', '"']))
+            .unwrap_or(rest.len());
         Some(rest[..end].to_string())
     }
 }
