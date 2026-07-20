@@ -41,6 +41,14 @@ description = """
 How VM windows are displayed. GTK: native look. SDL: lightweight. \
 Spice: best for remote access and Looking Glass."""
 
+[default_window_size]
+title = "Default Window Size"
+description = """
+Initial VM display size when launching, such as 1280x800 or 1920x1080. \
+Leave empty or enter none to use each VM's launch script default. \
+Applies to vm-curator generated launch scripts that use standard VGA, \
+virtio-vga, virtio-vga-gl, or QXL video devices."""
+
 [default_enable_kvm]
 title = "Enable KVM"
 description = """

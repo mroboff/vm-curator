@@ -332,6 +332,7 @@ fn cmd_launch(config: &Config, name: &str, install: bool, cdrom: Option<PathBuf>
         boot_mode,
         extra_args: Vec::new(),
         usb_devices: Vec::new(),
+        window_size: config.default_window_size,
     };
 
     println!("Launching {}...", vm.display_name());

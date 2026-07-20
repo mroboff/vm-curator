@@ -686,6 +686,62 @@ fi
     )
 }
 
+fn shell_array_literal(args: &[String]) -> String {
+    let mut literal = String::from("(");
+    for (index, arg) in args.iter().enumerate() {
+        if index > 0 {
+            literal.push(' ');
+        }
+        literal.push_str(&shell_escape(arg));
+    }
+    literal.push(')');
+    literal
+}
+
+fn video_args_for_config(config: &WizardQemuConfig) -> (Vec<String>, Option<&'static str>) {
+    if config.gl_acceleration && config.vga == "virtio" {
+        (
+            vec!["-device".to_string(), "virtio-vga-gl".to_string()],
+            Some("virtio-vga-gl"),
+        )
+    } else {
+        let override_device = match config.vga.as_str() {
+            "std" => Some("VGA"),
+            "virtio" => Some("virtio-vga"),
+            "qxl" => Some("qxl-vga"),
+            _ => None,
+        };
+        (
+            vec!["-vga".to_string(), config.vga.clone()],
+            override_device,
+        )
+    }
+}
+
+fn generate_video_args_setup(config: &WizardQemuConfig) -> String {
+    let (default_args, override_device) = video_args_for_config(config);
+    let override_device = override_device.unwrap_or("");
+
+    format!(
+        r#"# Optional vm-curator window-size override
+VM_CURATOR_VIDEO_DEVICE={}
+VM_CURATOR_VIDEO_ARGS={}
+if [[ -n "${{VM_CURATOR_WINDOW_SIZE:-}}" && -n "$VM_CURATOR_VIDEO_DEVICE" ]]; then
+    if [[ "$VM_CURATOR_WINDOW_SIZE" =~ ^([0-9]+)[xX]([0-9]+)$ ]]; then
+        VM_CURATOR_WIDTH="${{BASH_REMATCH[1]}}"
+        VM_CURATOR_HEIGHT="${{BASH_REMATCH[2]}}"
+        if (( VM_CURATOR_WIDTH >= 320 && VM_CURATOR_WIDTH <= 16384 && VM_CURATOR_HEIGHT >= 200 && VM_CURATOR_HEIGHT <= 16384 )); then
+            VM_CURATOR_VIDEO_ARGS=(-device "${{VM_CURATOR_VIDEO_DEVICE}},xres=${{VM_CURATOR_WIDTH}},yres=${{VM_CURATOR_HEIGHT}}")
+        fi
+    fi
+fi
+
+"#,
+        shell_escape(override_device),
+        shell_array_literal(&default_args)
+    )
+}
+
 /// Generate the launch.sh script content with OS profile awareness
 pub fn generate_launch_script_with_os(
     vm_name: &str,
@@ -768,6 +824,7 @@ pub fn generate_launch_script_with_os(
     }
 
     script.push('\n');
+    script.push_str(&generate_video_args_setup(config));
 
     // macOS OpenCore bootloader verification
     if is_intel_macos_vm && needs_uefi && config.bios_path.is_some() {
@@ -1219,13 +1276,8 @@ fn build_qemu_command_with_os(
         }
     }
 
-    // VGA / Graphics (escaped to prevent injection)
-    if config.gl_acceleration && config.vga == "virtio" {
-        // Use virtio-vga-gl for 3D acceleration
-        args.push("-device virtio-vga-gl".to_string());
-    } else {
-        args.push(format!("-vga {}", shell_escape(&config.vga)));
-    }
+    // VGA / Graphics. The generated script owns optional window-size overrides.
+    args.push("\"${VM_CURATOR_VIDEO_ARGS[@]}\"".to_string());
 
     // Display (with GL if enabled, escaped to prevent injection)
     if config.gl_acceleration {

@@ -23,6 +23,10 @@ fn test_extract_emulator() {
 fn test_extract_vga() {
     assert_eq!(extract_vga("-vga cirrus -m 512"), Some(VgaType::Cirrus));
     assert_eq!(extract_vga("-vga virtio"), Some(VgaType::Virtio));
+    assert_eq!(
+        extract_vga("VM_CURATOR_VIDEO_ARGS=(-vga std)"),
+        Some(VgaType::Std)
+    );
 }
 
 #[test]
