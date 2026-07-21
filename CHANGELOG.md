@@ -1,5 +1,10 @@
 # Changelog
 
+**v1.2.2**
+- **Fix VM Launch Failure in Library Paths Containing Spaces** (#65): VMs created with v1.0.0–v1.2.1 failed to launch when the VM library path contained a space (e.g. `/mnt/Virtual SSD/vm-space`) — QEMU aborted with `-qmp unix:/mnt/Virtual: Failed to connect to '/mnt/Virtual': No such file or directory`. The generated `launch.sh` wrote the QMP monitor socket path unquoted — the only unquoted path interpolation in the script — so the shell word-split the argument at the space. VMs created with v0.4.10 or earlier were unaffected because they predate the QMP socket line.
+  - Newly generated scripts quote the socket path (`unix:"$VM_DIR/qemu.sock"`), matching how `$DISK`, `$ISO`, and the other paths are already quoted.
+  - Existing broken scripts self-heal: on launch, vm-curator rewrites the unquoted form in place (idempotently), so affected VMs work again without re-creating them or hand-editing `launch.sh`. This repair runs on the TUI launch path as well as CLI launches.
+
 **v1.2.1**
 - **Raw Disk Image Support** (thanks @HenriqueCrj, #55): The VM creation wizard's disk step now offers a qcow2/raw format toggle for new disks, with honest trade-off labels (raw disks don't support snapshots).
   - Existing and imported disks keep their real format: it is detected via `qemu-img info` (falling back to the file extension), the disk file is named to match (`vm.raw` vs `vm.qcow2`), and generated launch scripts emit the matching `format=` argument instead of hardcoding qcow2.
