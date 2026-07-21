@@ -75,6 +75,10 @@ impl UsbPassthrough {
 pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) -> LaunchResult {
     let vm_name = vm.display_name();
 
+    if let Err(e) = ensure_qmp_in_script(&vm.path) {
+        log::warn!("launch_vm_with_error_check: could not patch QMP into launch.sh: {e}");
+    }
+
     let mut cmd = Command::new("bash");
     cmd.current_dir(&vm.path);
 
@@ -299,9 +303,6 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
 
 /// Launch a VM synchronously (legacy function for compatibility)
 pub fn launch_vm_sync(vm: &DiscoveredVm, options: &LaunchOptions) -> Result<()> {
-    if let Err(e) = ensure_qmp_in_script(&vm.path) {
-        log::warn!("launch_vm_sync: could not patch QMP into launch.sh: {e}");
-    }
     let result = launch_vm_with_error_check(vm, options);
 
     if result.success {
@@ -1247,7 +1248,7 @@ bind_vfio || exit 1
 // but not yet surfaced in the UI — intentional, not dead.
 
 #[allow(dead_code)]
-const QMP_ARG: &str = "        -qmp unix:$VM_DIR/qemu.sock,server=on,wait=off";
+const QMP_ARG: &str = "        -qmp unix:\"$VM_DIR/qemu.sock\",server=on,wait=off";
 
 /// Patch an existing launch.sh to include a QMP socket if not already present.
 /// Idempotent — safe to call before every launch.
@@ -1256,6 +1257,14 @@ pub fn ensure_qmp_in_script(vm_path: &Path) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
     let content =
         std::fs::read_to_string(&script_path).context("Failed to read launch.sh for QMP patch")?;
+
+    // Repair the unquoted socket path written by v1.0.0–v1.2.1 (issue #65):
+    // without quotes, a library path containing spaces word-splits the -qmp arg.
+    if content.contains("unix:$VM_DIR/qemu.sock") {
+        let fixed = content.replace("unix:$VM_DIR/qemu.sock", "unix:\"$VM_DIR/qemu.sock\"");
+        std::fs::write(&script_path, fixed).context("Failed to write repaired launch.sh")?;
+        return Ok(());
+    }
 
     if content.contains("qemu.sock") {
         return Ok(());
