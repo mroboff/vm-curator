@@ -618,21 +618,24 @@ for proc in Xorg Xwayland gnome-shell kwin_wayland plasmashell sway hyprland; do
 done
 sleep 2
 
-# ...then sweep anything still holding a DRM node — greeter workers,
-# pipewire/wireplumber, lingering Xwayland. Any open /dev/dri fd keeps the
-# GPU driver's refcount up and makes the module unload below fail (issue #64).
-# Escalate gently: wait, then SIGTERM, then SIGKILL.
+# ...then sweep anything still holding a DRM or KFD node — greeter workers,
+# pipewire/wireplumber, lingering Xwayland, ROCm/compute users. Any open
+# /dev/dri or /dev/kfd fd keeps the GPU driver's refcount up and makes the
+# module unload below fail (issues #64, #75). Escalate gently: wait, then
+# SIGTERM, then SIGKILL.
+gpu_nodes=(/dev/dri/*)
+[[ -e /dev/kfd ]] && gpu_nodes+=(/dev/kfd)
 if command -v fuser >/dev/null 2>&1; then
     for attempt in $(seq 1 8); do
-        if ! fuser -s /dev/dri/* 2>/dev/null; then
+        if ! fuser -s "${{gpu_nodes[@]}}" 2>/dev/null; then
             break
         fi
         if [[ $attempt -eq 3 ]]; then
-            echo "Asking processes holding /dev/dri to exit..."
-            fuser -k -TERM /dev/dri/* 2>/dev/null || true
+            echo "Asking processes holding GPU device nodes to exit..."
+            fuser -k -TERM "${{gpu_nodes[@]}}" 2>/dev/null || true
         elif [[ $attempt -ge 6 ]]; then
-            echo "Force-killing processes still holding /dev/dri..."
-            fuser -k -KILL /dev/dri/* 2>/dev/null || true
+            echo "Force-killing processes still holding GPU device nodes..."
+            fuser -k -KILL "${{gpu_nodes[@]}}" 2>/dev/null || true
         fi
         sleep 1
     done
@@ -691,6 +694,22 @@ for _ in $(seq 1 5); do
     sleep 2
 done
 
+# Last resort, opt-in ONLY: release the device from its driver without
+# unloading the module. Standard passthrough tooling uses this unbind and it
+# does not care about the module refcount — but on some AMD APUs it has
+# hard-hung or even powered off the machine (issue #61), so it never runs
+# unless explicitly requested:
+#   sudo VMC_APU_FORCE_UNBIND=1 <this script>
+if [[ "${{VMC_APU_FORCE_UNBIND:-0}}" == "1" ]] && [[ -e "/sys/bus/pci/devices/$GPU_ADDR/driver" ]]; then
+    drv=$(basename "$(readlink "/sys/bus/pci/devices/$GPU_ADDR/driver")")
+    if [[ "$drv" != "vfio-pci" ]]; then
+        echo "WARNING: VMC_APU_FORCE_UNBIND=1 — attempting device unbind from '$drv'."
+        echo "WARNING: on some machines (esp. AMD APUs) this can hard-hang or power off."
+        echo "$GPU_ADDR" > "/sys/bus/pci/devices/$GPU_ADDR/driver/unbind" 2>/dev/null || true
+        sleep 3
+    fi
+fi
+
 # The GPU driver must have released the device by now. Force-unbinding a
 # driver that is still in use can hard-hang or power off the machine
 # (issue #61), so abort gracefully instead — the cleanup trap restores
@@ -705,11 +724,35 @@ if [[ -e "/sys/bus/pci/devices/$GPU_ADDR/driver" ]]; then
         echo "Module usage:"
         lsmod | head -n 1
         lsmod | grep -E "^($ORIGINAL_DRIVER|drm|snd_hda_intel) " || true
-        if command -v fuser >/dev/null 2>&1; then
-            echo "Processes holding /dev/dri nodes:"
-            fuser -v /dev/dri/* 2>&1 || true
-        fi
+        # Scan /proc directly rather than trusting fuser alone: it misses
+        # processes in other mount namespaces (flatpak, containers) (#75).
+        echo "Processes with DRM/KFD file descriptors (all namespaces):"
+        for fdlink in /proc/[0-9]*/fd/*; do
+            tgt=$(readlink "$fdlink" 2>/dev/null) || continue
+            case "$tgt" in
+                /dev/dri/*|/dev/kfd)
+                    pid="${{fdlink#/proc/}}"; pid="${{pid%%/*}}"
+                    echo "  pid $pid ($(cat /proc/$pid/comm 2>/dev/null)): $tgt"
+                    ;;
+            esac
+        done
+        # Framebuffer/console state: a still-attached fbcon is a classic
+        # invisible refcount holder on APUs (#75).
+        echo "Framebuffers:"
+        for fb in /sys/class/graphics/fb*; do
+            [[ -e "$fb" ]] && echo "  $(basename "$fb"): $(cat "$fb/name" 2>/dev/null)"
+        done
+        echo "Virtual console binds (1 = still attached):"
+        for vtcon in /sys/class/vtconsole/vtcon*; do
+            [[ -e "$vtcon" ]] && echo "  $(basename "$vtcon") bind=$(cat "$vtcon/bind" 2>/dev/null): $(cat "$vtcon/name" 2>/dev/null)"
+        done
         echo "――――――――――――――――――――――――――――――――――――――"
+        echo ""
+        echo "If the diagnostics show no holders, the platform is keeping an"
+        echo "internal reference (common on AMD APUs). As a last resort you can"
+        echo "retry with device unbind instead of module unload:"
+        echo "  sudo VMC_APU_FORCE_UNBIND=1 $0"
+        echo "WARNING: on some APUs that can hang or power off the machine."
         exit 1
     fi
 fi
@@ -2031,7 +2074,7 @@ mod tests {
             .find("systemctl is-active --quiet \"$DISPLAY_MANAGER\"")
             .expect("display-manager stop polling missing");
         let drm_sweep = script
-            .find("fuser -k -TERM /dev/dri/*")
+            .find("fuser -k -TERM \"${gpu_nodes[@]}\"")
             .expect("DRM fd holder sweep missing");
         let sibling = script
             .find("Releasing GPU audio function")
@@ -2065,10 +2108,7 @@ mod tests {
         let unload = script
             .find("modprobe -r amdgpu")
             .expect("driver unload missing");
-        assert!(
-            retry < unload,
-            "modprobe -r must run inside the retry loop"
-        );
+        assert!(retry < unload, "modprobe -r must run inside the retry loop");
     }
 
     /// The scripts are emitted from format! templates, so a stray brace or
@@ -2110,8 +2150,62 @@ mod tests {
 
         assert!(script.contains("driver did not unload"));
         assert!(script.contains("Diagnostics (please include these in bug reports)"));
-        assert!(script.contains("fuser -v /dev/dri/*"));
         assert!(script.contains("lsmod"));
+        // Deep diagnostics (#75): namespace-proof /proc fd scan (fuser misses
+        // flatpak/containers), plus framebuffer and vtconsole state — the
+        // classic invisible refcount holders on APUs.
+        assert!(script.contains("/proc/[0-9]*/fd/*"));
+        assert!(script.contains("/dev/dri/*|/dev/kfd"));
+        assert!(script.contains("Framebuffers:"));
+        assert!(script.contains("Virtual console binds"));
+    }
+
+    /// Issue #75: /dev/kfd (amdgpu compute node) holders pin the module just
+    /// like /dev/dri holders, but were invisible to the sweep and diagnostics.
+    #[test]
+    fn start_script_sweeps_kfd_holders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let script = generate_start_script(&vm, &amd_gpu_config(None)).unwrap();
+
+        let kfd = script
+            .find("[[ -e /dev/kfd ]] && gpu_nodes+=(/dev/kfd)")
+            .expect("kfd missing from GPU node sweep");
+        let unload = script
+            .find("modprobe -r amdgpu")
+            .expect("driver unload missing");
+        assert!(kfd < unload, "kfd sweep must precede driver unload");
+    }
+
+    /// Issue #75: device unbind (as opposed to module unload) is available as
+    /// a last resort, but ONLY behind an explicit env-var opt-in — on some AMD
+    /// APUs it hard-hangs or powers off the machine (issue #61), so it must
+    /// never run by default. The existing
+    /// `start_script_aborts_instead_of_force_unbinding_gpu` test continues to
+    /// guarantee there is no unconditional unbind.
+    #[test]
+    fn start_script_gates_device_unbind_behind_env_opt_in() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vm = test_vm(tmp.path());
+        let script = generate_start_script(&vm, &amd_gpu_config(None)).unwrap();
+
+        let gate = script
+            .find("\"${VMC_APU_FORCE_UNBIND:-0}\" == \"1\"")
+            .expect("force-unbind env gate missing");
+        let unbind = script
+            .find("> \"/sys/bus/pci/devices/$GPU_ADDR/driver/unbind\"")
+            .expect("gated device unbind missing");
+        assert!(
+            gate < unbind,
+            "device unbind must come after the env-var gate"
+        );
+        // The gated block must warn about the hang/power-off risk before
+        // touching sysfs, and the abort message must advertise the opt-in.
+        let warning = script
+            .find("can hard-hang or power off")
+            .expect("force-unbind warning missing");
+        assert!(warning > gate && warning < unbind);
+        assert!(script.contains("sudo VMC_APU_FORCE_UNBIND=1 $0"));
     }
 
     #[test]
