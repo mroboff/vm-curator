@@ -1,22 +1,27 @@
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 
 use crate::app::App;
-use crate::ui::widgets::{AsciiInfoWidget, VmListWidget};
+use crate::ui::widgets::{AsciiInfoWidget, VmListWidget, NBSP};
 
 /// Render the main menu screen
 pub fn render(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
+    // The help bar wraps onto as many lines as the terminal width demands,
+    // so measure it against this frame's width before laying out the screen.
+    let hints = build_help_hints(app);
+    let help_height = hints_line_count(&hints, area.width.saturating_sub(2)) + 2;
+
     // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Title
-            Constraint::Min(10),   // Main content
-            Constraint::Length(3), // Status/help bar
+            Constraint::Length(3),           // Title
+            Constraint::Min(10),             // Main content
+            Constraint::Length(help_height), // Status/help bar
         ])
         .split(area);
 
@@ -53,7 +58,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     .render(main_chunks[1], frame.buffer_mut());
 
     // Render help bar
-    render_help_bar(app, chunks[2], frame);
+    render_help_bar(hints, chunks[2], frame);
 }
 
 fn render_title(app: &App, area: Rect, frame: &mut Frame) {
@@ -91,28 +96,50 @@ fn render_title(app: &App, area: Rect, frame: &mut Frame) {
     frame.render_widget(title, area);
 }
 
-fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
+/// Height (including top/bottom borders) the help bar will render at for the
+/// given terminal width. Exposed so mouse-click hit testing in `ui::mod` can
+/// locate the VM list area without duplicating the hint/wrap layout.
+pub fn help_bar_height(app: &App, width: u16) -> u16 {
+    hints_line_count(&build_help_hints(app), width.saturating_sub(2)) + 2
+}
+
+/// Word-wrapped line count for a list of hint spans (concatenates their text
+/// and delegates to the shared wrap estimator).
+fn hints_line_count(spans: &[Span], width: u16) -> u16 {
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    crate::ui::widgets::wrapped_line_count(&text, width)
+}
+
+/// Build the help bar's hint spans, or a status/stopping-VM message that
+/// overrides them. Owned (`'static`) so it can be measured for wrapping and
+/// rendered without borrowing from `app` across the layout split.
+fn build_help_hints(app: &App) -> Vec<Span<'static>> {
+    // A non-breaking space joins each [key] to its label so a wrap can only
+    // land in the gap *between* hints, never split a key from its own label
+    // (see ui::widgets::text::NBSP).
     let mut hints = vec![
         Span::styled(" [Enter]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Launch "),
+        Span::raw(format!("{NBSP}Launch ")),
         Span::styled(" [x]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Stop "),
+        Span::raw(format!("{NBSP}Stop ")),
         Span::styled(" [m]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Manage "),
+        Span::raw(format!("{NBSP}Manage ")),
         Span::styled(" [c]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Create "),
+        Span::raw(format!("{NBSP}Create ")),
         Span::styled(" [i]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Import "),
+        Span::raw(format!("{NBSP}Import ")),
         Span::styled(" [s]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Settings "),
+        Span::raw(format!("{NBSP}Settings ")),
         Span::styled(" [n]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Networks "),
+        Span::raw(format!("{NBSP}Networks ")),
+        Span::styled(" [g]", Style::default().fg(Color::Yellow)),
+        Span::raw(format!("{NBSP}Groups ")),
         Span::styled(" [/]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Search "),
+        Span::raw(format!("{NBSP}Search ")),
         Span::styled(" [?]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Help "),
+        Span::raw(format!("{NBSP}Help ")),
         Span::styled(" [q]", Style::default().fg(Color::Yellow)),
-        Span::raw(" Quit "),
+        Span::raw(format!("{NBSP}Quit ")),
     ];
 
     // Show stopping VM status
@@ -146,13 +173,38 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
         hints.push(Span::styled(msg.clone(), Style::default().fg(Color::Green)));
     }
 
+    hints
+}
+
+fn render_help_bar(hints: Vec<Span<'static>>, area: Rect, frame: &mut Frame) {
     let help = Paragraph::new(Line::from(hints))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
+        .wrap(Wrap { trim: true })
         .alignment(Alignment::Center);
 
     frame.render_widget(help, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hints_line_count_concatenates_spans_before_wrapping() {
+        let spans = vec![
+            Span::raw("[Enter] Launch  "),
+            Span::raw("[x] Stop  "),
+            Span::raw("[m] Manage"),
+        ];
+        assert_eq!(hints_line_count(&spans, 200), 1);
+        let narrow = hints_line_count(&spans, 10);
+        assert!(
+            narrow > 1,
+            "expected wrapping at width 10, got {narrow} line(s)"
+        );
+    }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::vm::qemu_config::PortForward;
 use crate::wizard_types::{CreateWizardState, DiskAction};
 
 #[test]
@@ -172,7 +173,12 @@ fn test_build_qemu_command_basic() {
         machine: Some("q35".to_string()),
         vga: "std".to_string(),
         audio: vec![],
-        network_model: "e1000".to_string(),
+        network_adapters: vec![NicConfig {
+            model: "e1000".to_string(),
+            backend: "user".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "ide".to_string(),
         enable_kvm: true,
         uefi: false,
@@ -181,10 +187,6 @@ fn test_build_qemu_command_basic() {
         usb_tablet: true,
         display: "gtk".to_string(),
         gl_acceleration: false,
-        network_backend: "user".to_string(),
-        port_forwards: vec![],
-        bridge_name: None,
-        mac_address: None,
         extra_args: vec![],
         bios_path: None,
     };
@@ -292,6 +294,14 @@ fn test_build_qemu_command_uefi_cdrom_still_prefers_cdrom() {
     assert!(!cmd.contains("-boot strict=on"));
 }
 
+fn nic(model: &str, backend: &str) -> NicConfig {
+    NicConfig {
+        model: model.to_string(),
+        backend: backend.to_string(),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn test_generate_network_args_user_with_portfwd() {
     let forwards = vec![
@@ -306,7 +316,11 @@ fn test_generate_network_args_user_with_portfwd() {
             guest_port: 80,
         },
     ];
-    let args = generate_network_args("e1000", "user", None, &forwards, None);
+    let nic = NicConfig {
+        port_forwards: forwards,
+        ..nic("e1000", "user")
+    };
+    let args = generate_network_args(&[nic]);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("hostfwd=tcp::2222-:22"));
     assert!(args[0].contains("hostfwd=tcp::8080-:80"));
@@ -315,7 +329,7 @@ fn test_generate_network_args_user_with_portfwd() {
 
 #[test]
 fn test_generate_network_args_passt() {
-    let args = generate_network_args("virtio", "passt", None, &[], None);
+    let args = generate_network_args(&[nic("virtio", "passt")]);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("-netdev passt,id=net0"));
     assert!(args[1].contains("virtio-net-pci,netdev=net0"));
@@ -323,20 +337,23 @@ fn test_generate_network_args_passt() {
 
 #[test]
 fn test_generate_network_args_bridge() {
-    let args = generate_network_args("e1000", "bridge", Some("virbr0"), &[], None);
+    let n = NicConfig {
+        bridge_name: Some("virbr0".to_string()),
+        ..nic("e1000", "bridge")
+    };
+    let args = generate_network_args(&[n]);
     assert_eq!(args.len(), 2);
     assert!(args[0].contains("-netdev bridge,id=net0,br=virbr0"));
 }
 
 #[test]
 fn test_generate_network_args_with_mac_bridge() {
-    let args = generate_network_args(
-        "e1000",
-        "bridge",
-        Some("virbr0"),
-        &[],
-        Some("52:54:00:de:ad:be"),
-    );
+    let n = NicConfig {
+        bridge_name: Some("virbr0".to_string()),
+        mac_address: Some("52:54:00:de:ad:be".to_string()),
+        ..nic("e1000", "bridge")
+    };
+    let args = generate_network_args(&[n]);
     assert_eq!(args.len(), 2);
     assert!(
         args[1].contains("mac=52:54:00:de:ad:be"),
@@ -347,21 +364,40 @@ fn test_generate_network_args_with_mac_bridge() {
 
 #[test]
 fn test_generate_network_args_with_mac_user() {
-    let args = generate_network_args("virtio", "user", None, &[], Some("aa:bb:cc:dd:ee:ff"));
+    let n = NicConfig {
+        mac_address: Some("aa:bb:cc:dd:ee:ff".to_string()),
+        ..nic("virtio", "user")
+    };
+    let args = generate_network_args(&[n]);
     assert!(args[1].contains("virtio-net-pci,netdev=net0,mac=aa:bb:cc:dd:ee:ff"));
 }
 
 #[test]
 fn test_generate_network_args_invalid_mac_dropped() {
     // Invalid MAC strings must not be written into the script.
-    let args = generate_network_args("e1000", "user", None, &[], Some("not-a-mac"));
+    let n = NicConfig {
+        mac_address: Some("not-a-mac".to_string()),
+        ..nic("e1000", "user")
+    };
+    let args = generate_network_args(&[n]);
     assert!(!args.iter().any(|a| a.contains("mac=")));
 }
 
 #[test]
 fn test_generate_network_args_none() {
-    let args = generate_network_args("none", "user", None, &[], None);
+    let args = generate_network_args(&[nic("none", "user")]);
     assert!(args.is_empty());
+}
+
+#[test]
+fn test_generate_network_args_multiple_nics() {
+    let args = generate_network_args(&[nic("e1000", "user"), nic("virtio", "bridge")]);
+    // 2 lines per adapter
+    assert_eq!(args.len(), 4);
+    assert!(args[0].contains("id=net0"));
+    assert!(args[1].contains("netdev=net0"));
+    assert!(args[2].contains("id=net1"));
+    assert!(args[3].contains("netdev=net1"));
 }
 
 #[test]
@@ -388,7 +424,12 @@ fn test_build_qemu_command_with_bios() {
         machine: Some("q800".to_string()),
         vga: "none".to_string(),
         audio: vec![],
-        network_model: "none".to_string(),
+        network_adapters: vec![NicConfig {
+            model: "none".to_string(),
+            backend: "user".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "scsi".to_string(),
         enable_kvm: false,
         gl_acceleration: false,
@@ -397,10 +438,6 @@ fn test_build_qemu_command_with_bios() {
         rtc_localtime: false,
         usb_tablet: false,
         display: "gtk".to_string(),
-        network_backend: "user".to_string(),
-        port_forwards: vec![],
-        bridge_name: None,
-        mac_address: None,
         extra_args: vec![],
         bios_path: Some(PathBuf::from("MacROM.bin")),
     };
@@ -761,7 +798,12 @@ fn macos_uefi_config() -> WizardQemuConfig {
         machine: Some("q35".to_string()),
         vga: "none".to_string(),
         audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-        network_model: "vmxnet3".to_string(),
+        network_adapters: vec![NicConfig {
+            model: "vmxnet3".to_string(),
+            backend: "passt".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "ide".to_string(),
         enable_kvm: true,
         gl_acceleration: false,
@@ -770,10 +812,6 @@ fn macos_uefi_config() -> WizardQemuConfig {
         rtc_localtime: false,
         usb_tablet: true,
         display: "spice-app".to_string(),
-        network_backend: "passt".to_string(),
-        port_forwards: vec![],
-        bridge_name: None,
-        mac_address: None,
         extra_args: vec!["-device vmware-svga,vgamem_mb=256".to_string()],
         bios_path: Some(PathBuf::from("OpenCore.qcow2")),
     }
@@ -789,7 +827,12 @@ fn macos_non_uefi_config() -> WizardQemuConfig {
         machine: Some("q35".to_string()),
         vga: "none".to_string(),
         audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-        network_model: "vmxnet3".to_string(),
+        network_adapters: vec![NicConfig {
+            model: "vmxnet3".to_string(),
+            backend: "passt".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "ide".to_string(),
         enable_kvm: true,
         gl_acceleration: false,
@@ -798,10 +841,6 @@ fn macos_non_uefi_config() -> WizardQemuConfig {
         rtc_localtime: false,
         usb_tablet: true,
         display: "spice-app".to_string(),
-        network_backend: "passt".to_string(),
-        port_forwards: vec![],
-        bridge_name: None,
-        mac_address: None,
         extra_args: vec!["-device vmware-svga,vgamem_mb=256".to_string()],
         bios_path: None,
     }
@@ -1049,13 +1088,17 @@ fn test_ppc_macos_no_smc() {
         machine: Some("mac99".to_string()),
         vga: "std".to_string(),
         audio: vec!["screamer".to_string()],
-        network_model: "sungem".to_string(),
+        network_adapters: vec![NicConfig {
+            model: "sungem".to_string(),
+            backend: "user".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "ide".to_string(),
         enable_kvm: false,
         uefi: false,
         usb_tablet: false,
         display: "gtk".to_string(),
-        network_backend: "user".to_string(),
         ..Default::default()
     };
 
@@ -1262,15 +1305,12 @@ fn test_update_network_in_script_inserts_into_all_branches() {
     )
     .unwrap();
 
-    update_network_in_script(
-        vm.path(),
-        "virtio",
-        "bridge",
-        Some("nm-bridge"),
-        &[],
-        Some("52:54:00:12:34:56"),
-    )
-    .unwrap();
+    let n = NicConfig {
+        bridge_name: Some("nm-bridge".to_string()),
+        mac_address: Some("52:54:00:12:34:56".to_string()),
+        ..nic("virtio", "bridge")
+    };
+    update_network_in_script(vm.path(), &[n]).unwrap();
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
 
@@ -1326,7 +1366,7 @@ fn test_update_network_in_script_strips_when_model_none() {
     )
     .unwrap();
 
-    update_network_in_script(vm.path(), "none", "user", None, &[], None).unwrap();
+    update_network_in_script(vm.path(), &[nic("none", "user")]).unwrap();
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
     assert_eq!(
@@ -1368,7 +1408,11 @@ fn test_update_network_in_script_originally_no_network_falls_back() {
         .join("\n");
     std::fs::write(vm.path().join("launch.sh"), stripped).unwrap();
 
-    update_network_in_script(vm.path(), "virtio", "bridge", Some("qemubr0"), &[], None).unwrap();
+    let n = NicConfig {
+        bridge_name: Some("qemubr0".to_string()),
+        ..nic("virtio", "bridge")
+    };
+    update_network_in_script(vm.path(), &[n]).unwrap();
 
     let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
     assert!(
@@ -1379,6 +1423,44 @@ fn test_update_network_in_script_originally_no_network_falls_back() {
         updated.contains("-device virtio-net-pci,netdev=net0"),
         "fallback should still inject -device:\n{updated}"
     );
+}
+
+#[test]
+fn test_update_network_in_script_multiple_nics_then_back_to_one() {
+    let vm = TestVmDir::new("multi-nic");
+    std::fs::write(
+        vm.path().join("launch.sh"),
+        fixture_launch_sh_five_branch_user_net(),
+    )
+    .unwrap();
+
+    // Go from 1 NIC to 2.
+    let second = NicConfig {
+        bridge_name: Some("vmc-lan".to_string()),
+        ..nic("virtio", "bridge")
+    };
+    update_network_in_script(vm.path(), &[nic("e1000", "user"), second]).unwrap();
+
+    let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
+    assert_eq!(updated.matches("-netdev user,id=net0").count(), 5);
+    assert_eq!(
+        updated.matches("-netdev bridge,id=net1,br=vmc-lan").count(),
+        5
+    );
+    assert_eq!(updated.matches("-device e1000,netdev=net0").count(), 5);
+    assert_eq!(
+        updated.matches("virtio-net-pci,netdev=net1").count(),
+        5
+    );
+    // Other args must survive.
+    assert_eq!(updated.matches("-device usb-tablet").count(), 5);
+
+    // Now collapse back to 1 NIC.
+    update_network_in_script(vm.path(), &[nic("e1000", "user")]).unwrap();
+    let updated = std::fs::read_to_string(vm.path().join("launch.sh")).unwrap();
+    assert_eq!(updated.matches("-netdev").count(), 5);
+    assert_eq!(updated.matches("id=net1").count(), 0);
+    assert_eq!(updated.matches("-device usb-tablet").count(), 5);
 }
 
 // ---------------------------------------------------------------------------

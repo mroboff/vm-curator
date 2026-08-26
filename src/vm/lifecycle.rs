@@ -124,28 +124,28 @@ pub struct DiskPassthrough {
 /// Fail fast when the VM uses a bridge network whose bridge does not exist.
 fn check_bridge_exists(vm: &DiscoveredVm) -> Result<(), String> {
     use crate::vm::qemu_config::NetworkBackend;
-    let Some(network) = &vm.config.network else {
-        return Ok(());
-    };
-    let NetworkBackend::Bridge(bridge) = &network.backend else {
-        return Ok(());
-    };
-    if std::path::Path::new("/sys/class/net").join(bridge).exists() {
-        return Ok(());
+    for network in &vm.config.networks {
+        let NetworkBackend::Bridge(bridge) = &network.backend else {
+            continue;
+        };
+        if std::path::Path::new("/sys/class/net").join(bridge).exists() {
+            continue;
+        }
+        if bridge.starts_with(crate::vnet::BRIDGE_PREFIX) {
+            return Err(format!(
+                "Managed network bridge '{}' is not running.\n\
+                 Start it from the Networks screen ([n] on the main menu) and try again.",
+                bridge
+            ));
+        } else {
+            return Err(format!(
+                "Bridge '{}' does not exist on the host. Create it (or pick another \
+                 network backend in Network Settings) and try again.",
+                bridge
+            ));
+        }
     }
-    if bridge.starts_with(crate::vnet::BRIDGE_PREFIX) {
-        Err(format!(
-            "Managed network bridge '{}' is not running.\n\
-             Start it from the Networks screen ([n] on the main menu) and try again.",
-            bridge
-        ))
-    } else {
-        Err(format!(
-            "Bridge '{}' does not exist on the host. Create it (or pick another \
-             network backend in Network Settings) and try again.",
-            bridge
-        ))
-    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -336,6 +336,25 @@ ip link set "$BRIDGE" up
 mkdir -p /etc/qemu
 touch /etc/qemu/bridge.conf
 grep -qxF "allow $BRIDGE" /etc/qemu/bridge.conf || echo "allow $BRIDGE" >> /etc/qemu/bridge.conf
+
+# NetworkManager doesn't know this bridge or the per-VM taps QEMU attaches
+# to it later, and can "helpfully" deactivate one — silently detaching it
+# from the bridge with no error anywhere, breaking VM-to-VM connectivity.
+# Tell it to leave vm-curator's bridges and taps alone, system-wide.
+if command -v nmcli >/dev/null 2>&1; then
+    mkdir -p /etc/NetworkManager/conf.d
+    NM_CONF=/etc/NetworkManager/conf.d/vm-curator-unmanaged.conf
+    if [[ ! -f "$NM_CONF" ]]; then
+        cat > "$NM_CONF" <<'NMEOF'
+# Written by vm-curator: never manage its virtual-network bridges or the
+# per-VM tap devices QEMU attaches to them.
+[keyfile]
+unmanaged-devices=interface-name:vmc-*;interface-name:tap*
+NMEOF
+        nmcli general reload conf 2>/dev/null || systemctl reload NetworkManager 2>/dev/null || true
+    fi
+    nmcli device set "$BRIDGE" managed no 2>/dev/null || true
+fi
 "#,
         name = net.name,
         kind = net.kind.label(),

@@ -9,6 +9,7 @@ mod app;
 mod commands;
 mod config;
 mod fs;
+mod groups;
 mod hardware;
 mod metadata;
 mod ui;

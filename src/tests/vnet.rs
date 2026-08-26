@@ -161,6 +161,18 @@ fn down_script_reverses_everything() {
     assert!(script.contains(rule), "down script missing: {rule}");
 }
 
+#[test]
+fn up_script_marks_bridge_and_taps_unmanaged_by_networkmanager() {
+    // NetworkManager can silently deactivate a tap it doesn't know is
+    // supposed to stay bridged, detaching it from the bridge with no error
+    // anywhere. The bridge and any tap* device must be excluded up front.
+    let script = generate_up_script(&lab_nat());
+    assert!(script.contains("unmanaged-devices=interface-name:vmc-*;interface-name:tap*"));
+    assert!(script.contains("nmcli device set \"$BRIDGE\" managed no"));
+    // Idempotent: don't clobber the shared conf file on every network's up
+    assert!(script.contains("if [[ ! -f \"$NM_CONF\" ]]"));
+}
+
 /// Scripts come out of format! templates; have bash verify the syntax.
 #[test]
 fn generated_scripts_are_valid_bash() {

@@ -24,9 +24,9 @@ fn shell_escape(s: &str) -> String {
 }
 
 use crate::commands::qemu_img;
-use crate::vm::qemu_config::{PortForward, PortProtocol};
+use crate::vm::qemu_config::PortProtocol;
 use crate::wizard_types::{
-    CreateWizardState, DiskAction, DiskImageFormat, WizardDiskSource, WizardQemuConfig,
+    CreateWizardState, DiskAction, DiskImageFormat, NicConfig, WizardDiskSource, WizardQemuConfig,
 };
 
 /// Install media type for QEMU command generation
@@ -293,8 +293,7 @@ fn find_ovmf_firmware(secboot: bool) -> Option<OvmfFirmware> {
 /// Result of creating a new VM
 #[derive(Debug)]
 pub struct CreatedVm {
-    /// Path to the VM directory - reserved for future use
-    #[allow(dead_code)]
+    /// Path to the VM directory
     pub path: PathBuf,
     /// Path to the launch script
     pub launch_script: PathBuf,
@@ -1471,38 +1470,53 @@ fn build_qemu_command_with_os_impl<'a>(
         }
     }
 
-    // Network (escaped to prevent injection)
-    if config.network_model != "none" {
+    // Network (escaped to prevent injection). One -netdev/-device pair per
+    // adapter, indexed by position (net0, net1, ...).
+    for (idx, nic) in config.network_adapters.iter().enumerate() {
+        if nic.model == "none" {
+            continue;
+        }
+
         // Map short network model names to QEMU device names
-        let net_device = match config.network_model.as_str() {
+        let net_device = match nic.model.as_str() {
             "virtio" => "virtio-net-pci".to_string(),
             other => shell_escape(other),
         };
 
-        let mac_suffix = config
+        let mac_suffix = nic
             .mac_address
             .as_deref()
             .filter(|m| crate::vm::mac::is_valid_mac(m))
             .map(|m| format!(",mac={}", m))
             .unwrap_or_default();
 
-        match config.network_backend.as_str() {
+        match nic.backend.as_str() {
             "none" => {
-                // No networking backend (different from network_model "none")
+                // No networking backend (different from adapter model "none")
             }
             "passt" => {
-                args.push("-netdev passt,id=net0".to_string());
-                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
+                args.push(format!("-netdev passt,id=net{}", idx));
+                args.push(format!(
+                    "-device {},netdev=net{}{}",
+                    net_device, idx, mac_suffix
+                ));
             }
             "bridge" => {
-                let br = config.bridge_name.as_deref().unwrap_or("qemubr0");
-                args.push(format!("-netdev bridge,id=net0,br={}", shell_escape(br)));
-                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
+                let br = nic.bridge_name.as_deref().unwrap_or("qemubr0");
+                args.push(format!(
+                    "-netdev bridge,id=net{},br={}",
+                    idx,
+                    shell_escape(br)
+                ));
+                args.push(format!(
+                    "-device {},netdev=net{}{}",
+                    net_device, idx, mac_suffix
+                ));
             }
             _ => {
                 // User/SLIRP (default)
-                let mut netdev = "-netdev user,id=net0".to_string();
-                for pf in &config.port_forwards {
+                let mut netdev = format!("-netdev user,id=net{}", idx);
+                for pf in &nic.port_forwards {
                     let proto = match pf.protocol {
                         PortProtocol::Tcp => "tcp",
                         PortProtocol::Udp => "udp",
@@ -1513,7 +1527,10 @@ fn build_qemu_command_with_os_impl<'a>(
                     ));
                 }
                 args.push(netdev);
-                args.push(format!("-device {},netdev=net0{}", net_device, mac_suffix));
+                args.push(format!(
+                    "-device {},netdev=net{}{}",
+                    net_device, idx, mac_suffix
+                ));
             }
         }
     }
@@ -1572,21 +1589,13 @@ pub fn write_launch_script(vm_dir: &Path, content: &str) -> Result<PathBuf> {
 }
 
 /// Update network arguments in an existing launch.sh script
-pub fn update_network_in_script(
-    vm_path: &Path,
-    model: &str,
-    backend: &str,
-    bridge_name: Option<&str>,
-    port_forwards: &[PortForward],
-    mac_address: Option<&str>,
-) -> Result<()> {
+pub fn update_network_in_script(vm_path: &Path, nics: &[NicConfig]) -> Result<()> {
     let script_path = vm_path.join("launch.sh");
     let content = std::fs::read_to_string(&script_path)
         .with_context(|| format!("Failed to read launch script: {}", script_path.display()))?;
 
     // Build new network arguments
-    let new_net_args =
-        generate_network_args(model, backend, bridge_name, port_forwards, mac_address);
+    let new_net_args = generate_network_args(nics);
 
     // Remove existing network lines and replace
     let mut new_lines = Vec::new();
@@ -1601,7 +1610,7 @@ pub fn update_network_in_script(
         let is_netdev = trimmed.contains("-netdev ")
             || trimmed.contains("-net user")
             || trimmed.contains("-net bridge");
-        let is_net_device = (trimmed.contains("-device ") && trimmed.contains("netdev=net0"))
+        let is_net_device = (trimmed.contains("-device ") && trimmed.contains("netdev=net"))
             || (trimmed.contains("-device ")
                 && (trimmed.contains("e1000")
                     || trimmed.contains("virtio-net")
@@ -1737,71 +1746,71 @@ pub fn set_spice_agent_args(content: &str, enable: bool) -> String {
     s
 }
 
-/// Generate network argument lines for a launch script
-fn generate_network_args(
-    model: &str,
-    backend: &str,
-    bridge_name: Option<&str>,
-    port_forwards: &[PortForward],
-    mac_address: Option<&str>,
-) -> Vec<String> {
-    if model == "none" {
-        return Vec::new();
-    }
-
-    let net_device = match model {
-        "virtio" => "virtio-net-pci".to_string(),
-        other => shell_escape(other),
-    };
-
-    let mac_suffix = mac_address
-        .filter(|m| crate::vm::mac::is_valid_mac(m))
-        .map(|m| format!(",mac={}", m))
-        .unwrap_or_default();
-
+/// Generate network argument lines for a launch script: one -netdev/-device
+/// pair per adapter, indexed by position (net0, net1, ...).
+fn generate_network_args(nics: &[NicConfig]) -> Vec<String> {
     let mut args = Vec::new();
 
-    match backend {
-        "none" => {
-            // No networking backend
+    for (idx, nic) in nics.iter().enumerate() {
+        if nic.model == "none" {
+            continue;
         }
-        "passt" => {
-            args.push("        -netdev passt,id=net0 \\".to_string());
-            args.push(format!(
-                "        -device {},netdev=net0{} \\",
-                net_device, mac_suffix
-            ));
-        }
-        "bridge" => {
-            let br = bridge_name.unwrap_or("qemubr0");
-            args.push(format!(
-                "        -netdev bridge,id=net0,br={} \\",
-                shell_escape(br)
-            ));
-            args.push(format!(
-                "        -device {},netdev=net0{} \\",
-                net_device, mac_suffix
-            ));
-        }
-        _ => {
-            // User/SLIRP
-            let mut netdev = "        -netdev user,id=net0".to_string();
-            for pf in port_forwards {
-                let proto = match pf.protocol {
-                    PortProtocol::Tcp => "tcp",
-                    PortProtocol::Udp => "udp",
-                };
-                netdev.push_str(&format!(
-                    ",hostfwd={}::{}-:{}",
-                    proto, pf.host_port, pf.guest_port
+
+        let net_device = match nic.model.as_str() {
+            "virtio" => "virtio-net-pci".to_string(),
+            other => shell_escape(other),
+        };
+
+        let mac_suffix = nic
+            .mac_address
+            .as_deref()
+            .filter(|m| crate::vm::mac::is_valid_mac(m))
+            .map(|m| format!(",mac={}", m))
+            .unwrap_or_default();
+
+        match nic.backend.as_str() {
+            "none" => {
+                // No networking backend
+            }
+            "passt" => {
+                args.push(format!("        -netdev passt,id=net{} \\", idx));
+                args.push(format!(
+                    "        -device {},netdev=net{}{} \\",
+                    net_device, idx, mac_suffix
                 ));
             }
-            netdev.push_str(" \\");
-            args.push(netdev);
-            args.push(format!(
-                "        -device {},netdev=net0{} \\",
-                net_device, mac_suffix
-            ));
+            "bridge" => {
+                let br = nic.bridge_name.as_deref().unwrap_or("qemubr0");
+                args.push(format!(
+                    "        -netdev bridge,id=net{},br={} \\",
+                    idx,
+                    shell_escape(br)
+                ));
+                args.push(format!(
+                    "        -device {},netdev=net{}{} \\",
+                    net_device, idx, mac_suffix
+                ));
+            }
+            _ => {
+                // User/SLIRP
+                let mut netdev = format!("        -netdev user,id=net{}", idx);
+                for pf in &nic.port_forwards {
+                    let proto = match pf.protocol {
+                        PortProtocol::Tcp => "tcp",
+                        PortProtocol::Udp => "udp",
+                    };
+                    netdev.push_str(&format!(
+                        ",hostfwd={}::{}-:{}",
+                        proto, pf.host_port, pf.guest_port
+                    ));
+                }
+                netdev.push_str(" \\");
+                args.push(netdev);
+                args.push(format!(
+                    "        -device {},netdev=net{}{} \\",
+                    net_device, idx, mac_suffix
+                ));
+            }
         }
     }
 

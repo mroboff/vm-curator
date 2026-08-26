@@ -1,6 +1,8 @@
 pub mod configuration;
 pub mod create_wizard;
 pub mod disk_passthrough;
+pub mod group_members;
+pub mod groups;
 pub mod help;
 pub mod import_wizard;
 pub mod main_menu;

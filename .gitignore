@@ -29,3 +29,6 @@ scripts/
 result
 result-*
 *.nix-tmp
+
+# AI stuff
+.claude/worktrees

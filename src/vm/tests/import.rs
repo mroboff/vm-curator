@@ -42,9 +42,12 @@ fn test_parse_libvirt_xml_kvm_domain() {
     assert!(vm.qemu_config.enable_kvm);
     assert_eq!(vm.qemu_config.vga, "qxl");
     assert_eq!(vm.qemu_config.display, "spice-app");
-    assert_eq!(vm.qemu_config.network_backend, "bridge");
-    assert_eq!(vm.qemu_config.bridge_name, Some("br0".to_string()));
-    assert_eq!(vm.qemu_config.network_model, "virtio-net-pci");
+    assert_eq!(vm.qemu_config.network_adapters[0].backend, "bridge");
+    assert_eq!(
+        vm.qemu_config.network_adapters[0].bridge_name,
+        Some("br0".to_string())
+    );
+    assert_eq!(vm.qemu_config.network_adapters[0].model, "virtio-net-pci");
     assert_eq!(vm.qemu_config.disk_interface, "virtio");
     assert_eq!(
         vm.disk_paths,
@@ -88,7 +91,7 @@ fn test_parse_libvirt_xml_network_downgrade() {
 "#;
 
     let vm = parse_libvirt_xml_str(xml, Path::new("/test.xml")).unwrap();
-    assert_eq!(vm.qemu_config.network_backend, "user");
+    assert_eq!(vm.qemu_config.network_adapters[0].backend, "user");
     assert!(vm
         .import_notes
         .iter()
@@ -116,7 +119,7 @@ fn test_parse_libvirt_xml_macvtap_downgrade() {
 "#;
 
     let vm = parse_libvirt_xml_str(xml, Path::new("/test.xml")).unwrap();
-    assert_eq!(vm.qemu_config.network_backend, "user");
+    assert_eq!(vm.qemu_config.network_adapters[0].backend, "user");
     assert!(vm.import_notes.iter().any(|n| n.contains("macvtap")));
 }
 

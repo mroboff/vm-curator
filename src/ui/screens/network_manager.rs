@@ -11,10 +11,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     prelude::*,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::{App, ConfirmAction, Screen, VNetEditorState};
+use crate::app::{App, ConfirmAction, Screen, UnsavedKind, VNetEditorState};
 use crate::vnet::{self, VirtualNetwork};
 
 pub fn render(app: &App, frame: &mut Frame) {
@@ -230,7 +230,8 @@ fn render_editor(editor: &VNetEditorState, frame: &mut Frame) {
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
     frame.render_widget(help, chunks[6]);
 }
 
@@ -325,7 +326,16 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) -> Result<()> {
     // App-level actions first (they need `app` unborrowed)
     match key.code {
         KeyCode::Esc => {
-            app.vnet_editor = None;
+            // Prompt before discarding if this session actually changed
+            // anything; otherwise there's nothing to lose, so just leave.
+            let dirty = app.vnet_editor.as_ref().map(|e| e.dirty()).unwrap_or(false);
+            if dirty {
+                app.push_screen(Screen::Confirm(ConfirmAction::UnsavedChanges(
+                    UnsavedKind::NetworkEdit,
+                )));
+            } else {
+                discard_editor(app);
+            }
             return Ok(());
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
@@ -372,8 +382,17 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-/// Build the network from the form, save it, and close the editor.
-fn save_editor(app: &mut App) {
+/// Discard the create/edit form's in-progress edits and close it without
+/// saving. Used by a no-op Esc (nothing changed) and by the "Discard"
+/// choice on the confirmation prompt (`ConfirmAction::UnsavedChanges(NetworkEdit)`).
+pub(crate) fn discard_editor(app: &mut App) {
+    app.vnet_editor = None;
+}
+
+/// Build the network from the form, save it, and close the editor. Used by
+/// the editor's `[s] Save` key and by the "Save" choice on the same
+/// confirmation prompt.
+pub(crate) fn save_editor(app: &mut App) {
     let Some(editor) = app.vnet_editor.as_mut() else {
         return;
     };

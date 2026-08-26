@@ -45,6 +45,7 @@ pub fn render(frame: &mut Frame) {
         key_line("x", "Stop selected VM (graceful shutdown)"),
         key_line("c", "Create new VM"),
         key_line("n", "Virtual Network Manager"),
+        key_line("g", "Manage VM groups (drives the main list order)"),
         key_line("/", "Search/filter VMs"),
         Line::from(""),
         Line::from(Span::styled(

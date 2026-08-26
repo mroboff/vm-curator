@@ -335,7 +335,13 @@ impl LibvirtParse {
             },
             vga,
             audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-            network_model,
+            network_adapters: vec![crate::wizard_types::NicConfig {
+                model: network_model,
+                backend: network_backend,
+                bridge_name,
+                ..Default::default()
+            }],
+            active_nic: 0,
             disk_interface,
             enable_kvm,
             gl_acceleration: false,
@@ -344,10 +350,6 @@ impl LibvirtParse {
             rtc_localtime: false,
             usb_tablet: true,
             display,
-            network_backend,
-            port_forwards: Vec::new(),
-            bridge_name,
-            mac_address: None,
             extra_args: Vec::new(),
             bios_path: None,
         };
@@ -541,7 +543,12 @@ fn parse_quickemu_conf_str(content: &str, config_path: &Path) -> Result<Importab
         machine: Some("q35".to_string()),
         vga: "virtio".to_string(),
         audio: vec!["intel-hda".to_string(), "hda-duplex".to_string()],
-        network_model: "virtio-net-pci".to_string(),
+        network_adapters: vec![crate::wizard_types::NicConfig {
+            model: "virtio-net-pci".to_string(),
+            backend: "user".to_string(),
+            ..Default::default()
+        }],
+        active_nic: 0,
         disk_interface: "virtio".to_string(),
         enable_kvm: true,
         gl_acceleration: false,
@@ -550,10 +557,6 @@ fn parse_quickemu_conf_str(content: &str, config_path: &Path) -> Result<Importab
         rtc_localtime: guest_os == "windows",
         usb_tablet: true,
         display,
-        network_backend: "user".to_string(),
-        port_forwards: Vec::new(),
-        bridge_name: None,
-        mac_address: None,
         extra_args: Vec::new(),
         bios_path: None,
     };

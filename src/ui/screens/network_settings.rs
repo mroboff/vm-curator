@@ -9,11 +9,15 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::app::{AddPfStep, AddingPortForward, App, NetworkSettingsState};
+use crate::app::{
+    AddPfStep, AddingPortForward, App, ConfirmAction, NetworkSettingsState, NicConfig, Screen,
+    UnsavedKind,
+};
 use crate::vm::qemu_config::{PortForward, PortProtocol};
 
 /// Network adapter model options (same as create wizard)
 const NETWORK_OPTIONS: &[&str] = &["virtio", "e1000", "rtl8139", "ne2k_pci", "pcnet", "none"];
+
 
 /// Render the network settings screen
 pub fn render(app: &App, frame: &mut Frame) {
@@ -37,14 +41,69 @@ pub fn render(app: &App, frame: &mut Frame) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    // Check if we're in port forward editing mode
     if ns.editing_port_forwards {
         render_port_forward_editor(app, ns, frame, inner);
         return;
     }
 
-    let is_bridge = ns.backend == "bridge";
-    let show_mac = ns.backend != "none";
+    if !ns.editing_nic {
+        render_nic_list(ns, frame, inner);
+        return;
+    }
+
+    render_nic_editor(app, ns, frame, inner);
+}
+
+/// Render the list of NICs.
+fn render_nic_list(ns: &NetworkSettingsState, frame: &mut Frame, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(1), // Header
+            Constraint::Length(1), // Spacer
+            Constraint::Min(6),    // NIC list
+            Constraint::Length(2), // Help
+        ])
+        .split(area);
+
+    let header = Paragraph::new("Network Adapters").style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let mut lines = Vec::new();
+    for (i, nic) in ns.nics.iter().enumerate() {
+        let selected = i == ns.list_cursor;
+        let prefix = if selected { "> " } else { "  " };
+        let style = if selected {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::styled(
+            format!("{}NIC {}: {}", prefix, i + 1, nic.describe()),
+            style,
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines), chunks[2]);
+
+    let help = Paragraph::new("[Enter] Edit  [a] Add  [d] Delete  [s] Save  [j/k] Navigate  [Esc] Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[3]);
+}
+
+/// Render the field editor for the NIC at `ns.active_nic`.
+fn render_nic_editor(app: &App, ns: &NetworkSettingsState, frame: &mut Frame, area: Rect) {
+    let nic = &ns.nics[ns.active_nic];
+    let is_bridge = nic.is_bridge();
+    let show_mac = nic.show_mac();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -60,10 +119,15 @@ pub fn render(app: &App, frame: &mut Frame) {
             Constraint::Min(6),    // Info area
             Constraint::Length(2), // Help
         ])
-        .split(inner);
+        .split(area);
 
     // Header
-    let header = Paragraph::new("Configure VM Networking").style(
+    let header = Paragraph::new(format!(
+        "Configure NIC {} of {}",
+        ns.active_nic + 1,
+        ns.nics.len()
+    ))
+    .style(
         Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -74,29 +138,20 @@ pub fn render(app: &App, frame: &mut Frame) {
     let adapter_selected = ns.selected_field == 0;
     let adapter_line = render_field_line(
         "Adapter:",
-        &ns.model,
+        &nic.model,
         adapter_selected,
-        "[Left/Right] cycle",
+        "[←/→/Tab] cycle",
     );
     frame.render_widget(Paragraph::new(adapter_line), chunks[2]);
 
     // Backend
     let backend_selected = ns.selected_field == 1;
-    let backend_display = match ns.backend.as_str() {
-        "user" => "user/SLIRP (NAT)".to_string(),
-        "passt" => "passt".to_string(),
-        "bridge" => format!(
-            "bridge ({})",
-            ns.bridge_name.as_deref().unwrap_or("qemubr0")
-        ),
-        "none" => "none".to_string(),
-        other => other.to_string(),
-    };
+    let backend_display = nic.backend_display();
     let backend_line = render_field_line(
         "Backend:",
         &backend_display,
         backend_selected,
-        "[Left/Right] cycle",
+        "[←/→/Tab] cycle",
     );
     frame.render_widget(Paragraph::new(backend_line), chunks[3]);
 
@@ -105,7 +160,7 @@ pub fn render(app: &App, frame: &mut Frame) {
         let mac_selected = ns.selected_field == 2;
         let mac_display = if ns.editing_mac {
             format!("{}_", ns.mac_edit_buffer)
-        } else if let Some(mac) = ns.mac_address.as_deref() {
+        } else if let Some(mac) = nic.mac_address.as_deref() {
             mac.to_string()
         } else {
             "(auto)".to_string()
@@ -122,19 +177,19 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
 
     // Bridge name (when bridge backend) or Port forwards (when user/passt)
-    let show_pf = ns.backend == "user" || ns.backend == "passt";
+    let show_pf = nic.show_port_forwards();
     let bridge_pf_selected = ns.selected_field == 3;
     if is_bridge {
-        let bridge_display = ns.bridge_name.as_deref().unwrap_or("qemubr0");
+        let bridge_display = nic.bridge_name.as_deref().unwrap_or("qemubr0");
         let bridge_line = render_field_line(
             "Bridge:",
             bridge_display,
             bridge_pf_selected,
-            "[Left/Right] cycle",
+            "[←/→/Tab] cycle",
         );
         frame.render_widget(Paragraph::new(bridge_line), chunks[5]);
     } else if show_pf {
-        let pf_count = ns.port_forwards.len();
+        let pf_count = nic.port_forwards.len();
         let pf_display = if pf_count == 0 {
             "none".to_string()
         } else {
@@ -251,13 +306,13 @@ pub fn render(app: &App, frame: &mut Frame) {
 
         let info = Paragraph::new(lines);
         frame.render_widget(info, chunks[7]);
-    } else if show_pf && !ns.port_forwards.is_empty() {
+    } else if show_pf && !nic.port_forwards.is_empty() {
         let mut lines = Vec::new();
         lines.push(Line::styled(
             "  Current port forwarding rules:",
             Style::default().fg(Color::DarkGray),
         ));
-        for pf in &ns.port_forwards {
+        for pf in &nic.port_forwards {
             lines.push(Line::from(format!(
                 "    {} {} -> {}",
                 pf.protocol, pf.host_port, pf.guest_port
@@ -268,7 +323,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     }
 
     // Help
-    let help = Paragraph::new("[Enter] Apply  [Esc] Cancel  [j/k] Navigate  [Left/Right] Change")
+    let help = Paragraph::new("[s] Save  [Esc] Back  [j/k] Navigate  [←/→] Change")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
     frame.render_widget(help, chunks[8]);
@@ -307,14 +362,16 @@ fn render_port_forward_editor(
     );
     frame.render_widget(header, chunks[0]);
 
+    let port_forwards = &ns.nics[ns.active_nic].port_forwards;
+
     // Rules list
-    if ns.port_forwards.is_empty() {
+    if port_forwards.is_empty() {
         let msg = Paragraph::new("  No port forwarding rules configured.")
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(msg, chunks[2]);
     } else {
         let mut lines = Vec::new();
-        for (i, pf) in ns.port_forwards.iter().enumerate() {
+        for (i, pf) in port_forwards.iter().enumerate() {
             let is_selected = i == ns.pf_selected;
             let prefix = if is_selected { "> " } else { "  " };
             let style = if is_selected {
@@ -381,7 +438,7 @@ fn render_adding_pf(adding: &AddingPortForward, frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::White)
     };
     let proto_hint = if proto_active {
-        " [Left/Right] toggle"
+        " [←/→] toggle"
     } else {
         ""
     };
@@ -482,6 +539,10 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         return Ok(());
     };
 
+    if !ns.editing_nic {
+        return handle_nic_list_key(app, key);
+    }
+
     // Port forward editor mode
     if ns.editing_port_forwards {
         // Adding a port forward
@@ -498,7 +559,8 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if let Some(ref mut ns) = app.network_settings_state {
-                    if ns.pf_selected < ns.port_forwards.len().saturating_sub(1) {
+                    let count = ns.nics[ns.active_nic].port_forwards.len();
+                    if ns.pf_selected < count.saturating_sub(1) {
                         ns.pf_selected += 1;
                     }
                 }
@@ -522,9 +584,11 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
             }
             KeyCode::Char('d') | KeyCode::Delete => {
                 if let Some(ref mut ns) = app.network_settings_state {
-                    if !ns.port_forwards.is_empty() && ns.pf_selected < ns.port_forwards.len() {
-                        ns.port_forwards.remove(ns.pf_selected);
-                        if ns.pf_selected >= ns.port_forwards.len() && ns.pf_selected > 0 {
+                    let active_nic = ns.active_nic;
+                    let port_forwards = &mut ns.nics[active_nic].port_forwards;
+                    if !port_forwards.is_empty() && ns.pf_selected < port_forwards.len() {
+                        port_forwards.remove(ns.pf_selected);
+                        if ns.pf_selected >= port_forwards.len() && ns.pf_selected > 0 {
                             ns.pf_selected -= 1;
                         }
                     }
@@ -550,20 +614,22 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
     if editing_mac {
         let mut bad_mac: Option<String> = None;
         if let Some(ref mut ns) = app.network_settings_state {
+            let active_nic = ns.active_nic;
             match key.code {
                 KeyCode::Esc => {
-                    ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                    ns.mac_edit_buffer = ns.nics[active_nic].mac_address.clone().unwrap_or_default();
                     ns.editing_mac = false;
                 }
                 KeyCode::Enter => {
                     let trimmed = ns.mac_edit_buffer.trim().to_string();
                     if trimmed.is_empty() {
-                        ns.mac_address = None;
+                        ns.nics[active_nic].mac_address = None;
                         ns.mac_edit_buffer.clear();
                         ns.editing_mac = false;
                     } else if crate::vm::mac::is_valid_mac(&trimmed) {
-                        ns.mac_address = Some(trimmed.to_lowercase());
-                        ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                        ns.nics[active_nic].mac_address = Some(trimmed.to_lowercase());
+                        ns.mac_edit_buffer =
+                            ns.nics[active_nic].mac_address.clone().unwrap_or_default();
                         ns.editing_mac = false;
                     } else {
                         bad_mac = Some(trimmed);
@@ -587,45 +653,34 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
     }
 
     // Normal settings mode
-    let backend_options: Vec<String> = app
-        .get_network_backend_options()
-        .iter()
-        .map(|(id, _)| id.to_string())
-        .collect();
-    let mut system_bridges = app.network_caps.system_bridges.clone();
-    // Managed networks (issue #53) are valid attach targets even while down —
-    // their bridges appear once started from the Networks screen.
-    for net in &app.vnet_networks {
-        let bridge = net.bridge_name();
-        if !system_bridges.contains(&bridge) {
-            system_bridges.push(bridge);
-        }
-    }
-    let show_pf = {
+    let backend_stops = app.get_network_backend_stops();
+    let system_bridges = app.bridge_picker_list();
+    let (show_pf, max_field) = {
         let ns = app.network_settings_state.as_ref().unwrap();
-        ns.backend == "user" || ns.backend == "passt"
-    };
-    let is_bridge = {
-        let ns = app.network_settings_state.as_ref().unwrap();
-        ns.backend == "bridge"
-    };
-    let show_mac = {
-        let ns = app.network_settings_state.as_ref().unwrap();
-        ns.backend != "none"
-    };
-    // Field indices: 0=adapter, 1=backend, 2=mac (when show_mac), 3=bridge/forwards
-    let max_field = if !show_mac {
-        1
-    } else if show_pf || is_bridge {
-        3
-    } else {
-        2
+        let nic = &ns.nics[ns.active_nic];
+        (nic.show_port_forwards(), nic.max_editor_field())
     };
 
     match key.code {
         KeyCode::Esc => {
-            app.network_settings_state = None;
-            app.pop_screen();
+            // Prompt before discarding if this session actually changed
+            // anything; otherwise there's nothing to lose, so just leave.
+            let dirty = app
+                .network_settings_state
+                .as_ref()
+                .map(|ns| ns.nic_snapshot.as_ref() != Some(&ns.nics[ns.active_nic]))
+                .unwrap_or(false);
+            if dirty {
+                app.push_screen(Screen::Confirm(ConfirmAction::UnsavedChanges(
+                    UnsavedKind::NicEdit,
+                )));
+            } else {
+                discard_nic_edit(app);
+            }
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            // Save, then return to the NIC list (not close the screen).
+            save_nic_edit(app)?;
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(ref mut ns) = app.network_settings_state {
@@ -643,56 +698,51 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         }
         KeyCode::Char('r') => {
             if let Some(ref mut ns) = app.network_settings_state {
-                if ns.selected_field == 2 && ns.backend != "none" {
+                let active_nic = ns.active_nic;
+                if ns.selected_field == 2 && ns.nics[active_nic].backend != "none" {
                     let mac = crate::vm::mac::generate_random_mac();
-                    ns.mac_address = Some(mac.clone());
+                    ns.nics[active_nic].mac_address = Some(mac.clone());
                     ns.mac_edit_buffer = mac;
                 }
             }
         }
         KeyCode::Char('c') => {
             if let Some(ref mut ns) = app.network_settings_state {
-                if ns.selected_field == 2 && ns.backend != "none" {
-                    ns.mac_address = None;
+                let active_nic = ns.active_nic;
+                if ns.selected_field == 2 && ns.nics[active_nic].backend != "none" {
+                    ns.nics[active_nic].mac_address = None;
                     ns.mac_edit_buffer.clear();
                 }
             }
         }
-        KeyCode::Left | KeyCode::Right => {
-            let delta = if key.code == KeyCode::Right {
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+            // Cycle the focused field (Right/Tab forward, Left/Shift+Tab back).
+            let delta = if matches!(key.code, KeyCode::Right | KeyCode::Tab) {
                 1i32
             } else {
                 -1i32
             };
             if let Some(ref mut ns) = app.network_settings_state {
+                let active_nic = ns.active_nic;
                 match ns.selected_field {
                     0 => {
                         // Cycle adapter model
-                        cycle_option(&mut ns.model, NETWORK_OPTIONS, delta);
+                        cycle_option(&mut ns.nics[active_nic].model, NETWORK_OPTIONS, delta);
                     }
                     1 => {
-                        // Cycle backend
-                        let current_idx = backend_options
-                            .iter()
-                            .position(|b| b == &ns.backend)
-                            .unwrap_or(0);
-                        let new_idx = (current_idx as i32 + delta)
-                            .rem_euclid(backend_options.len() as i32)
-                            as usize;
-                        ns.backend = backend_options[new_idx].clone();
-
-                        // Set default bridge name
-                        if ns.backend == "bridge" && ns.bridge_name.is_none() {
-                            ns.bridge_name = system_bridges
-                                .first()
-                                .cloned()
-                                .or_else(|| Some("qemubr0".to_string()));
-                        }
+                        // Cycle backend (expands "bridge" into one stop per
+                        // managed vmc-* network, auto-syncing bridge_name)
+                        let default_bridge = system_bridges
+                            .first()
+                            .cloned()
+                            .or_else(|| Some("qemubr0".to_string()));
+                        ns.nics[active_nic].cycle_backend(&backend_stops, &default_bridge, delta);
                     }
-                    3 if ns.backend == "bridge" => {
+                    3 if ns.nics[active_nic].backend == "bridge" => {
                         // Cycle bridge name
                         if !system_bridges.is_empty() {
-                            let current_bridge = ns.bridge_name.as_deref().unwrap_or("");
+                            let current_bridge =
+                                ns.nics[active_nic].bridge_name.as_deref().unwrap_or("");
                             let current_idx = system_bridges
                                 .iter()
                                 .position(|b| b == current_bridge)
@@ -700,7 +750,7 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                             let new_idx = (current_idx as i32 + delta)
                                 .rem_euclid(system_bridges.len() as i32)
                                 as usize;
-                            ns.bridge_name = Some(system_bridges[new_idx].clone());
+                            ns.nics[active_nic].bridge_name = Some(system_bridges[new_idx].clone());
                         }
                     }
                     _ => {}
@@ -710,12 +760,13 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
         KeyCode::Enter => {
             let (sel, backend) = {
                 let ns = app.network_settings_state.as_ref().unwrap();
-                (ns.selected_field, ns.backend.clone())
+                (ns.selected_field, ns.nics[ns.active_nic].backend.clone())
             };
             if sel == 2 && backend != "none" {
                 // Enter MAC edit mode
                 if let Some(ref mut ns) = app.network_settings_state {
-                    ns.mac_edit_buffer = ns.mac_address.clone().unwrap_or_default();
+                    let active_nic = ns.active_nic;
+                    ns.mac_edit_buffer = ns.nics[active_nic].mac_address.clone().unwrap_or_default();
                     ns.editing_mac = true;
                 }
             } else if sel == 3 && show_pf {
@@ -725,9 +776,91 @@ pub fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Res
                     ns.pf_selected = 0;
                 }
             } else {
-                // Apply changes
-                apply_network_settings(app)?;
+                // No action on this field — Enter never leaves the editor;
+                // only Esc (discard) or [s] Save do.
             }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// Handle key events for the top-level NIC list view.
+fn handle_nic_list_key(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
+    use crossterm::event::KeyCode;
+
+    match key.code {
+        KeyCode::Esc => {
+            let dirty = app
+                .network_settings_state
+                .as_ref()
+                .map(|ns| ns.nics != ns.nics_baseline)
+                .unwrap_or(false);
+            if dirty {
+                app.push_screen(Screen::Confirm(ConfirmAction::UnsavedChanges(
+                    UnsavedKind::NicList,
+                )));
+            } else {
+                app.network_settings_state = None;
+                app.pop_screen();
+            }
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                if ns.list_cursor < ns.nics.len().saturating_sub(1) {
+                    ns.list_cursor += 1;
+                }
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                if ns.list_cursor > 0 {
+                    ns.list_cursor -= 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                ns.active_nic = ns.list_cursor;
+                // Snapshot so Esc can discard edits made in this session.
+                ns.nic_snapshot = Some(ns.nics[ns.active_nic].clone());
+                ns.editing_nic = true;
+                ns.selected_field = 0;
+            }
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            // Add a new NIC and jump straight into editing it.
+            if let Some(ref mut ns) = app.network_settings_state {
+                ns.nics.push(NicConfig::default());
+                ns.active_nic = ns.nics.len() - 1;
+                ns.list_cursor = ns.active_nic;
+                ns.nic_snapshot = Some(ns.nics[ns.active_nic].clone());
+                ns.editing_nic = true;
+                ns.selected_field = 0;
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Delete => {
+            if let Some(ref mut ns) = app.network_settings_state {
+                if ns.list_cursor < ns.nics.len() && ns.nics.len() > 1 {
+                    ns.nics.remove(ns.list_cursor);
+                    // Keep active_nic pointing at the same adapter it did
+                    // before the removal (or the nearest one left).
+                    if ns.active_nic == ns.list_cursor {
+                        if ns.active_nic >= ns.nics.len() {
+                            ns.active_nic = ns.nics.len() - 1;
+                        }
+                    } else if ns.active_nic > ns.list_cursor {
+                        ns.active_nic -= 1;
+                    }
+                    if ns.list_cursor >= ns.nics.len() {
+                        ns.list_cursor = ns.nics.len() - 1;
+                    }
+                }
+            }
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            apply_network_settings(app, true)?;
         }
         _ => {}
     }
@@ -768,7 +901,7 @@ fn handle_adding_pf(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::R
                         host_port: host,
                         guest_port: guest,
                     };
-                    ns.port_forwards.push(pf);
+                    ns.nics[ns.active_nic].port_forwards.push(pf);
                     ns.adding_pf = None;
                 }
             }
@@ -803,13 +936,14 @@ fn handle_adding_pf(app: &mut App, key: crossterm::event::KeyEvent) -> anyhow::R
 
 fn add_preset(app: &mut App, protocol: PortProtocol, host_port: u16, guest_port: u16) {
     if let Some(ref mut ns) = app.network_settings_state {
+        let active_nic = ns.active_nic;
+        let port_forwards = &mut ns.nics[active_nic].port_forwards;
         // Don't add duplicate
-        if !ns
-            .port_forwards
+        if !port_forwards
             .iter()
             .any(|pf| pf.host_port == host_port && pf.guest_port == guest_port)
         {
-            ns.port_forwards.push(PortForward {
+            port_forwards.push(PortForward {
                 protocol,
                 host_port,
                 guest_port,
@@ -827,20 +961,17 @@ fn cycle_option(current: &mut String, options: &[&str], delta: i32) {
     *current = options[new_idx].to_string();
 }
 
-/// Apply network settings changes to the VM's launch.sh
-fn apply_network_settings(app: &mut App) -> anyhow::Result<()> {
+/// Save `ns.nics` to the VM's launch.sh. When `close_screen` is true, the
+/// whole Network Settings screen closes afterwards (used from the NIC
+/// list's [s] Save); when false, only the caller's overlay is expected to
+/// back out on its own (used from the per-NIC editor's [s] Save, which
+/// returns to the NIC list instead of closing entirely).
+fn apply_network_settings(app: &mut App, close_screen: bool) -> anyhow::Result<()> {
     let ns = app.network_settings_state.as_ref().unwrap().clone();
 
     if let Some(vm) = app.selected_vm() {
         let vm_path = vm.path.clone();
-        crate::vm::create::update_network_in_script(
-            &vm_path,
-            &ns.model,
-            &ns.backend,
-            ns.bridge_name.as_deref(),
-            &ns.port_forwards,
-            ns.mac_address.as_deref(),
-        )?;
+        crate::vm::create::update_network_in_script(&vm_path, &ns.nics)?;
 
         app.reload_selected_vm_script();
 
@@ -853,9 +984,52 @@ fn apply_network_settings(app: &mut App) -> anyhow::Result<()> {
         app.set_status("Network settings updated");
     }
 
+    if close_screen {
+        app.network_settings_state = None;
+        app.pop_screen();
+    } else if let Some(ref mut ns) = app.network_settings_state {
+        ns.editing_nic = false;
+        ns.nic_snapshot = None;
+        // Saved successfully — the list's own unsaved-changes check should
+        // no longer see these NICs as dirty.
+        ns.nics_baseline = ns.nics.clone();
+    }
+    Ok(())
+}
+
+/// Save the active NIC's edits and return to the NIC list. Used by the
+/// per-NIC editor's `[s] Save` key and by the "Save" choice on the
+/// discard-confirmation prompt (`ConfirmAction::UnsavedChanges(NicEdit)`).
+pub(crate) fn save_nic_edit(app: &mut App) -> anyhow::Result<()> {
+    apply_network_settings(app, false)
+}
+
+/// Discard the active NIC's in-progress edits (restoring the snapshot
+/// taken when its editor was opened) and return to the NIC list. Used by
+/// a no-op Esc (nothing changed) and by the "Discard" choice on the
+/// confirmation prompt.
+pub(crate) fn discard_nic_edit(app: &mut App) {
+    if let Some(ref mut ns) = app.network_settings_state {
+        let active_nic = ns.active_nic;
+        if let Some(snapshot) = ns.nic_snapshot.take() {
+            ns.nics[active_nic] = snapshot;
+        }
+        ns.editing_nic = false;
+    }
+}
+
+/// Save all pending NIC changes and close the Network Settings screen.
+/// Used by the "Save" choice on the NIC list's discard-confirmation
+/// prompt (`ConfirmAction::UnsavedChanges(NicList)`).
+pub(crate) fn save_nic_list(app: &mut App) -> anyhow::Result<()> {
+    apply_network_settings(app, true)
+}
+
+/// Throw away all pending NIC changes and close the Network Settings
+/// screen without saving. Used by the "Discard" choice on the same prompt.
+pub(crate) fn discard_nic_list(app: &mut App) {
     app.network_settings_state = None;
     app.pop_screen();
-    Ok(())
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

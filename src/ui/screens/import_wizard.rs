@@ -11,7 +11,8 @@ use ratatui::{
 };
 
 use crate::app::{
-    App, FileBrowserMode, ImportDiskAction, ImportSource, ImportStep, ImportWizardState,
+    App, FileBrowserMode, GroupChoice, ImportDiskAction, ImportSource, ImportStep,
+    ImportWizardState,
 };
 use crate::vm::import;
 
@@ -482,12 +483,14 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
             Span::styled("  Display:    ", Style::default().fg(Color::Gray)),
             Span::styled(&cfg.display, Style::default().fg(Color::White)),
         ]));
+        let net_display = cfg
+            .network_adapters
+            .first()
+            .map(|n| format!("{} ({})", n.model, n.backend))
+            .unwrap_or_else(|| "none".to_string());
         lines.push(Line::from(vec![
             Span::styled("  Network:    ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{} ({})", cfg.network_model, cfg.network_backend),
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(net_display, Style::default().fg(Color::White)),
         ]));
         lines.push(Line::from(vec![
             Span::styled("  KVM:        ", Style::default().fg(Color::Gray)),
@@ -520,6 +523,30 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
             Span::styled(disk_action_str, Style::default().fg(Color::White)),
         ]));
 
+        if state.editing_group_name {
+            lines.push(Line::from(vec![
+                Span::styled("  Group:      ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{}_", state.group_name_buffer),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled("  Group:      ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    state.group_choice.label(),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    "  [←/→ change, g new group]",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+
         // Show compatibility note count
         if !vm.import_notes.is_empty() {
             lines.push(Line::from(""));
@@ -544,9 +571,10 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
     let summary = Paragraph::new(lines);
     frame.render_widget(summary, chunks[0]);
 
-    let help = Paragraph::new("[Enter] Import  [Tab] Edit name  [Esc] Back")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+    let help =
+        Paragraph::new("[Enter] Import  [Tab] Edit name  [←/→] Group  [g] New group  [Esc] Back")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
     frame.render_widget(help, chunks[1]);
 }
 
@@ -770,6 +798,9 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
         if state.editing_name {
             return handle_review_editing(app, key);
         }
+        if state.editing_group_name {
+            return handle_review_group_editing(app, key);
+        }
     }
 
     match key.code {
@@ -785,15 +816,40 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
                 state.editing_name = true;
             }
         }
+        KeyCode::Left => {
+            let existing = app.group_names();
+            if let Some(ref mut state) = app.import_state {
+                state.group_choice = state.group_choice.prev(&existing);
+            }
+        }
+        KeyCode::Right => {
+            let existing = app.group_names();
+            if let Some(ref mut state) = app.import_state {
+                state.group_choice = state.group_choice.next(&existing);
+            }
+        }
+        KeyCode::Char('g') | KeyCode::Char('G') => {
+            if let Some(ref mut state) = app.import_state {
+                state.group_name_buffer =
+                    state.group_choice.target_name().unwrap_or("").to_string();
+                state.editing_group_name = true;
+            }
+        }
         KeyCode::Enter => {
             // Execute import
             let result = execute_import_from_state(app);
             match result {
                 Ok(()) => {
-                    let vm_name = app
+                    let (vm_name, folder_name, group_choice) = app
                         .import_state
                         .as_ref()
-                        .map(|s| s.vm_name.clone())
+                        .map(|s| {
+                            (
+                                s.vm_name.clone(),
+                                s.folder_name.clone(),
+                                s.group_choice.clone(),
+                            )
+                        })
                         .unwrap_or_default();
                     app.import_state = None;
 
@@ -802,8 +858,13 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
                         app.pop_screen();
                     }
 
-                    // Refresh VM list
+                    // Refresh VM list (this already assigns the new VM to its
+                    // OS-category default group, if any groups exist — an
+                    // explicit group_choice below overrides that default).
                     let _ = app.refresh_vms();
+                    if let Some(group_name) = group_choice.target_name() {
+                        app.set_vm_group(&folder_name, group_name);
+                    }
                     app.set_status(format!("Imported: {}", vm_name));
                 }
                 Err(e) => {
@@ -814,6 +875,35 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn handle_review_group_editing(app: &mut App, key: KeyEvent) -> Result<()> {
+    if let Some(ref mut state) = app.import_state {
+        match key.code {
+            KeyCode::Esc => {
+                state.editing_group_name = false;
+                state.group_name_buffer.clear();
+            }
+            KeyCode::Enter | KeyCode::Tab => {
+                let trimmed = state.group_name_buffer.trim().to_string();
+                state.group_choice = if trimmed.is_empty() {
+                    GroupChoice::Default
+                } else {
+                    GroupChoice::New(trimmed)
+                };
+                state.editing_group_name = false;
+                state.group_name_buffer.clear();
+            }
+            KeyCode::Char(c) => {
+                state.group_name_buffer.push(c);
+            }
+            KeyCode::Backspace => {
+                state.group_name_buffer.pop();
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

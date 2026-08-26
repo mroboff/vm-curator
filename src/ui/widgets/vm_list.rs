@@ -4,30 +4,46 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::groups::VmGroup;
 use crate::metadata::{HierarchyConfig, MetadataStore, SortBy};
 use crate::vm::DiscoveredVm;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
-/// Build the visual order of VMs based on hierarchy (used for navigation)
-/// Returns a Vec where index is visual position and value is filtered_idx
+/// Build the visual order of VMs (used for navigation).
+///
+/// When the user has defined any groups, the list is organized by group
+/// (in the user's display order, with an "Ungrouped" section for VMs in no
+/// group) instead of the automatic OS-family hierarchy — groups are an
+/// explicit choice and take priority once the user starts using them.
+/// Returns a Vec where index is visual position and value is filtered_idx.
 pub fn build_visual_order(
     vms: &[DiscoveredVm],
     filtered_indices: &[usize],
     hierarchy: &HierarchyConfig,
     metadata: &MetadataStore,
+    groups: &[VmGroup],
 ) -> Vec<usize> {
-    let vm_hierarchy = build_vm_hierarchy(vms, filtered_indices, hierarchy, metadata);
     let mut order = Vec::new();
 
-    for family in &hierarchy.families {
-        if let Some(subcats) = vm_hierarchy.get(&family.id) {
-            for subcat in hierarchy.subcategories_for_family(&family.id) {
-                if let Some(vm_entries) = subcats.get(&subcat.id) {
-                    for entry in vm_entries {
-                        order.push(entry.filtered_idx);
+    if groups.is_empty() {
+        let vm_hierarchy = build_vm_hierarchy(vms, filtered_indices, hierarchy, metadata);
+        for family in &hierarchy.families {
+            if let Some(subcats) = vm_hierarchy.get(&family.id) {
+                for subcat in hierarchy.subcategories_for_family(&family.id) {
+                    if let Some(vm_entries) = subcats.get(&subcat.id) {
+                        for entry in vm_entries {
+                            order.push(entry.filtered_idx);
+                        }
                     }
                 }
+            }
+        }
+    } else {
+        let sections = build_vm_by_group(vms, filtered_indices, groups, metadata);
+        for (_, entries) in &sections {
+            for entry in entries {
+                order.push(entry.filtered_idx);
             }
         }
     }
@@ -42,31 +58,42 @@ pub fn click_row_to_visual_index(
     filtered_indices: &[usize],
     hierarchy: &HierarchyConfig,
     metadata: &MetadataStore,
+    groups: &[VmGroup],
     visual_order: &[usize],
     clicked_row: usize,
 ) -> Option<usize> {
-    let vm_hierarchy = build_vm_hierarchy(vms, filtered_indices, hierarchy, metadata);
-
     // Build index_map to map row -> filtered_idx (None for headers)
     let mut index_map: Vec<Option<usize>> = Vec::new();
 
-    for family in &hierarchy.families {
-        if let Some(subcats) = vm_hierarchy.get(&family.id) {
-            // Family header
-            index_map.push(None);
+    if groups.is_empty() {
+        let vm_hierarchy = build_vm_hierarchy(vms, filtered_indices, hierarchy, metadata);
+        for family in &hierarchy.families {
+            if let Some(subcats) = vm_hierarchy.get(&family.id) {
+                // Family header
+                index_map.push(None);
 
-            let family_subcats: Vec<_> = hierarchy.subcategories_for_family(&family.id);
+                let family_subcats: Vec<_> = hierarchy.subcategories_for_family(&family.id);
 
-            for subcat in family_subcats {
-                if let Some(vm_entries) = subcats.get(&subcat.id) {
-                    // Subcategory header
-                    index_map.push(None);
+                for subcat in family_subcats {
+                    if let Some(vm_entries) = subcats.get(&subcat.id) {
+                        // Subcategory header
+                        index_map.push(None);
 
-                    // VM entries
-                    for entry in vm_entries {
-                        index_map.push(Some(entry.filtered_idx));
+                        // VM entries
+                        for entry in vm_entries {
+                            index_map.push(Some(entry.filtered_idx));
+                        }
                     }
                 }
+            }
+        }
+    } else {
+        let sections = build_vm_by_group(vms, filtered_indices, groups, metadata);
+        for (_, entries) in &sections {
+            // Group header
+            index_map.push(None);
+            for entry in entries {
+                index_map.push(Some(entry.filtered_idx));
             }
         }
     }
@@ -86,6 +113,7 @@ pub struct VmListWidget<'a> {
     pub selected: usize,
     pub hierarchy: &'a HierarchyConfig,
     pub metadata: &'a crate::metadata::MetadataStore,
+    pub groups: &'a [VmGroup],
     pub running_vms: &'a HashMap<String, u32>,
     pub stopping_vms: &'a HashMap<String, Instant>,
 }
@@ -99,6 +127,7 @@ impl<'a> VmListWidget<'a> {
             selected: app.selected_vm,
             hierarchy: &app.hierarchy,
             metadata: &app.metadata,
+            groups: &app.groups,
             running_vms: &app.running_vms,
             stopping_vms: &app.stopping_vms,
         }
@@ -111,26 +140,37 @@ impl<'a> VmListWidget<'a> {
 
         let title = format!(" VMs ({}) ", self.filtered_indices.len());
 
-        // Build hierarchical structure
-        let vm_hierarchy = build_vm_hierarchy(
-            self.vms,
-            self.filtered_indices,
-            self.hierarchy,
-            self.metadata,
-        );
-
         // Available width for list items: area minus borders minus highlight symbol ("→ ")
         let inner_width = area.width.saturating_sub(2 + 3) as usize;
 
-        // Render as tree with proper indices
-        let (items, index_map) = render_hierarchy_items(
-            &vm_hierarchy,
-            self.hierarchy,
-            self.metadata,
-            self.running_vms,
-            self.stopping_vms,
-            inner_width,
-        );
+        // Render as tree with proper indices — grouped by the user's groups
+        // when any are defined, otherwise by the automatic OS-family hierarchy.
+        let (items, index_map) = if self.groups.is_empty() {
+            let vm_hierarchy = build_vm_hierarchy(
+                self.vms,
+                self.filtered_indices,
+                self.hierarchy,
+                self.metadata,
+            );
+            render_hierarchy_items(
+                &vm_hierarchy,
+                self.hierarchy,
+                self.metadata,
+                self.running_vms,
+                self.stopping_vms,
+                inner_width,
+            )
+        } else {
+            let sections =
+                build_vm_by_group(self.vms, self.filtered_indices, self.groups, self.metadata);
+            render_group_items(
+                &sections,
+                self.metadata,
+                self.running_vms,
+                self.stopping_vms,
+                inner_width,
+            )
+        };
 
         // Get the filtered_idx for the currently selected visual position
         let selected_filtered_idx = self.visual_order.get(self.selected).copied();
@@ -238,6 +278,55 @@ fn build_vm_hierarchy<'a>(
         });
     }
 
+    result
+}
+
+/// Label for the synthetic trailing section holding VMs in no user group.
+const UNGROUPED_LABEL: &str = "Ungrouped";
+
+/// Build a group_name -> Vec<VmEntry> view, in the user's group display
+/// order, with a trailing "Ungrouped" section for VMs in no group. A VM
+/// belonging to more than one group appears once per group it's in. Groups
+/// with no matching VMs (and "Ungrouped" when everything is grouped) are
+/// omitted. VMs within each section are sorted alphabetically by display name.
+fn build_vm_by_group<'a>(
+    vms: &'a [DiscoveredVm],
+    filtered_indices: &[usize],
+    groups: &[VmGroup],
+    metadata: &MetadataStore,
+) -> Vec<(String, Vec<VmEntry<'a>>)> {
+    let mut sections: Vec<(String, Vec<VmEntry>)> = groups
+        .iter()
+        .map(|g| (g.name.clone(), Vec::new()))
+        .collect();
+    let mut ungrouped: Vec<VmEntry> = Vec::new();
+
+    for (filtered_idx, &vm_idx) in filtered_indices.iter().enumerate() {
+        let vm = &vms[vm_idx];
+        let mut in_any_group = false;
+        for (i, group) in groups.iter().enumerate() {
+            if group.contains(&vm.id) {
+                sections[i].1.push(VmEntry { vm, filtered_idx });
+                in_any_group = true;
+            }
+        }
+        if !in_any_group {
+            ungrouped.push(VmEntry { vm, filtered_idx });
+        }
+    }
+
+    for (_, entries) in sections.iter_mut() {
+        entries.sort_by_key(|e| get_display_name(e.vm, metadata));
+    }
+    ungrouped.sort_by_key(|e| get_display_name(e.vm, metadata));
+
+    let mut result: Vec<(String, Vec<VmEntry>)> = sections
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
+    if !ungrouped.is_empty() {
+        result.push((UNGROUPED_LABEL.to_string(), ungrouped));
+    }
     result
 }
 
@@ -356,4 +445,158 @@ fn render_hierarchy_items<'a>(
     }
 
     (items, index_map)
+}
+
+/// Render group sections (as built by [`build_vm_by_group`]) as list items —
+/// one flat level of VMs per group header, no subcategory nesting.
+fn render_group_items<'a>(
+    sections: &[(String, Vec<VmEntry<'a>>)],
+    metadata: &crate::metadata::MetadataStore,
+    running_vms: &HashMap<String, u32>,
+    stopping_vms: &HashMap<String, Instant>,
+    inner_width: usize,
+) -> (Vec<ListItem<'a>>, Vec<Option<usize>>) {
+    let mut items = Vec::new();
+    let mut index_map: Vec<Option<usize>> = Vec::new();
+
+    for (group_name, entries) in sections {
+        let icon = if group_name == UNGROUPED_LABEL {
+            "📎"
+        } else {
+            "📁"
+        };
+        items.push(ListItem::new(Line::from(vec![
+            Span::raw(format!("{} ", icon)),
+            Span::styled(
+                group_name.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])));
+        index_map.push(None); // Headers are not selectable
+
+        let vm_count = entries.len();
+        for (vm_idx, entry) in entries.iter().enumerate() {
+            let is_last_vm = vm_idx == vm_count - 1;
+            let vm_branch = if is_last_vm { "└─" } else { "├─" };
+
+            let display_name = get_display_name(entry.vm, metadata);
+
+            let is_stopping = stopping_vms.contains_key(&entry.vm.id);
+            let is_running = running_vms.contains_key(&entry.vm.id);
+
+            let prefix = format!("  {} ", vm_branch);
+            // +2 for the indicator "●" and its leading space
+            let used_width = prefix.len() + display_name.len();
+
+            if is_stopping || is_running {
+                let padding = inner_width.saturating_sub(used_width + 2);
+                let color = if is_stopping {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                };
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                    Span::styled(display_name, Style::default().fg(Color::White)),
+                    Span::raw(" ".repeat(padding)),
+                    Span::styled(" \u{25cf}", Style::default().fg(color)),
+                ])));
+            } else {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                    Span::styled(display_name, Style::default().fg(Color::White)),
+                ])));
+            }
+            index_map.push(Some(entry.filtered_idx));
+        }
+    }
+
+    (items, index_map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata::HierarchyConfig;
+    use crate::vm::QemuConfig;
+    use std::path::PathBuf;
+
+    fn vm(id: &str) -> DiscoveredVm {
+        DiscoveredVm {
+            id: id.to_string(),
+            path: PathBuf::from("/test").join(id),
+            launch_script: PathBuf::from("/test").join(id).join("launch.sh"),
+            config: QemuConfig::default(),
+            custom_name: None,
+            os_profile: None,
+            notes: None,
+        }
+    }
+
+    fn group(name: &str, vm_ids: &[&str]) -> VmGroup {
+        VmGroup {
+            name: name.to_string(),
+            vm_ids: vm_ids.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn build_visual_order_falls_back_to_hierarchy_when_no_groups() {
+        let vms = vec![vm("alpha"), vm("beta")];
+        let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let hierarchy = HierarchyConfig::load_embedded();
+        let metadata = MetadataStore::default();
+
+        let order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata, &[]);
+
+        assert_eq!(order.len(), 2);
+    }
+
+    #[test]
+    fn build_visual_order_uses_group_order_when_groups_defined() {
+        let vms = vec![vm("alpha"), vm("beta"), vm("gamma")];
+        let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let hierarchy = HierarchyConfig::load_embedded();
+        let metadata = MetadataStore::default();
+        // "Servers" (gamma) is listed before "Desktops" (alpha); beta is ungrouped.
+        let groups = vec![group("Servers", &["gamma"]), group("Desktops", &["alpha"])];
+
+        let order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata, &groups);
+
+        // filtered_idx 2 = gamma (Servers), 0 = alpha (Desktops), 1 = beta (Ungrouped, last)
+        assert_eq!(order, vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn build_vm_by_group_lists_a_multi_group_vm_in_each_group() {
+        let vms = vec![vm("alpha"), vm("beta")];
+        let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let metadata = MetadataStore::default();
+        let groups = vec![group("A", &["alpha"]), group("B", &["alpha"])];
+
+        let sections = build_vm_by_group(&vms, &filtered_indices, &groups, &metadata);
+
+        assert_eq!(sections.len(), 3); // "A", "B", "Ungrouped"
+        assert_eq!(sections[0].0, "A");
+        assert_eq!(sections[1].0, "B");
+        assert_eq!(sections[2].0, UNGROUPED_LABEL);
+        assert_eq!(sections[2].1[0].vm.id, "beta");
+    }
+
+    #[test]
+    fn build_vm_by_group_omits_empty_sections() {
+        let vms = vec![vm("alpha")];
+        let filtered_indices: Vec<usize> = (0..vms.len()).collect();
+        let metadata = MetadataStore::default();
+        // "Empty" has no matching VM and "Servers" has alpha; both VMs are grouped
+        // so there should be no trailing "Ungrouped" section either.
+        let groups = vec![group("Empty", &[]), group("Servers", &["alpha"])];
+
+        let sections = build_vm_by_group(&vms, &filtered_indices, &groups, &metadata);
+
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].0, "Servers");
+    }
 }

@@ -94,6 +94,10 @@ pub enum Screen {
     DiskPassthrough,
     /// Virtual Network Manager (managed NAT/Isolated networks, issue #53)
     NetworkManager,
+    /// User-defined VM groups: list, create/rename/delete, reorder
+    Groups,
+    /// Manage which VMs belong to the currently selected group
+    GroupMembers,
 }
 
 /// Context for text input dialogs
@@ -101,6 +105,8 @@ pub enum Screen {
 pub enum TextInputContext {
     SnapshotName,
     RenameVm,
+    CreateGroup,
+    RenameGroup,
 }
 
 /// Actions that need confirmation
@@ -121,6 +127,8 @@ pub enum ConfirmAction {
     UsePhysicalDisk,
     /// Delete the selected managed virtual network (definition + scripts).
     DeleteNetwork,
+    /// Delete the selected VM group (definition only; VMs are untouched).
+    DeleteGroup,
 }
 
 /// Who opened the physical disk picker (determines where the selection goes)
@@ -140,6 +148,19 @@ pub enum UnsavedKind {
     Pci,
     SharedFolders,
     DiskPassthrough,
+    /// Leaving the Network Settings per-NIC field editor with unsaved
+    /// edits to that adapter. Unlike the other kinds, this never pops the
+    /// screen stack — the editor is a nested view within
+    /// `Screen::NetworkSettings`, not its own screen.
+    NicEdit,
+    /// Leaving the Network Settings NIC list (i.e. closing the screen)
+    /// with adapters added/edited/removed since the last save.
+    NicList,
+    /// Leaving the Virtual Network Manager's create/edit form with unsaved
+    /// edits. Like the per-NIC editor in Network Settings, this never pops
+    /// the screen stack — the form is a nested view within
+    /// `Screen::NetworkManager`, not its own screen.
+    NetworkEdit,
 }
 
 /// Input mode for text entry
@@ -225,6 +246,12 @@ pub struct App {
     pub vnet_selected: usize,
     /// Create/edit form state for the Networks screen
     pub vnet_editor: Option<VNetEditorState>,
+    /// User-defined VM groups (Groups screen), in user-controlled display order
+    pub groups: Vec<crate::groups::VmGroup>,
+    /// Selected row in the Groups screen
+    pub groups_selected: usize,
+    /// Selected VM row (index into `vms`) in the Group Members screen
+    pub group_members_selected: usize,
     /// Physical block devices (cached for the disk picker)
     pub block_devices: Vec<crate::hardware::BlockDevice>,
     /// Selected row in the physical disk picker
@@ -333,6 +360,17 @@ pub struct App {
     pub wizard_pf_selected: usize,
     /// Wizard port forward adding state
     pub wizard_adding_pf: Option<AddingPortForward>,
+    /// Whether the wizard's NIC list overlay (step 4) is active
+    pub wizard_editing_nics: bool,
+    /// Row highlighted in the wizard's NIC list, in
+    /// `0..network_adapters.len()`.
+    pub wizard_nic_list_cursor: usize,
+    /// Whether the wizard's per-NIC field editor (opened from the NIC
+    /// list) is active
+    pub wizard_editing_nic_fields: bool,
+    /// Focused row in the wizard's per-NIC field editor (0=adapter,
+    /// 1=backend, 2=mac, 3=bridge/forwards)
+    pub wizard_nic_field_focus: usize,
 }
 
 /// Entry in file browser
@@ -417,10 +455,44 @@ impl App {
         let mut shared_folders_help = SharedFoldersHelpStore::load_embedded();
         shared_folders_help.load_user_overrides(&config_dir.join("shared_folders_help.toml"));
 
+        // Load user-defined VM groups, dropping membership for any VM id that
+        // no longer exists (e.g. deleted while the app wasn't running).
+        let groups_path = crate::groups::groups_file_path();
+        // A VM's default group is its OS category: on first run (no
+        // groups.toml yet) this seeds one group per category, so users start
+        // from the same organization the automatic hierarchy already gave
+        // them, editable from here on; on later runs it just tops up any VM
+        // that isn't in a group yet (e.g. a folder added by hand between
+        // sessions). Skipped when groups.toml exists but is empty — that
+        // means the user deliberately cleared their groups (falling back to
+        // the automatic OS-family view), and that choice should stick.
+        let is_first_run = !groups_path.exists();
+        let mut groups = crate::groups::load_groups(&groups_path);
+        let mut groups_changed = false;
+        if is_first_run || !groups.is_empty() {
+            let category_order = family_order_map(&hierarchy);
+            let vm_categories: Vec<(String, String)> = vms
+                .iter()
+                .filter_map(|vm| category_of(&hierarchy, vm))
+                .collect();
+            groups_changed |= crate::groups::assign_to_category_groups(
+                &mut groups,
+                &vm_categories,
+                &category_order,
+            );
+        }
+        let valid_ids: std::collections::HashSet<&str> =
+            vms.iter().map(|vm| vm.id.as_str()).collect();
+        groups_changed |= crate::groups::prune_stale(&mut groups, &valid_ids);
+        if groups_changed {
+            let _ = crate::groups::save_groups(&groups_path, &groups);
+        }
+
         // Step 6: Build visual order and detect display capabilities
         progress(6, TOTAL_STEPS, "Building VM list...");
         let filtered_indices: Vec<usize> = (0..vms.len()).collect();
-        let visual_order = build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata);
+        let visual_order =
+            build_visual_order(&vms, &filtered_indices, &hierarchy, &metadata, &groups);
         let (background_tx, background_rx) = mpsc::channel();
 
         // Detect network capabilities
@@ -463,6 +535,9 @@ impl App {
             vnet_networks: Vec::new(),
             vnet_selected: 0,
             vnet_editor: None,
+            groups,
+            groups_selected: 0,
+            group_members_selected: 0,
             block_devices: Vec::new(),
             block_device_selected: 0,
             disk_picker_context: DiskPickerContext::default(),
@@ -532,6 +607,10 @@ impl App {
             wizard_editing_port_forwards: false,
             wizard_pf_selected: 0,
             wizard_adding_pf: None,
+            wizard_editing_nics: false,
+            wizard_nic_list_cursor: 0,
+            wizard_editing_nic_fields: false,
+            wizard_nic_field_focus: 0,
         })
     }
 
@@ -566,23 +645,40 @@ impl App {
         preferred_order.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Get available network backend options based on detected capabilities
-    pub fn get_network_backend_options(&self) -> Vec<(&str, &str)> {
-        let mut options = vec![("user", "User/SLIRP (NAT) - Default, works everywhere")];
+    /// Cycle stops for a NIC's "Net Backend" field: `(backend_id,
+    /// bridge_name)`. Expands the generic "bridge" backend into one stop
+    /// per managed Virtual Network Manager network (`vmc-*`) so cycling
+    /// directly lands on a specific managed network, in addition to one
+    /// generic "bridge" stop (bridge_name left as-is / defaulted) for
+    /// manually picking any other host bridge via the Bridge: field.
+    pub fn get_network_backend_stops(&self) -> Vec<(String, Option<String>)> {
+        let mut stops = vec![("user".to_string(), None)];
         if self.network_caps.passt_available {
-            options.push(("passt", "passt - Fast NAT, ping works"));
+            stops.push(("passt".to_string(), None));
         }
         if self.network_caps.bridge_helper_path.is_some() {
-            if !self.network_caps.system_bridges.is_empty()
-                && self.network_caps.bridge_helper_configured
-            {
-                options.push(("bridge", "Bridge - Full network, own IP"));
-            } else {
-                options.push(("bridge", "Bridge - Requires one-time setup"));
+            stops.push(("bridge".to_string(), None));
+            for net in &self.vnet_networks {
+                stops.push(("bridge".to_string(), Some(net.bridge_name())));
             }
         }
-        options.push(("none", "None - No networking"));
-        options
+        stops.push(("none".to_string(), None));
+        stops
+    }
+
+    /// Host bridges available for a NIC's Bridge: field, including managed
+    /// Virtual Network Manager networks (`vmc-*`) even while stopped —
+    /// their bridge only appears in `network_caps.system_bridges` once
+    /// started, but they're still a valid, resolvable attach target.
+    pub fn bridge_picker_list(&self) -> Vec<String> {
+        let mut bridges = self.network_caps.system_bridges.clone();
+        for net in &self.vnet_networks {
+            let bridge = net.bridge_name();
+            if !bridges.contains(&bridge) {
+                bridges.push(bridge);
+            }
+        }
+        bridges
     }
 
     /// Get the currently selected VM
@@ -676,12 +772,14 @@ impl App {
                 .collect();
         }
 
-        // Rebuild visual order for hierarchy navigation
+        // Rebuild visual order (grouped by user groups if any are defined,
+        // otherwise by the automatic OS-family hierarchy)
         self.visual_order = build_visual_order(
             &self.vms,
             &self.filtered_indices,
             &self.hierarchy,
             &self.metadata,
+            &self.groups,
         );
 
         // Reset selection if out of bounds
@@ -694,7 +792,46 @@ impl App {
     pub fn refresh_vms(&mut self) -> Result<()> {
         self.vms = discover_vms(&self.config.vm_library_path)?;
         self.update_filter();
+        self.prune_stale_group_memberships();
+        self.assign_ungrouped_vms_to_category_groups();
         Ok(())
+    }
+
+    /// A VM's default group is its OS category — assign any VM that isn't in
+    /// any group yet to the matching category group, creating that group if
+    /// needed (covers VM creation, import, or a rescan finding a folder added
+    /// by hand). A no-op while `groups` is empty: the user cleared every
+    /// group deliberately (falling back to the automatic OS-family view), and
+    /// that choice should stick until they start using groups again — it
+    /// shouldn't get silently reversed by the next VM change.
+    fn assign_ungrouped_vms_to_category_groups(&mut self) {
+        if self.groups.is_empty() {
+            return;
+        }
+        let category_order = family_order_map(&self.hierarchy);
+        let vm_categories: Vec<(String, String)> = self
+            .vms
+            .iter()
+            .filter_map(|vm| category_of(&self.hierarchy, vm))
+            .collect();
+
+        if crate::groups::assign_to_category_groups(
+            &mut self.groups,
+            &vm_categories,
+            &category_order,
+        ) {
+            self.persist_groups();
+        }
+    }
+
+    /// Drop group memberships for VM ids that no longer exist (e.g. deleted
+    /// VMs), and persist if anything changed.
+    fn prune_stale_group_memberships(&mut self) {
+        let valid_ids: std::collections::HashSet<&str> =
+            self.vms.iter().map(|vm| vm.id.as_str()).collect();
+        if crate::groups::prune_stale(&mut self.groups, &valid_ids) {
+            self.persist_groups();
+        }
     }
 
     /// Load snapshots for the current VM
@@ -734,6 +871,135 @@ impl App {
         if self.vnet_selected >= self.vnet_networks.len() {
             self.vnet_selected = self.vnet_networks.len().saturating_sub(1);
         }
+    }
+
+    /// Open the Groups screen
+    pub fn open_groups(&mut self) {
+        if self.groups_selected >= self.groups.len() {
+            self.groups_selected = self.groups.len().saturating_sub(1);
+        }
+        self.push_screen(Screen::Groups);
+    }
+
+    /// Persist the current in-memory group list/order to disk.
+    pub fn persist_groups(&mut self) {
+        // The main VM list is organized by group once any exist, so every
+        // change here needs to be reflected there too.
+        self.update_filter();
+        if let Err(e) = crate::groups::save_groups(&crate::groups::groups_file_path(), &self.groups)
+        {
+            self.set_status(format!("Failed to save groups: {e}"));
+        }
+    }
+
+    /// Get the currently selected group in the Groups screen
+    pub fn selected_group(&self) -> Option<&crate::groups::VmGroup> {
+        self.groups.get(self.groups_selected)
+    }
+
+    /// Create a new group with the given name (rejects duplicates) and select it.
+    pub fn create_group(&mut self, name: &str) {
+        if self.groups.iter().any(|g| g.name == name) {
+            self.set_status(format!("A group named '{}' already exists", name));
+            return;
+        }
+        self.groups.push(crate::groups::VmGroup::new(name));
+        self.groups_selected = self.groups.len() - 1;
+        self.persist_groups();
+    }
+
+    /// Rename the currently selected group (rejects duplicates).
+    pub fn rename_selected_group(&mut self, name: &str) {
+        if self
+            .groups
+            .iter()
+            .enumerate()
+            .any(|(i, g)| g.name == name && i != self.groups_selected)
+        {
+            self.set_status(format!("A group named '{}' already exists", name));
+            return;
+        }
+        if let Some(group) = self.groups.get_mut(self.groups_selected) {
+            group.name = name.to_string();
+            self.persist_groups();
+        }
+    }
+
+    /// Delete the currently selected group (definition only; VMs are untouched).
+    pub fn delete_selected_group(&mut self) {
+        if self.groups_selected < self.groups.len() {
+            let removed = self.groups.remove(self.groups_selected);
+            if self.groups_selected >= self.groups.len() && self.groups_selected > 0 {
+                self.groups_selected -= 1;
+            }
+            self.persist_groups();
+            self.set_status(format!("Deleted group '{}'", removed.name));
+        }
+    }
+
+    /// Move the selected group down one position in the display order.
+    pub fn move_selected_group_down(&mut self) {
+        if self.groups_selected + 1 < self.groups.len() {
+            self.groups
+                .swap(self.groups_selected, self.groups_selected + 1);
+            self.groups_selected += 1;
+            self.persist_groups();
+        }
+    }
+
+    /// Move the selected group up one position in the display order.
+    pub fn move_selected_group_up(&mut self) {
+        if self.groups_selected > 0 {
+            self.groups
+                .swap(self.groups_selected, self.groups_selected - 1);
+            self.groups_selected -= 1;
+            self.persist_groups();
+        }
+    }
+
+    /// Open the Group Members screen for the currently selected group.
+    pub fn open_group_members(&mut self) {
+        self.group_members_selected = 0;
+        self.push_screen(Screen::GroupMembers);
+    }
+
+    /// Toggle whether the given VM belongs to the currently selected group.
+    ///
+    /// Doesn't persist — membership changes are written once when the Group
+    /// Members screen is closed, so toggling many VMs in a row doesn't hit
+    /// disk on every keypress.
+    pub fn toggle_vm_in_selected_group(&mut self, vm_id: &str) {
+        if let Some(group) = self.groups.get_mut(self.groups_selected) {
+            if let Some(pos) = group.vm_ids.iter().position(|id| id == vm_id) {
+                group.vm_ids.remove(pos);
+            } else {
+                group.vm_ids.push(vm_id.to_string());
+            }
+        }
+    }
+
+    /// Move a VM into exactly one group (removing it from any others),
+    /// creating that group if it doesn't exist. Used by the create/import
+    /// wizards when the user explicitly picks a group instead of accepting
+    /// the OS-category default (which `refresh_vms` already applies).
+    pub fn set_vm_group(&mut self, vm_id: &str, group_name: &str) {
+        for group in &mut self.groups {
+            group.vm_ids.retain(|id| id != vm_id);
+        }
+        match self.groups.iter_mut().find(|g| g.name == group_name) {
+            Some(group) => group.vm_ids.push(vm_id.to_string()),
+            None => self.groups.push(crate::groups::VmGroup {
+                name: group_name.to_string(),
+                vm_ids: vec![vm_id.to_string()],
+            }),
+        }
+        self.persist_groups();
+    }
+
+    /// Names of all current groups, in display order — for the create/import
+    /// wizards' group-choice cycling.
+    pub fn group_names(&self) -> Vec<String> {
+        self.groups.iter().map(|g| g.name.clone()).collect()
     }
 
     /// Enumerate physical disks and open the picker screen
@@ -1516,6 +1782,30 @@ impl App {
             .and_then(|s| s.selected_os.as_ref())
             .and_then(|os_id| self.qemu_profiles.get(os_id))
     }
+}
+
+/// A VM's OS category — the family name from the automatic hierarchy — used
+/// as its default group. `None` only if the categorized family id doesn't
+/// match any configured family, which shouldn't happen since `categorize`
+/// always falls back to the "other" family.
+fn category_of(hierarchy: &HierarchyConfig, vm: &DiscoveredVm) -> Option<(String, String)> {
+    let categorize_id = vm.os_profile.as_deref().unwrap_or(vm.id.as_str());
+    let (family_id, _subcategory_id) = hierarchy.categorize(categorize_id);
+    hierarchy
+        .families
+        .iter()
+        .find(|f| f.id == family_id)
+        .map(|f| (vm.id.clone(), f.name.clone()))
+}
+
+/// Family display name -> sort order, for placing newly-created category
+/// groups among each other in the same order the hierarchy view uses.
+fn family_order_map(hierarchy: &HierarchyConfig) -> HashMap<String, i32> {
+    hierarchy
+        .families
+        .iter()
+        .map(|f| (f.name.clone(), f.order))
+        .collect()
 }
 
 /// Extract the PCI host address (e.g. `0000:01:00.0`) from a saved passthrough
