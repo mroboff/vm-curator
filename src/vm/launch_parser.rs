@@ -59,7 +59,7 @@ pub fn parse_launch_script(script_path: &Path, content: &str) -> Result<QemuConf
     config.disks = extract_disks(content, vm_dir);
 
     // Extract network config
-    config.network = extract_network(content);
+    config.networks = extract_networks(content);
 
     // Extract extra arguments we don't specifically parse
     config.extra_args = extract_extra_args(content);
@@ -577,120 +577,191 @@ fn guess_disk_format(path: &Path) -> DiskFormat {
         .unwrap_or(DiskFormat::Raw)
 }
 
-/// Extract network configuration
-fn extract_network(content: &str) -> Option<NetworkConfig> {
-    let mut config = NetworkConfig::default();
-    let mut has_network = false;
+/// Extract the numeric suffix following `marker` in `line` (e.g. `marker =
+/// "id=net"` on `-netdev user,id=net1,...` yields `Some(1)`).
+fn parse_net_index(line: &str, marker: &str) -> Option<usize> {
+    let idx = line.find(marker)?;
+    let rest = &line[idx + marker.len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+/// Extract a `br=<name>` bridge name from a `-netdev`/`-net bridge` line.
+fn extract_bridge_name(line: &str) -> Option<String> {
+    let idx = line.find("br=")?;
+    let rest = &line[idx + 3..];
+    Some(
+        rest.chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect(),
+    )
+}
+
+/// Extract a `mac=<addr>` MAC address from a `-device`/`-netdev`/`-nic` line.
+fn extract_mac(line: &str) -> Option<String> {
+    let idx = line.find("mac=")?;
+    let rest = &line[idx + 4..];
+    let mac: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == ':')
+        .collect();
+    if crate::vm::mac::is_valid_mac(&mac) {
+        Some(mac.to_lowercase())
+    } else {
+        None
+    }
+}
+
+/// Apply a `-netdev` line's backend/bridge/port-forwards onto `net`.
+fn apply_netdev_line(net: &mut NetworkConfig, line: &str) {
+    if line.contains("passt") {
+        net.backend = NetworkBackend::Passt;
+        net.user_net = false;
+    } else if line.contains("bridge") {
+        net.user_net = false;
+        let bridge = extract_bridge_name(line).unwrap_or_else(|| "qemubr0".to_string());
+        net.backend = NetworkBackend::Bridge(bridge.clone());
+        net.bridge = Some(bridge);
+    } else if line.contains("user") {
+        net.user_net = true;
+        net.backend = NetworkBackend::User;
+        net.port_forwards = extract_port_forwards(line);
+    }
+}
+
+/// Apply a `-device` line's adapter model onto `net`.
+fn apply_device_line(net: &mut NetworkConfig, line: &str) {
+    if line.contains("virtio-net") {
+        net.model = "virtio-net".to_string();
+    } else if line.contains("e1000") {
+        net.model = "e1000".to_string();
+    } else if line.contains("rtl8139") {
+        net.model = "rtl8139".to_string();
+    } else if line.contains("ne2k_pci") {
+        net.model = "ne2k_pci".to_string();
+    } else if line.contains("pcnet") {
+        net.model = "pcnet".to_string();
+    }
+}
+
+/// Extract network configuration for every NIC in the script.
+///
+/// The generator emits one `-netdev ...,id=netN,...` + `-device
+/// ...,netdev=netN[,mac=...]` pair per adapter, so those are grouped by
+/// their `N` into one `NetworkConfig` each, in order. Older/hand-written
+/// scripts using `-net user`/`-net bridge`/`-nic ...` (no `id=netN` tag)
+/// fall back to the pre-multi-NIC behavior of a single adapter at index 0.
+fn extract_networks(content: &str) -> Vec<NetworkConfig> {
+    use std::collections::BTreeMap;
+
+    let mut by_id: BTreeMap<usize, NetworkConfig> = BTreeMap::new();
+    let mut legacy = NetworkConfig::default();
+    let mut has_legacy = false;
 
     for line in content.lines() {
         if line.trim_start().starts_with('#') {
             continue;
         }
 
-        // Check for network model via -device
+        if line.contains("-netdev") {
+            if let Some(id) = parse_net_index(line, "id=net") {
+                let net = by_id.entry(id).or_default();
+                apply_netdev_line(net, line);
+                if let Some(mac) = extract_mac(line) {
+                    net.mac_address = Some(mac);
+                }
+                continue;
+            }
+
+            // -netdev line whose id doesn't follow this app's own
+            // `netN` numbering (e.g. a hand-edited script) — still
+            // extract its backend/bridge/port-forwards, just as a
+            // single legacy adapter rather than an indexed one.
+            apply_netdev_line(&mut legacy, line);
+            if let Some(mac) = extract_mac(line) {
+                legacy.mac_address = Some(mac);
+            }
+            has_legacy = true;
+            continue;
+        }
+
         if line.contains("-device") {
-            // Extract network device model from -device lines
-            if line.contains("virtio-net") {
-                config.model = "virtio-net".to_string();
-                has_network = true;
-            } else if line.contains("e1000") && line.contains("netdev=") {
-                config.model = "e1000".to_string();
-                has_network = true;
-            } else if line.contains("rtl8139") && line.contains("netdev=") {
-                config.model = "rtl8139".to_string();
-                has_network = true;
+            if let Some(id) = parse_net_index(line, "netdev=net") {
+                let net = by_id.entry(id).or_default();
+                apply_device_line(net, line);
+                if let Some(mac) = extract_mac(line) {
+                    net.mac_address = Some(mac);
+                }
+                continue;
+            }
+
+            // Legacy -device line for a NIC without an id=netN tag.
+            let before = legacy.model.clone();
+            apply_device_line(&mut legacy, line);
+            if legacy.model != before {
+                has_legacy = true;
+            }
+            if let Some(mac) = extract_mac(line) {
+                legacy.mac_address = Some(mac);
+                has_legacy = true;
             }
         }
 
         // Check for network model via -net nic
         if line.contains("-net nic") || line.contains("-nic") {
-            has_network = true;
+            has_legacy = true;
 
             if line.contains("model=virtio") {
-                config.model = "virtio-net".to_string();
+                legacy.model = "virtio-net".to_string();
             } else if line.contains("model=e1000") {
-                config.model = "e1000".to_string();
+                legacy.model = "e1000".to_string();
             } else if line.contains("model=rtl8139") {
-                config.model = "rtl8139".to_string();
-            }
-        }
-
-        // Check for netdev backends
-        if line.contains("-netdev") {
-            has_network = true;
-
-            if line.contains("passt") {
-                config.backend = NetworkBackend::Passt;
-                config.user_net = false;
-            } else if line.contains("bridge") {
-                config.user_net = false;
-                // Extract bridge name
-                if let Some(idx) = line.find("br=") {
-                    let rest = &line[idx + 3..];
-                    let bridge: String = rest
-                        .chars()
-                        .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-                        .collect();
-                    config.backend = NetworkBackend::Bridge(bridge.clone());
-                    config.bridge = Some(bridge);
-                } else {
-                    config.backend = NetworkBackend::Bridge("qemubr0".to_string());
-                    config.bridge = Some("qemubr0".to_string());
-                }
-            } else if line.contains("user") {
-                config.user_net = true;
-                config.backend = NetworkBackend::User;
-
-                // Extract port forwards from hostfwd
-                config.port_forwards = extract_port_forwards(line);
+                legacy.model = "rtl8139".to_string();
             }
         }
 
         // Check for -net user/bridge (legacy format)
         if line.contains("-net user") {
-            has_network = true;
-            config.user_net = true;
-            config.backend = NetworkBackend::User;
-            config.port_forwards.extend(extract_port_forwards(line));
+            has_legacy = true;
+            legacy.user_net = true;
+            legacy.backend = NetworkBackend::User;
+            legacy.port_forwards.extend(extract_port_forwards(line));
         }
 
         if line.contains("-net bridge") {
-            has_network = true;
-            config.user_net = false;
-            if let Some(idx) = line.find("br=") {
-                let rest = &line[idx + 3..];
-                let bridge: String = rest
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-                    .collect();
-                config.backend = NetworkBackend::Bridge(bridge.clone());
-                config.bridge = Some(bridge);
+            has_legacy = true;
+            legacy.user_net = false;
+            if let Some(bridge) = extract_bridge_name(line) {
+                legacy.backend = NetworkBackend::Bridge(bridge.clone());
+                legacy.bridge = Some(bridge);
             }
         }
 
-        // Extract MAC address. QEMU accepts `mac=...` on either the
-        // -device line (most common) or the -netdev line.
+        // Extract MAC address for legacy lines. QEMU accepts `mac=...` on
+        // either the -device line (most common) or the -netdev/-nic line.
         if (line.contains("-device") || line.contains("-netdev") || line.contains("-nic"))
             && line.contains("mac=")
         {
-            if let Some(idx) = line.find("mac=") {
-                let rest = &line[idx + 4..];
-                let mac: String = rest
-                    .chars()
-                    .take_while(|c| c.is_ascii_hexdigit() || *c == ':')
-                    .collect();
-                if crate::vm::mac::is_valid_mac(&mac) {
-                    config.mac_address = Some(mac.to_lowercase());
-                    has_network = true;
-                }
+            if let Some(mac) = extract_mac(line) {
+                legacy.mac_address = Some(mac);
+                has_legacy = true;
             }
         }
     }
 
-    if has_network || content.contains("-net") || content.contains("-nic") {
-        Some(config)
+    let results: Vec<NetworkConfig> = by_id.into_values().collect();
+    if !results.is_empty() {
+        return results;
+    }
+
+    if has_legacy || content.contains("-net") || content.contains("-nic") {
+        vec![legacy]
     } else {
-        None
+        Vec::new()
     }
 }
 

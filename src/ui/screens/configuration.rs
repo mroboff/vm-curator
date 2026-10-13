@@ -131,16 +131,22 @@ fn render_config(config: &QemuConfig, area: Rect, frame: &mut Frame) {
         ]));
     }
 
-    // Network
-    if let Some(ref net) = config.network {
+    // Network(s)
+    let multi_nic = config.networks.len() > 1;
+    for (idx, net) in config.networks.iter().enumerate() {
         let backend_str = match &net.backend {
             crate::vm::qemu_config::NetworkBackend::User => "user/SLIRP (NAT)".to_string(),
             crate::vm::qemu_config::NetworkBackend::Passt => "passt".to_string(),
             crate::vm::qemu_config::NetworkBackend::Bridge(name) => format!("bridge: {}", name),
             crate::vm::qemu_config::NetworkBackend::None => "none".to_string(),
         };
+        let label = if multi_nic {
+            format!("Network {}: ", idx + 1)
+        } else {
+            "Network: ".to_string()
+        };
         lines.push(Line::from(vec![
-            Span::styled("Network: ", Style::default().fg(Color::Yellow)),
+            Span::styled(label, Style::default().fg(Color::Yellow)),
             Span::raw(format!("{} ({})", net.model, backend_str)),
         ]));
         if !net.port_forwards.is_empty() {
