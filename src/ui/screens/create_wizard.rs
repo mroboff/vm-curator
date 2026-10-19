@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::app::{
-    App, DiskAction, DiskImageFormat, FileBrowserMode, WizardDiskSource, WizardField,
+    App, DiskAction, DiskImageFormat, FileBrowserMode, NicConfig, WizardDiskSource, WizardField,
     WizardQemuConfig, WizardStep,
 };
 use crate::metadata::QemuProfileStore;
@@ -84,7 +84,14 @@ pub fn render(app: &App, frame: &mut Frame) {
         WizardStep::Confirm => render_step_confirm(app, frame, dialog_area),
     }
 
-    // Port-forward editor draws on top of step 4 when active.
+    // Network adapter overlays draw on top of step 4 when active, stacked
+    // list -> per-NIC editor -> port-forward editor.
+    if app.wizard_editing_nics {
+        render_wizard_nic_list(app, frame, dialog_area);
+    }
+    if app.wizard_editing_nic_fields {
+        render_wizard_nic_editor(app, frame, dialog_area);
+    }
     if app.wizard_editing_port_forwards {
         render_wizard_port_forward_editor(app, frame, dialog_area);
     }
@@ -2019,18 +2026,16 @@ const AUDIO_OPTIONS: &[(&str, &[&str])] = &[
     ("None", &[]),
 ];
 
-/// Fields in the QEMU config screen
+/// Fields in the QEMU config screen. Network adapters are configured in a
+/// separate list+editor overlay (opened from the `NetworkAdapters` row),
+/// not as inline rows here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QemuField {
     Memory,
     CpuCores,
     Vga,
     Audio,
-    Network,
-    NetBackend,
-    BridgeName,
-    PortForwards,
-    MacAddress,
+    NetworkAdapters,
     DiskInterface,
     Display,
     Kvm,
@@ -2048,74 +2053,21 @@ impl QemuField {
             1 => Self::CpuCores,
             2 => Self::Vga,
             3 => Self::Audio,
-            4 => Self::Network,
-            5 => Self::NetBackend,
-            6 => Self::BridgeName,
-            7 => Self::PortForwards,
-            8 => Self::MacAddress,
-            9 => Self::DiskInterface,
-            10 => Self::Display,
-            11 => Self::Kvm,
-            12 => Self::GlAccel,
-            13 => Self::Uefi,
-            14 => Self::Tpm,
-            15 => Self::UsbTablet,
+            4 => Self::NetworkAdapters,
+            5 => Self::DiskInterface,
+            6 => Self::Display,
+            7 => Self::Kvm,
+            8 => Self::GlAccel,
+            9 => Self::Uefi,
+            10 => Self::Tpm,
+            11 => Self::UsbTablet,
             _ => Self::RtcLocal,
         }
     }
 
     fn count() -> usize {
-        17
+        13
     }
-
-    /// Whether this field is currently rendered in step 4. Mirrors the
-    /// conditional `render_step_configure_qemu` blocks so that keyboard
-    /// navigation and edit actions can avoid landing on hidden rows.
-    /// Issue #31.
-    fn is_visible(self, config: &WizardQemuConfig) -> bool {
-        use QemuField::*;
-        let net_on = config.network_model != "none";
-        match self {
-            NetBackend | MacAddress => net_on,
-            BridgeName => net_on && config.network_backend == "bridge",
-            PortForwards => {
-                net_on && (config.network_backend == "user" || config.network_backend == "passt")
-            }
-            _ => true,
-        }
-    }
-}
-
-/// Return the next currently-visible field index in the given direction,
-/// or `current` if no visible neighbour exists. Used to skip rows that
-/// `render_step_configure_qemu` is hiding.
-fn next_visible_field(current: usize, config: &WizardQemuConfig, delta: i32) -> usize {
-    let max = QemuField::count() as i32 - 1;
-    let mut idx = current as i32;
-    loop {
-        idx += delta;
-        if idx < 0 || idx > max {
-            return current;
-        }
-        if QemuField::from_index(idx as usize).is_visible(config) {
-            return idx as usize;
-        }
-    }
-}
-
-/// If `focus` lands on a hidden field, snap it to the nearest visible
-/// neighbour (preferring forward). Used after config-mutating actions
-/// (`r` reset, Left/Right cycle) so the user never observes a stranded
-/// invisible cursor.
-fn snap_focus_to_visible(focus: usize, config: &WizardQemuConfig) -> usize {
-    if QemuField::from_index(focus).is_visible(config) {
-        return focus;
-    }
-    let fwd = next_visible_field(focus, config, 1);
-    if fwd != focus {
-        return fwd;
-    }
-    next_visible_field(focus, config, -1)
 }
 
 fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
@@ -2240,95 +2192,23 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
         "[←/→] cycle",
     ));
 
-    // Network adapter (cycle)
+    // Network adapters (opens the NIC list overlay)
     let net_selected = focus == 4;
+    let net_display = format!(
+        "{} adapter{}",
+        config.network_adapters.len(),
+        if config.network_adapters.len() == 1 { "" } else { "s" }
+    );
     lines.push(render_field_line(
         "Network:",
-        &config.network_model,
+        &net_display,
         net_selected,
         false,
-        "[←/→] cycle",
+        "[Enter] configure",
     ));
 
-    // Network backend (cycle) - hidden if network model is "none"
-    if QemuField::NetBackend.is_visible(config) {
-        let backend_selected = focus == 5;
-        let backend_display = match config.network_backend.as_str() {
-            "user" => "user/SLIRP (NAT)".to_string(),
-            "passt" => "passt".to_string(),
-            "bridge" => format!(
-                "bridge ({})",
-                config.bridge_name.as_deref().unwrap_or("qemubr0")
-            ),
-            "none" => "none".to_string(),
-            other => other.to_string(),
-        };
-        lines.push(render_field_line(
-            "Net Backend:",
-            &backend_display,
-            backend_selected,
-            false,
-            "[←/→] cycle",
-        ));
-
-        // Bridge name (only for bridge backend)
-        if QemuField::BridgeName.is_visible(config) {
-            let bridge_selected = focus == 6;
-            let bridge_display = config.bridge_name.as_deref().unwrap_or("qemubr0");
-            lines.push(render_field_line(
-                "Bridge:",
-                bridge_display,
-                bridge_selected,
-                false,
-                "[←/→] cycle",
-            ));
-        }
-
-        // Port forwards (only for user/passt)
-        if QemuField::PortForwards.is_visible(config) {
-            let pf_selected = focus == 7;
-            let pf_display = if config.port_forwards.is_empty() {
-                "none".to_string()
-            } else {
-                format!("{} rule(s)", config.port_forwards.len())
-            };
-            lines.push(render_field_line(
-                "Forwards:",
-                &pf_display,
-                pf_selected,
-                false,
-                "[Enter] edit",
-            ));
-        }
-
-        // MAC address (text input, hidden when network model is "none")
-        let mac_selected = focus == 8;
-        let mac_editing = matches!(state.editing_field, Some(WizardField::MacAddress));
-        let mac_value = if mac_editing {
-            format!("{}|", state.wizard_edit_buffer)
-        } else if let Some(mac) = config.mac_address.as_deref() {
-            mac.to_string()
-        } else {
-            "(auto)".to_string()
-        };
-        let mac_hint = if mac_editing {
-            "[Enter] Done  [Esc] Cancel"
-        } else if mac_selected {
-            "[Tab] Edit  [g] Generate  [c] Clear"
-        } else {
-            ""
-        };
-        lines.push(render_field_line(
-            "MAC:",
-            &mac_value,
-            mac_selected,
-            mac_editing,
-            mac_hint,
-        ));
-    }
-
     // Disk Interface (cycle)
-    let disk_selected = focus == 9;
+    let disk_selected = focus == 5;
     lines.push(render_field_line(
         "Disk I/F:",
         &config.disk_interface,
@@ -2338,7 +2218,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // Display (cycle)
-    let disp_selected = focus == 10;
+    let disp_selected = focus == 6;
     lines.push(render_field_line(
         "Display:",
         &config.display,
@@ -2354,7 +2234,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // KVM toggle
-    let kvm_selected = focus == 11;
+    let kvm_selected = focus == 7;
     lines.push(render_toggle_line(
         "KVM Accel:",
         config.enable_kvm,
@@ -2362,7 +2242,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // 3D/GL acceleration toggle
-    let gl_selected = focus == 12;
+    let gl_selected = focus == 8;
     lines.push(render_toggle_line(
         "3D Accel:",
         config.gl_acceleration,
@@ -2370,15 +2250,15 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // UEFI toggle
-    let uefi_selected = focus == 13;
+    let uefi_selected = focus == 9;
     lines.push(render_toggle_line("UEFI Boot:", config.uefi, uefi_selected));
 
     // TPM toggle
-    let tpm_selected = focus == 14;
+    let tpm_selected = focus == 10;
     lines.push(render_toggle_line("TPM 2.0:", config.tpm, tpm_selected));
 
     // USB Tablet toggle
-    let usb_selected = focus == 15;
+    let usb_selected = focus == 11;
     lines.push(render_toggle_line(
         "USB Tablet:",
         config.usb_tablet,
@@ -2386,7 +2266,7 @@ fn render_step_configure_qemu(app: &App, frame: &mut Frame, area: Rect) {
     ));
 
     // RTC Local toggle
-    let rtc_selected = focus == 16;
+    let rtc_selected = focus == 12;
     lines.push(render_toggle_line(
         "RTC Local:",
         config.rtc_localtime,
@@ -2566,57 +2446,12 @@ fn get_field_notes(app: &App, focus: usize) -> String {
             None: Server/headless",
             os_name
         ),
-        QemuField::Network => format!(
-            "Network adapter for {}.\n\n\
-            virtio: Best perf (needs driver)\n\
-            e1000: Wide compat (Intel)\n\
-            rtl8139: Win XP built-in\n\
-            ne2k_pci: DOS/old Linux\n\
-            pcnet: BSD compatible",
-            os_name
-        ),
-        QemuField::NetBackend => format!(
-            "Network backend for {}.\n\n\
-            user: NAT via SLIRP (default)\n  Works everywhere, no setup needed\n\n\
-            passt: Fast NAT, ping works\n  Requires passt package\n\n\
-            bridge: Full network access\n  VM gets own IP on LAN\n  One-time setup needed\n\n\
-            none: No networking",
-            os_name
-        ),
-        QemuField::BridgeName => {
-            let bridges = &app.network_caps.system_bridges;
-            let bridges_str = if bridges.is_empty() {
-                "No bridges detected on system.".to_string()
-            } else {
-                format!("Available: {}", bridges.join(", "))
-            };
-            format!(
-                "Network bridge for {}.\n\n\
-                {}\n\n\
-                The VM will get its own IP on the bridge network, \
-                providing full LAN access.\n\n\
-                Requires qemu-bridge-helper with proper permissions.",
-                os_name, bridges_str
-            )
-        }
-        QemuField::PortForwards => format!(
-            "Port forwarding for {}.\n\n\
-            Forward host ports to the VM for \
-            services like SSH, HTTP, RDP.\n\n\
-            Only available with user (NAT) and \
-            passt backends.\n\n\
-            Press Enter to edit forwarding rules.",
-            os_name
-        ),
-        QemuField::MacAddress => format!(
-            "MAC address for {}.\n\n\
-            Leave empty for QEMU to pick one. \
-            Set explicitly when you need a stable MAC \
-            (DHCP reservations, license-bound guests, \
-            host firewall rules).\n\n\
-            Format: aa:bb:cc:dd:ee:ff\n\
-            Press [g] to generate a random MAC \
-            with QEMU's safe 52:54:00 prefix.",
+        QemuField::NetworkAdapters => format!(
+            "Network adapters for {}.\n\n\
+            A VM can have any number of network adapters, each with \
+            its own model, backend, and (for bridge) target network.\n\n\
+            Press Enter to open the adapter list, where you can select \
+            an adapter to configure, add a new one, or delete one.",
             os_name
         ),
         QemuField::DiskInterface => format!(
@@ -2680,9 +2515,19 @@ fn get_field_notes(app: &App, focus: usize) -> String {
 }
 
 fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
-    // Handle wizard port forward editing
+    // Handle wizard port forward editing (nested inside the NIC field editor)
     if app.wizard_editing_port_forwards {
         return handle_wizard_port_forward_editor(app, key);
+    }
+
+    // Handle the per-NIC field editor (nested inside the NIC list)
+    if app.wizard_editing_nic_fields {
+        return handle_wizard_nic_editor_key(app, key);
+    }
+
+    // Handle the NIC list overlay
+    if app.wizard_editing_nics {
+        return handle_wizard_nic_list_key(app, key);
     }
 
     // Check if we're in edit mode for Memory or CPU
@@ -2696,50 +2541,6 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
         .as_ref()
         .map(|s| matches!(s.editing_field, Some(WizardField::CpuCores)))
         .unwrap_or(false);
-    let editing_mac = app
-        .wizard_state
-        .as_ref()
-        .map(|s| matches!(s.editing_field, Some(WizardField::MacAddress)))
-        .unwrap_or(false);
-
-    if editing_mac {
-        let mut bad_mac: Option<String> = None;
-        if let Some(ref mut state) = app.wizard_state {
-            match key.code {
-                KeyCode::Esc => {
-                    state.editing_field = None;
-                    state.wizard_edit_buffer.clear();
-                }
-                KeyCode::Enter | KeyCode::Tab => {
-                    let trimmed = state.wizard_edit_buffer.trim().to_string();
-                    if trimmed.is_empty() {
-                        state.qemu_config.mac_address = None;
-                        state.editing_field = None;
-                        state.wizard_edit_buffer.clear();
-                    } else if crate::vm::mac::is_valid_mac(&trimmed) {
-                        state.qemu_config.mac_address = Some(trimmed.to_lowercase());
-                        state.editing_field = None;
-                        state.wizard_edit_buffer.clear();
-                    } else {
-                        bad_mac = Some(trimmed);
-                    }
-                }
-                KeyCode::Char(c) if c.is_ascii_hexdigit() || c == ':' => {
-                    if state.wizard_edit_buffer.len() < 17 {
-                        state.wizard_edit_buffer.push(c);
-                    }
-                }
-                KeyCode::Backspace => {
-                    state.wizard_edit_buffer.pop();
-                }
-                _ => {}
-            }
-        }
-        if let Some(bad) = bad_mac {
-            app.set_status(format!("Invalid MAC address: {}", bad));
-        }
-        return Ok(());
-    }
 
     if editing_memory || editing_cpu {
         // Text input mode for Memory or CPU
@@ -2807,31 +2608,28 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             app.wizard_prev_step();
         }
         KeyCode::Enter => {
-            // Open port-forward editor only if PortForwards is the focused
-            // *and* currently visible row. Issue #31.
-            let on_visible_pf = app
+            // Open the NIC list overlay only if NetworkAdapters is focused.
+            let on_network_adapters = app
                 .wizard_state
                 .as_ref()
-                .map(|s| {
-                    let field = QemuField::from_index(s.field_focus);
-                    field == QemuField::PortForwards && field.is_visible(&s.qemu_config)
-                })
+                .map(|s| QemuField::from_index(s.field_focus) == QemuField::NetworkAdapters)
                 .unwrap_or(false);
-            if on_visible_pf {
-                app.wizard_editing_port_forwards = true;
-                app.wizard_pf_selected = 0;
-                app.wizard_adding_pf = None;
+            if on_network_adapters {
+                let active_nic = app
+                    .wizard_state
+                    .as_ref()
+                    .map(|s| s.qemu_config.active_nic)
+                    .unwrap_or(0);
+                app.wizard_nic_list_cursor = active_nic;
+                app.wizard_editing_nics = true;
             } else {
                 let _ = app.wizard_next_step();
             }
         }
         KeyCode::Tab => {
-            // Enter edit mode for Memory, CPU, or MAC fields
+            // Enter edit mode for Memory or CPU fields
             if let Some(ref mut state) = app.wizard_state {
                 let field = QemuField::from_index(state.field_focus);
-                if !field.is_visible(&state.qemu_config) {
-                    return Ok(());
-                }
                 match field {
                     QemuField::Memory => {
                         state.editing_field = Some(WizardField::MemoryMb);
@@ -2841,39 +2639,22 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
                         state.editing_field = Some(WizardField::CpuCores);
                         state.wizard_edit_buffer = state.qemu_config.cpu_cores.to_string();
                     }
-                    QemuField::MacAddress => {
-                        state.editing_field = Some(WizardField::MacAddress);
-                        state.wizard_edit_buffer =
-                            state.qemu_config.mac_address.clone().unwrap_or_default();
-                    }
                     _ => {}
-                }
-            }
-        }
-        KeyCode::Char('g') => {
-            if let Some(ref mut state) = app.wizard_state {
-                let field = QemuField::from_index(state.field_focus);
-                if field == QemuField::MacAddress && field.is_visible(&state.qemu_config) {
-                    state.qemu_config.mac_address = Some(crate::vm::mac::generate_random_mac());
-                }
-            }
-        }
-        KeyCode::Char('c') => {
-            if let Some(ref mut state) = app.wizard_state {
-                let field = QemuField::from_index(state.field_focus);
-                if field == QemuField::MacAddress && field.is_visible(&state.qemu_config) {
-                    state.qemu_config.mac_address = None;
                 }
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(ref mut state) = app.wizard_state {
-                state.field_focus = next_visible_field(state.field_focus, &state.qemu_config, 1);
+                if state.field_focus < QemuField::count() - 1 {
+                    state.field_focus += 1;
+                }
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             if let Some(ref mut state) = app.wizard_state {
-                state.field_focus = next_visible_field(state.field_focus, &state.qemu_config, -1);
+                if state.field_focus > 0 {
+                    state.field_focus -= 1;
+                }
             }
         }
         KeyCode::Left | KeyCode::Right => {
@@ -2930,9 +2711,6 @@ fn handle_step_configure_qemu(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(profile) = app.wizard_selected_profile().cloned() {
                 if let Some(ref mut state) = app.wizard_state {
                     state.qemu_config = WizardQemuConfig::from_profile(&profile);
-                    // Profile defaults may hide the previously-focused row.
-                    state.field_focus =
-                        snap_focus_to_visible(state.field_focus, &state.qemu_config);
                 }
             }
         }
@@ -2971,7 +2749,10 @@ fn handle_wizard_port_forward_editor(app: &mut App, key: KeyEvent) -> Result<()>
                             guest_port: guest,
                         };
                         if let Some(ref mut state) = app.wizard_state {
-                            state.qemu_config.port_forwards.push(pf);
+                            let active_nic = state.qemu_config.active_nic;
+                            state.qemu_config.network_adapters[active_nic]
+                                .port_forwards
+                                .push(pf);
                         }
                         app.wizard_adding_pf = None;
                     }
@@ -3013,7 +2794,9 @@ fn handle_wizard_port_forward_editor(app: &mut App, key: KeyEvent) -> Result<()>
             let pf_len = app
                 .wizard_state
                 .as_ref()
-                .map(|s| s.qemu_config.port_forwards.len())
+                .map(|s| s.qemu_config.network_adapters[s.qemu_config.active_nic]
+                    .port_forwards
+                    .len())
                 .unwrap_or(0);
             if app.wizard_pf_selected < pf_len.saturating_sub(1) {
                 app.wizard_pf_selected += 1;
@@ -3034,15 +2817,11 @@ fn handle_wizard_port_forward_editor(app: &mut App, key: KeyEvent) -> Result<()>
         }
         KeyCode::Char('d') | KeyCode::Delete => {
             if let Some(ref mut state) = app.wizard_state {
-                if !state.qemu_config.port_forwards.is_empty()
-                    && app.wizard_pf_selected < state.qemu_config.port_forwards.len()
-                {
-                    state
-                        .qemu_config
-                        .port_forwards
-                        .remove(app.wizard_pf_selected);
-                    if app.wizard_pf_selected >= state.qemu_config.port_forwards.len()
-                        && app.wizard_pf_selected > 0
+                let active_nic = state.qemu_config.active_nic;
+                let port_forwards = &mut state.qemu_config.network_adapters[active_nic].port_forwards;
+                if !port_forwards.is_empty() && app.wizard_pf_selected < port_forwards.len() {
+                    port_forwards.remove(app.wizard_pf_selected);
+                    if app.wizard_pf_selected >= port_forwards.len() && app.wizard_pf_selected > 0
                     {
                         app.wizard_pf_selected -= 1;
                     }
@@ -3060,6 +2839,257 @@ fn handle_wizard_port_forward_editor(app: &mut App, key: KeyEvent) -> Result<()>
     Ok(())
 }
 
+/// Handle key events for the wizard's NIC list overlay.
+fn handle_wizard_nic_list_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    let nic_count = app
+        .wizard_state
+        .as_ref()
+        .map(|s| s.qemu_config.network_adapters.len())
+        .unwrap_or(1);
+
+    match key.code {
+        KeyCode::Esc => {
+            app.wizard_editing_nics = false;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if app.wizard_nic_list_cursor < nic_count.saturating_sub(1) {
+                app.wizard_nic_list_cursor += 1;
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if app.wizard_nic_list_cursor > 0 {
+                app.wizard_nic_list_cursor -= 1;
+            }
+        }
+        KeyCode::Enter => {
+            let cursor = app.wizard_nic_list_cursor;
+            if let Some(ref mut state) = app.wizard_state {
+                state.qemu_config.active_nic = cursor;
+            }
+            app.wizard_nic_field_focus = 0;
+            app.wizard_editing_nic_fields = true;
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            // Add a new NIC and jump straight into editing it.
+            if let Some(ref mut state) = app.wizard_state {
+                state.qemu_config.network_adapters.push(NicConfig::default());
+                state.qemu_config.active_nic = state.qemu_config.network_adapters.len() - 1;
+                app.wizard_nic_list_cursor = state.qemu_config.active_nic;
+            }
+            app.wizard_nic_field_focus = 0;
+            app.wizard_editing_nic_fields = true;
+        }
+        KeyCode::Char('d') | KeyCode::Delete => {
+            let cursor = app.wizard_nic_list_cursor;
+            let mut new_cursor = cursor;
+            if let Some(ref mut state) = app.wizard_state {
+                if cursor < state.qemu_config.network_adapters.len()
+                    && state.qemu_config.network_adapters.len() > 1
+                {
+                    state.qemu_config.network_adapters.remove(cursor);
+                    // Keep active_nic pointing at the same adapter it did
+                    // before the removal (or the nearest one left).
+                    if state.qemu_config.active_nic == cursor {
+                        if state.qemu_config.active_nic
+                            >= state.qemu_config.network_adapters.len()
+                        {
+                            state.qemu_config.active_nic =
+                                state.qemu_config.network_adapters.len() - 1;
+                        }
+                    } else if state.qemu_config.active_nic > cursor {
+                        state.qemu_config.active_nic -= 1;
+                    }
+                    if new_cursor >= state.qemu_config.network_adapters.len() {
+                        new_cursor = state.qemu_config.network_adapters.len() - 1;
+                    }
+                }
+            }
+            app.wizard_nic_list_cursor = new_cursor;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Handle key events for the wizard's per-NIC field editor.
+fn handle_wizard_nic_editor_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    // MAC edit mode: capture text input first.
+    let editing_mac = app
+        .wizard_state
+        .as_ref()
+        .map(|s| matches!(s.editing_field, Some(WizardField::MacAddress)))
+        .unwrap_or(false);
+    if editing_mac {
+        let mut bad_mac: Option<String> = None;
+        if let Some(ref mut state) = app.wizard_state {
+            match key.code {
+                KeyCode::Esc => {
+                    state.editing_field = None;
+                    state.wizard_edit_buffer.clear();
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    let trimmed = state.wizard_edit_buffer.trim().to_string();
+                    let active_nic = state.qemu_config.active_nic;
+                    if trimmed.is_empty() {
+                        state.qemu_config.network_adapters[active_nic].mac_address = None;
+                        state.editing_field = None;
+                        state.wizard_edit_buffer.clear();
+                    } else if crate::vm::mac::is_valid_mac(&trimmed) {
+                        state.qemu_config.network_adapters[active_nic].mac_address =
+                            Some(trimmed.to_lowercase());
+                        state.editing_field = None;
+                        state.wizard_edit_buffer.clear();
+                    } else {
+                        bad_mac = Some(trimmed);
+                    }
+                }
+                KeyCode::Char(c) if c.is_ascii_hexdigit() || c == ':' => {
+                    if state.wizard_edit_buffer.len() < 17 {
+                        state.wizard_edit_buffer.push(c);
+                    }
+                }
+                KeyCode::Backspace => {
+                    state.wizard_edit_buffer.pop();
+                }
+                _ => {}
+            }
+        }
+        if let Some(bad) = bad_mac {
+            app.set_status(format!("Invalid MAC address: {}", bad));
+        }
+        return Ok(());
+    }
+
+    let backend_stops = app.get_network_backend_stops();
+    let system_bridges = app.bridge_picker_list();
+    let default_bridge = system_bridges
+        .first()
+        .cloned()
+        .or_else(|| Some("qemubr0".to_string()));
+
+    let Some((show_pf, show_mac, max_field)) = app.wizard_state.as_ref().map(|state| {
+        let nic = &state.qemu_config.network_adapters[state.qemu_config.active_nic];
+        (
+            nic.show_port_forwards(),
+            nic.show_mac(),
+            nic.max_editor_field(),
+        )
+    }) else {
+        return Ok(());
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.wizard_editing_nic_fields = false;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if app.wizard_nic_field_focus < max_field {
+                app.wizard_nic_field_focus += 1;
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if app.wizard_nic_field_focus > 0 {
+                app.wizard_nic_field_focus -= 1;
+            }
+        }
+        KeyCode::Char('g') => {
+            if app.wizard_nic_field_focus == 2 && show_mac {
+                if let Some(ref mut state) = app.wizard_state {
+                    let active_nic = state.qemu_config.active_nic;
+                    state.qemu_config.network_adapters[active_nic].mac_address =
+                        Some(crate::vm::mac::generate_random_mac());
+                }
+            }
+        }
+        KeyCode::Char('c') => {
+            if app.wizard_nic_field_focus == 2 && show_mac {
+                if let Some(ref mut state) = app.wizard_state {
+                    let active_nic = state.qemu_config.active_nic;
+                    state.qemu_config.network_adapters[active_nic].mac_address = None;
+                }
+            }
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+            if key.code == KeyCode::Tab && app.wizard_nic_field_focus == 2 && show_mac {
+                // Tab on the MAC field opens text-edit mode (no "reverse"
+                // equivalent — Shift+Tab there is a no-op, like Left/Right).
+                if let Some(ref mut state) = app.wizard_state {
+                    state.editing_field = Some(WizardField::MacAddress);
+                    let active_nic = state.qemu_config.active_nic;
+                    state.wizard_edit_buffer = state.qemu_config.network_adapters[active_nic]
+                        .mac_address
+                        .clone()
+                        .unwrap_or_default();
+                }
+                return Ok(());
+            }
+            // Cycle the focused field (Right/Tab forward, Left/Shift+Tab back).
+            let delta = if matches!(key.code, KeyCode::Right | KeyCode::Tab) {
+                1i32
+            } else {
+                -1i32
+            };
+            if let Some(ref mut state) = app.wizard_state {
+                let active_nic = state.qemu_config.active_nic;
+                match app.wizard_nic_field_focus {
+                    0 => {
+                        cycle_option(
+                            &mut state.qemu_config.network_adapters[active_nic].model,
+                            NETWORK_OPTIONS,
+                            delta,
+                        );
+                    }
+                    1 => {
+                        state.qemu_config.network_adapters[active_nic].cycle_backend(
+                            &backend_stops,
+                            &default_bridge,
+                            delta,
+                        );
+                    }
+                    3 if state.qemu_config.network_adapters[active_nic].backend == "bridge" => {
+                        if !system_bridges.is_empty() {
+                            let current_bridge = state.qemu_config.network_adapters[active_nic]
+                                .bridge_name
+                                .as_deref()
+                                .unwrap_or("");
+                            let current_idx = system_bridges
+                                .iter()
+                                .position(|b| b == current_bridge)
+                                .unwrap_or(0);
+                            let new_idx = (current_idx as i32 + delta)
+                                .rem_euclid(system_bridges.len() as i32)
+                                as usize;
+                            state.qemu_config.network_adapters[active_nic].bridge_name =
+                                Some(system_bridges[new_idx].clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if app.wizard_nic_field_focus == 2 && show_mac {
+                if let Some(ref mut state) = app.wizard_state {
+                    state.editing_field = Some(WizardField::MacAddress);
+                    let active_nic = state.qemu_config.active_nic;
+                    state.wizard_edit_buffer = state.qemu_config.network_adapters[active_nic]
+                        .mac_address
+                        .clone()
+                        .unwrap_or_default();
+                }
+            } else if app.wizard_nic_field_focus == 3 && show_pf {
+                app.wizard_editing_port_forwards = true;
+                app.wizard_pf_selected = 0;
+                app.wizard_adding_pf = None;
+            }
+            // No action on this field — Enter never leaves the editor;
+            // only Esc does.
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn add_wizard_preset(
     app: &mut App,
     protocol: crate::vm::qemu_config::PortProtocol,
@@ -3067,25 +3097,225 @@ fn add_wizard_preset(
     guest_port: u16,
 ) {
     if let Some(ref mut state) = app.wizard_state {
-        if !state
-            .qemu_config
-            .port_forwards
+        let active_nic = state.qemu_config.active_nic;
+        let port_forwards = &mut state.qemu_config.network_adapters[active_nic].port_forwards;
+        if !port_forwards
             .iter()
             .any(|pf| pf.host_port == host_port && pf.guest_port == guest_port)
         {
-            state
-                .qemu_config
-                .port_forwards
-                .push(crate::vm::qemu_config::PortForward {
-                    protocol,
-                    host_port,
-                    guest_port,
-                });
+            port_forwards.push(crate::vm::qemu_config::PortForward {
+                protocol,
+                host_port,
+                guest_port,
+            });
         }
     }
 }
 
-/// Render the port-forward editor as a popup over the wizard dialog.
+/// Render the NIC list overlay as a popup over the wizard dialog.
+fn render_wizard_nic_list(app: &App, frame: &mut Frame, parent: Rect) {
+    let Some(state) = app.wizard_state.as_ref() else {
+        return;
+    };
+
+    let width = parent.width.saturating_sub(8).min(64);
+    let height = parent.height.saturating_sub(6).min(16);
+    let x = parent.x + (parent.width.saturating_sub(width)) / 2;
+    let y = parent.y + (parent.height.saturating_sub(height)) / 2;
+    let area = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Network Adapters ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+
+    let mut lines = Vec::new();
+    for (i, nic) in state.qemu_config.network_adapters.iter().enumerate() {
+        let selected = i == app.wizard_nic_list_cursor;
+        let prefix = if selected { "> " } else { "  " };
+        let style = if selected {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::styled(
+            format!("{}NIC {}: {}", prefix, i + 1, nic.describe()),
+            style,
+        ));
+    }
+    frame.render_widget(Paragraph::new(lines), chunks[0]);
+
+    let help = Paragraph::new("[Enter] Edit  [a] Add  [d] Delete  [j/k] Navigate  [Esc] Done")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[1]);
+}
+
+/// Render the per-NIC field editor overlay, on top of the NIC list.
+fn render_wizard_nic_editor(app: &App, frame: &mut Frame, parent: Rect) {
+    let Some(state) = app.wizard_state.as_ref() else {
+        return;
+    };
+    let nic = &state.qemu_config.network_adapters[state.qemu_config.active_nic];
+    let is_bridge = nic.is_bridge();
+    let show_mac = nic.show_mac();
+    let show_pf = nic.show_port_forwards();
+    let focus = app.wizard_nic_field_focus;
+
+    let width = parent.width.saturating_sub(10).min(60);
+    let height = parent.height.saturating_sub(8).min(14);
+    let x = parent.x + (parent.width.saturating_sub(width)) / 2;
+    let y = parent.y + (parent.height.saturating_sub(height)) / 2;
+    let area = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(
+            " NIC {} of {} ",
+            state.qemu_config.active_nic + 1,
+            state.qemu_config.network_adapters.len()
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(1), // Adapter
+            Constraint::Length(1), // Backend
+            Constraint::Length(1), // MAC
+            Constraint::Length(1), // Bridge / Forwards
+            Constraint::Min(1),    // Spacer
+            Constraint::Length(1), // Help
+        ])
+        .split(inner);
+
+    render_nic_field_row(
+        frame,
+        chunks[0],
+        "Adapter:",
+        &nic.model,
+        focus == 0,
+        false,
+        "[←/→/Tab] cycle",
+    );
+
+    let backend_display = nic.backend_display();
+    render_nic_field_row(
+        frame,
+        chunks[1],
+        "Backend:",
+        &backend_display,
+        focus == 1,
+        false,
+        "[←/→/Tab] cycle",
+    );
+
+    if show_mac {
+        let mac_editing = matches!(state.editing_field, Some(WizardField::MacAddress));
+        let mac_value = if mac_editing {
+            format!("{}|", state.wizard_edit_buffer)
+        } else if let Some(mac) = nic.mac_address.as_deref() {
+            mac.to_string()
+        } else {
+            "(auto)".to_string()
+        };
+        let mac_hint = if mac_editing {
+            "[Enter] Done  [Esc] Cancel"
+        } else if focus == 2 {
+            "[Tab] Edit  [g] Generate  [c] Clear"
+        } else {
+            ""
+        };
+        render_nic_field_row(
+            frame,
+            chunks[2],
+            "MAC:",
+            &mac_value,
+            focus == 2,
+            mac_editing,
+            mac_hint,
+        );
+    }
+
+    if is_bridge {
+        let bridge_display = nic.bridge_name.as_deref().unwrap_or("qemubr0");
+        render_nic_field_row(
+            frame,
+            chunks[3],
+            "Bridge:",
+            bridge_display,
+            focus == 3,
+            false,
+            "[←/→/Tab] cycle",
+        );
+    } else if show_pf {
+        let pf_display = if nic.port_forwards.is_empty() {
+            "none".to_string()
+        } else {
+            format!("{} rule(s)", nic.port_forwards.len())
+        };
+        render_nic_field_row(
+            frame,
+            chunks[3],
+            "Forwards:",
+            &pf_display,
+            focus == 3,
+            false,
+            "[Enter] edit",
+        );
+    }
+
+    let help = Paragraph::new("[j/k] Navigate  [←/→] Change  [Esc] Back")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, chunks[5]);
+}
+
+/// Render a single field row directly into `area` (used by the compact
+/// per-NIC editor popup, which has one row per chunk rather than a single
+/// scrolling list).
+fn render_nic_field_row(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    selected: bool,
+    editing: bool,
+    hint: &str,
+) {
+    let line = render_field_line(label, value, selected, editing, hint);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 fn render_wizard_port_forward_editor(app: &App, frame: &mut Frame, parent: Rect) {
     let Some(state) = app.wizard_state.as_ref() else {
         return;
@@ -3131,7 +3361,7 @@ fn render_wizard_port_forward_editor(app: &App, frame: &mut Frame, parent: Rect)
         .split(inner);
 
     // Rules list
-    let pfs = &state.qemu_config.port_forwards;
+    let pfs = &state.qemu_config.network_adapters[state.qemu_config.active_nic].port_forwards;
     if pfs.is_empty() {
         let msg = Paragraph::new("  No port forwarding rules configured.")
             .style(Style::default().fg(Color::DarkGray));
@@ -3282,29 +3512,10 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
         .unwrap_or_else(|| "qemu-system-x86_64".to_string());
     let dynamic_display_options = app.get_display_options_for_emulator(&emulator);
 
-    // Collect network backend options before mutable borrow
-    let backend_options: Vec<String> = app
-        .get_network_backend_options()
-        .iter()
-        .map(|(id, _)| id.to_string())
-        .collect();
-    let system_bridges = app.network_caps.system_bridges.clone();
-    let default_bridge = system_bridges
-        .first()
-        .cloned()
-        .or_else(|| Some("qemubr0".to_string()));
-
     let Some(ref mut state) = app.wizard_state else {
         return;
     };
     let field = QemuField::from_index(state.field_focus);
-
-    // Issue #31: don't mutate config when the cursor is parked on a row
-    // that the renderer is hiding. Navigation already prevents this in
-    // normal flow; this is a defence-in-depth check.
-    if !field.is_visible(&state.qemu_config) {
-        return;
-    }
 
     match field {
         QemuField::Memory => {
@@ -3321,36 +3532,6 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
         }
         QemuField::Audio => {
             cycle_audio(&mut state.qemu_config.audio, delta);
-        }
-        QemuField::Network => {
-            cycle_option(&mut state.qemu_config.network_model, NETWORK_OPTIONS, delta);
-        }
-        QemuField::NetBackend => {
-            let backend_strs: Vec<&str> = backend_options.iter().map(|s| s.as_str()).collect();
-            cycle_option(&mut state.qemu_config.network_backend, &backend_strs, delta);
-
-            // Set default bridge name when switching to bridge
-            if state.qemu_config.network_backend == "bridge"
-                && state.qemu_config.bridge_name.is_none()
-            {
-                state.qemu_config.bridge_name = default_bridge.clone();
-            }
-        }
-        QemuField::BridgeName => {
-            // Cycle through available system bridges
-            if !system_bridges.is_empty() {
-                let current_bridge = state.qemu_config.bridge_name.as_deref().unwrap_or("");
-                let current_idx = system_bridges
-                    .iter()
-                    .position(|b| b == current_bridge)
-                    .unwrap_or(0);
-                let new_idx =
-                    (current_idx as i32 + delta).rem_euclid(system_bridges.len() as i32) as usize;
-                state.qemu_config.bridge_name = Some(system_bridges[new_idx].clone());
-            }
-        }
-        QemuField::PortForwards => {
-            // Handled via Enter key, not left/right
         }
         QemuField::DiskInterface => {
             cycle_option(
@@ -3369,17 +3550,10 @@ fn handle_qemu_field_change(app: &mut App, delta: i32) {
                 cycle_option(&mut state.qemu_config.display, DISPLAY_OPTIONS, delta);
             }
         }
-        // Toggles use space, not left/right
+        // NetworkAdapters is opened via Enter, not cycled.
+        // Toggles use space, not left/right.
         _ => {}
     }
-
-    // Defence-in-depth: if the just-applied cycle hid the row we were on,
-    // jump to the nearest visible neighbour rather than stranding the
-    // cursor on an invisible field. (Current visibility rules don't
-    // trigger this — focus is always on the field being mutated — but a
-    // future rule that hides a sibling could.) Issue #31.
-    let new_focus = snap_focus_to_visible(state.field_focus, &state.qemu_config);
-    state.field_focus = new_focus;
 }
 
 fn cycle_option(current: &mut String, options: &[&str], delta: i32) {
@@ -3570,26 +3744,32 @@ fn render_step_confirm(app: &App, frame: &mut Frame, area: Rect) {
                 .unwrap_or_else(|| "None".to_string()),
         ),
     ]));
-    let net_display = if config.network_model == "none" {
-        "none".to_string()
-    } else {
-        let backend_str = match config.network_backend.as_str() {
-            "passt" => "passt".to_string(),
-            "bridge" => format!(
-                "bridge ({})",
-                config.bridge_name.as_deref().unwrap_or("qemubr0")
-            ),
-            "none" => "disabled".to_string(),
-            _ => "user/SLIRP (NAT)".to_string(),
+    let multi_nic = config.network_adapters.len() > 1;
+    for (idx, adapter) in config.network_adapters.iter().enumerate() {
+        let net_display = if adapter.model == "none" {
+            "none".to_string()
+        } else {
+            let backend_str = match adapter.backend.as_str() {
+                "passt" => "passt".to_string(),
+                "bridge" => format!(
+                    "bridge ({})",
+                    adapter.bridge_name.as_deref().unwrap_or("qemubr0")
+                ),
+                "none" => "disabled".to_string(),
+                _ => "user/SLIRP (NAT)".to_string(),
+            };
+            format!("{} ({})", adapter.model, backend_str)
         };
-        format!("{} ({})", config.network_model, backend_str)
-    };
-    lines.push(Line::from(vec![
-        Span::styled("Network:        ", Style::default().fg(Color::Yellow)),
-        Span::raw(net_display),
-    ]));
-    if !config.port_forwards.is_empty() {
-        for pf in &config.port_forwards {
+        let label = if multi_nic {
+            format!("Network {}:      ", idx + 1)
+        } else {
+            "Network:        ".to_string()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(label, Style::default().fg(Color::Yellow)),
+            Span::raw(net_display),
+        ]));
+        for pf in &adapter.port_forwards {
             lines.push(Line::from(format!(
                 "                {} {} -> {}",
                 pf.protocol, pf.host_port, pf.guest_port

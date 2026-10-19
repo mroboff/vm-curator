@@ -152,6 +152,14 @@ pub enum UnsavedKind {
     Pci,
     SharedFolders,
     DiskPassthrough,
+    /// Leaving the Network Settings per-NIC field editor with unsaved
+    /// edits to that adapter. Unlike the other kinds, this never pops the
+    /// screen stack — the editor is a nested view within
+    /// `Screen::NetworkSettings`, not its own screen.
+    NicEdit,
+    /// Leaving the Network Settings NIC list (i.e. closing the screen)
+    /// with adapters added/edited/removed since the last save.
+    NicList,
 }
 
 /// Input mode for text entry
@@ -345,6 +353,17 @@ pub struct App {
     pub wizard_pf_selected: usize,
     /// Wizard port forward adding state
     pub wizard_adding_pf: Option<AddingPortForward>,
+    /// Whether the wizard's NIC list overlay (step 4) is active
+    pub wizard_editing_nics: bool,
+    /// Row highlighted in the wizard's NIC list, in
+    /// `0..network_adapters.len()`.
+    pub wizard_nic_list_cursor: usize,
+    /// Whether the wizard's per-NIC field editor (opened from the NIC
+    /// list) is active
+    pub wizard_editing_nic_fields: bool,
+    /// Focused row in the wizard's per-NIC field editor (0=adapter,
+    /// 1=backend, 2=mac, 3=bridge/forwards)
+    pub wizard_nic_field_focus: usize,
 }
 
 /// Entry in file browser
@@ -544,6 +563,10 @@ impl App {
             wizard_editing_port_forwards: false,
             wizard_pf_selected: 0,
             wizard_adding_pf: None,
+            wizard_editing_nics: false,
+            wizard_nic_list_cursor: 0,
+            wizard_editing_nic_fields: false,
+            wizard_nic_field_focus: 0,
         })
     }
 
@@ -578,23 +601,40 @@ impl App {
         preferred_order.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Get available network backend options based on detected capabilities
-    pub fn get_network_backend_options(&self) -> Vec<(&str, &str)> {
-        let mut options = vec![("user", "User/SLIRP (NAT) - Default, works everywhere")];
+    /// Cycle stops for a NIC's "Net Backend" field: `(backend_id,
+    /// bridge_name)`. Expands the generic "bridge" backend into one stop
+    /// per managed Virtual Network Manager network (`vmc-*`) so cycling
+    /// directly lands on a specific managed network, in addition to one
+    /// generic "bridge" stop (bridge_name left as-is / defaulted) for
+    /// manually picking any other host bridge via the Bridge: field.
+    pub fn get_network_backend_stops(&self) -> Vec<(String, Option<String>)> {
+        let mut stops = vec![("user".to_string(), None)];
         if self.network_caps.passt_available {
-            options.push(("passt", "passt - Fast NAT, ping works"));
+            stops.push(("passt".to_string(), None));
         }
         if self.network_caps.bridge_helper_path.is_some() {
-            if !self.network_caps.system_bridges.is_empty()
-                && self.network_caps.bridge_helper_configured
-            {
-                options.push(("bridge", "Bridge - Full network, own IP"));
-            } else {
-                options.push(("bridge", "Bridge - Requires one-time setup"));
+            stops.push(("bridge".to_string(), None));
+            for net in &self.vnet_networks {
+                stops.push(("bridge".to_string(), Some(net.bridge_name())));
             }
         }
-        options.push(("none", "None - No networking"));
-        options
+        stops.push(("none".to_string(), None));
+        stops
+    }
+
+    /// Host bridges available for a NIC's Bridge: field, including managed
+    /// Virtual Network Manager networks (`vmc-*`) even while stopped —
+    /// their bridge only appears in `network_caps.system_bridges` once
+    /// started, but they're still a valid, resolvable attach target.
+    pub fn bridge_picker_list(&self) -> Vec<String> {
+        let mut bridges = self.network_caps.system_bridges.clone();
+        for net in &self.vnet_networks {
+            let bridge = net.bridge_name();
+            if !bridges.contains(&bridge) {
+                bridges.push(bridge);
+            }
+        }
+        bridges
     }
 
     /// Get the currently selected VM

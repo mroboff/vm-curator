@@ -482,12 +482,14 @@ fn render_step_review(state: &ImportWizardState, frame: &mut Frame, area: Rect) 
             Span::styled("  Display:    ", Style::default().fg(Color::Gray)),
             Span::styled(&cfg.display, Style::default().fg(Color::White)),
         ]));
+        let net_display = cfg
+            .network_adapters
+            .first()
+            .map(|n| format!("{} ({})", n.model, n.backend))
+            .unwrap_or_else(|| "none".to_string());
         lines.push(Line::from(vec![
             Span::styled("  Network:    ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{} ({})", cfg.network_model, cfg.network_backend),
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(net_display, Style::default().fg(Color::White)),
         ]));
         lines.push(Line::from(vec![
             Span::styled("  KVM:        ", Style::default().fg(Color::Gray)),

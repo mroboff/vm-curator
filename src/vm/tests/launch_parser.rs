@@ -63,7 +63,7 @@ fn test_extract_port_forwards() {
 fn test_extract_network_passt() {
     let content =
         "qemu-system-x86_64 \\\n  -netdev passt,id=net0 \\\n  -device virtio-net-pci,netdev=net0";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.backend, NetworkBackend::Passt);
 }
 
@@ -71,7 +71,7 @@ fn test_extract_network_passt() {
 fn test_extract_network_bridge() {
     let content =
         "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device e1000,netdev=net0";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.backend, NetworkBackend::Bridge("virbr0".to_string()));
     assert_eq!(config.bridge, Some("virbr0".to_string()));
 }
@@ -79,7 +79,7 @@ fn test_extract_network_bridge() {
 #[test]
 fn test_extract_network_user_with_portfwd() {
     let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  -device e1000,netdev=net0";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.backend, NetworkBackend::User);
     assert_eq!(config.port_forwards.len(), 1);
     assert_eq!(config.port_forwards[0].host_port, 2222);
@@ -89,22 +89,66 @@ fn test_extract_network_user_with_portfwd() {
 #[test]
 fn test_extract_network_mac_on_device() {
     let content = "qemu-system-x86_64 \\\n  -netdev bridge,id=net0,br=virbr0 \\\n  -device virtio-net-pci,netdev=net0,mac=52:54:00:de:ad:be";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.mac_address, Some("52:54:00:de:ad:be".to_string()));
 }
 
 #[test]
 fn test_extract_network_mac_uppercase_normalized() {
     let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0 \\\n  -device e1000,netdev=net0,mac=AA:BB:CC:DD:EE:FF";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.mac_address, Some("aa:bb:cc:dd:ee:ff".to_string()));
 }
 
 #[test]
 fn test_extract_network_no_mac() {
     let content = "qemu-system-x86_64 \\\n  -netdev user,id=net0 \\\n  -device e1000,netdev=net0";
-    let config = extract_network(content).unwrap();
+    let config = extract_networks(content).into_iter().next().unwrap();
     assert_eq!(config.mac_address, None);
+}
+
+#[test]
+fn test_extract_networks_non_numeric_netdev_id_still_parses_backend() {
+    // A hand-edited script may use a descriptive -netdev id instead of this
+    // app's own netN convention. The real backend/bridge must still be
+    // recovered, not silently dropped to the User default (regression: a
+    // save-back via Network Settings would otherwise clobber a working
+    // bridge config with plain user/SLIRP).
+    let content = "qemu-system-x86_64 \\\n  \
+        -netdev bridge,id=mybr0,br=virbr0 \\\n  \
+        -device rtl8139,netdev=mybr0";
+    let configs = extract_networks(content);
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].backend, NetworkBackend::Bridge("virbr0".to_string()));
+    assert_eq!(configs[0].bridge, Some("virbr0".to_string()));
+    assert_eq!(configs[0].model, "rtl8139");
+}
+
+#[test]
+fn test_extract_networks_multiple_nics() {
+    let content = "qemu-system-x86_64 \\\n  \
+        -netdev user,id=net0,hostfwd=tcp::2222-:22 \\\n  \
+        -device e1000,netdev=net0 \\\n  \
+        -netdev bridge,id=net1,br=vmc-lan \\\n  \
+        -device virtio-net-pci,netdev=net1,mac=52:54:00:de:ad:be";
+    let configs = extract_networks(content);
+    assert_eq!(configs.len(), 2);
+
+    assert_eq!(configs[0].backend, NetworkBackend::User);
+    assert_eq!(configs[0].model, "e1000");
+    assert_eq!(configs[0].port_forwards.len(), 1);
+    assert_eq!(configs[0].port_forwards[0].host_port, 2222);
+
+    assert_eq!(
+        configs[1].backend,
+        NetworkBackend::Bridge("vmc-lan".to_string())
+    );
+    assert_eq!(configs[1].bridge, Some("vmc-lan".to_string()));
+    assert_eq!(configs[1].model, "virtio-net");
+    assert_eq!(
+        configs[1].mac_address,
+        Some("52:54:00:de:ad:be".to_string())
+    );
 }
 
 #[test]
