@@ -14,6 +14,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use regex::Regex;
 use std::io::Stdout;
 use std::path::PathBuf;
@@ -230,6 +231,22 @@ fn text_input_contents(context: &TextInputContext, input: &str) -> String {
                 *current_size_bytes as f64 / GIB,
             )
         }
+        TextInputContext::SnapshotName => {
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                format!("{input}_\n\nEnter a name for the new snapshot.")
+            } else {
+                match crate::vm::snapshot::validate_snapshot_name(trimmed) {
+                    Ok(name) if name == trimmed => {
+                        format!("{input}_\n\nSaved as: {name}")
+                    }
+                    Ok(name) => format!(
+                        "{input}_\n\nSaved as: {name}\n(unsafe characters are replaced with '_')"
+                    ),
+                    Err(error) => format!("{input}_\n\n{error}"),
+                }
+            }
+        }
         _ => format!("{input}_"),
     }
 }
@@ -277,16 +294,38 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
 /// Handle mouse input
 fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<()> {
     match mouse.kind {
-        MouseEventKind::ScrollUp => {
-            if app.screen == Screen::MainMenu {
-                app.select_prev();
+        MouseEventKind::ScrollUp => match app.screen {
+            Screen::MainMenu => app.select_prev(),
+            Screen::Management => app.menu_prev(),
+            Screen::Snapshots => {
+                if app.selected_snapshot > 0 {
+                    app.selected_snapshot -= 1;
+                }
             }
-        }
-        MouseEventKind::ScrollDown => {
-            if app.screen == Screen::MainMenu {
-                app.select_next();
+            Screen::NetworkManager => {
+                if app.vnet_selected > 0 {
+                    app.vnet_selected -= 1;
+                }
             }
-        }
+            _ => {}
+        },
+        MouseEventKind::ScrollDown => match app.screen {
+            Screen::MainMenu => app.select_next(),
+            Screen::Management => {
+                app.menu_next(screens::management::menu_item_count(app));
+            }
+            Screen::Snapshots => {
+                if app.selected_snapshot + 1 < app.snapshots.len() {
+                    app.selected_snapshot += 1;
+                }
+            }
+            Screen::NetworkManager => {
+                if app.vnet_selected + 1 < app.vnet_networks.len() {
+                    app.vnet_selected += 1;
+                }
+            }
+            _ => {}
+        },
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => match &app.screen {
             Screen::MainMenu => {
                 handle_main_menu_click(app, mouse.column, mouse.row)?;
@@ -757,6 +796,42 @@ fn render(app: &App, frame: &mut Frame) {
             screens::network_manager::render(app, frame);
         }
     }
+
+    if app.loading {
+        render_loading_overlay(app, frame);
+    }
+}
+
+/// A small modal shown while a background operation is in progress. Without it
+/// the TUI ignores input but otherwise looks frozen.
+fn render_loading_overlay(app: &App, frame: &mut Frame) {
+    let area = frame.area();
+    let width = 56.min(area.width.saturating_sub(4));
+    let height = 5.min(area.height.saturating_sub(4));
+    let dialog = centered_rect(width, height, area);
+    frame.render_widget(Clear, dialog);
+
+    let message = app
+        .status_message
+        .as_deref()
+        .unwrap_or("Background operation in progress...");
+    let block = Block::default()
+        .title(" Working ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let paragraph = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Please wait...",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(message),
+    ])
+    .block(block)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, dialog);
 }
 
 /// Handle key input
@@ -829,6 +904,17 @@ fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+        KeyCode::Home | KeyCode::Char('g') => app.select_first(),
+        KeyCode::End | KeyCode::Char('G') => app.select_last(),
+        KeyCode::Esc => {
+            if app.status_message.is_some() {
+                app.clear_status();
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => match app.refresh_vms() {
+            Ok(()) => app.set_status(format!("Refreshed: {} VMs", app.vms.len())),
+            Err(e) => app.set_status(format!("Error refreshing VMs: {e}")),
+        },
         KeyCode::PageDown => {
             app.info_scroll = app.info_scroll.saturating_add(5);
         }
@@ -930,6 +1016,44 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                 let menu_items = get_menu_items(vm, &app.config);
                 if let Some(item) = menu_items.get(selected_idx) {
                     match item.action {
+                        MenuAction::ValidateVm => {
+                            if let Some(vm) = app.selected_vm().cloned() {
+                                match crate::vm::validate_vm_launch(&vm) {
+                                    Ok(()) => app.set_status(format!(
+                                        "{}: configuration looks valid",
+                                        vm.display_name()
+                                    )),
+                                    Err(error) => app.show_error(format!(
+                                        "VM validation failed for {}\n\n{error:#}",
+                                        vm.display_name()
+                                    )),
+                                }
+                            }
+                        }
+                        MenuAction::PauseResume => {
+                            if let Some(vm) = app.selected_vm().cloned() {
+                                if !app.running_vms.contains_key(&vm.id) {
+                                    app.set_status("VM is not running");
+                                } else {
+                                    let paused = crate::vm::is_vm_paused(&vm.path);
+                                    let result = if paused {
+                                        crate::vm::resume_vm(&vm.path)
+                                    } else {
+                                        crate::vm::pause_vm(&vm.path)
+                                    };
+                                    match result {
+                                        Ok(()) => app.set_status(if paused {
+                                            "VM resumed"
+                                        } else {
+                                            "VM paused (state kept in memory)"
+                                        }),
+                                        Err(error) => app.set_status(format!(
+                                            "Error changing pause state: {error}"
+                                        )),
+                                    }
+                                }
+                            }
+                        }
                         MenuAction::StopVm => {
                             if let Some(vm) = app.selected_vm().cloned() {
                                 if app.selected_vm_pid().is_some() {
@@ -2777,10 +2901,10 @@ fn render_text_input(app: &App, context: &TextInputContext, frame: &mut Frame) {
 
     let area = frame.area();
     let dialog_width = 50.min(area.width.saturating_sub(4));
-    let dialog_height = if matches!(context, TextInputContext::ResizeVmDisk { .. }) {
-        9
-    } else {
-        5
+    let dialog_height = match context {
+        TextInputContext::ResizeVmDisk { .. } => 9,
+        TextInputContext::SnapshotName => 7,
+        _ => 5,
     };
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);

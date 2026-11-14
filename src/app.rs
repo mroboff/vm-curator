@@ -263,6 +263,8 @@ pub struct App {
     pub vm_list_offset: Cell<usize>,
     /// Status message
     pub status_message: Option<String>,
+    /// Whether the current status message reports an error (rendered red/sticky)
+    pub status_is_error: bool,
     /// When status message was set (for auto-clearing)
     pub status_time: Option<Instant>,
     /// Whether the app should quit
@@ -503,6 +505,7 @@ impl App {
             visual_order,
             vm_list_offset: Cell::new(0),
             status_message: None,
+            status_is_error: false,
             status_time: None,
             should_quit: false,
             file_browser_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
@@ -645,6 +648,22 @@ impl App {
         }
     }
 
+    /// Move selection to the first VM
+    pub fn select_first(&mut self) {
+        if !self.visual_order.is_empty() {
+            self.selected_vm = 0;
+            self.info_scroll = 0;
+        }
+    }
+
+    /// Move selection to the last VM
+    pub fn select_last(&mut self) {
+        if !self.visual_order.is_empty() {
+            self.selected_vm = self.visual_order.len() - 1;
+            self.info_scroll = 0;
+        }
+    }
+
     /// Move selection up in VM list (follows visual/hierarchy order)
     pub fn select_prev(&mut self) {
         if !self.visual_order.is_empty() && self.selected_vm > 0 {
@@ -680,14 +699,37 @@ impl App {
         if self.search_query.is_empty() {
             self.filtered_indices = (0..self.vms.len()).collect();
         } else {
-            let query = self.search_query.to_lowercase();
+            let terms: Vec<String> = self
+                .search_query
+                .to_lowercase()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            let metadata = &self.metadata;
             self.filtered_indices = self
                 .vms
                 .iter()
                 .enumerate()
                 .filter(|(_, vm)| {
-                    vm.display_name().to_lowercase().contains(&query)
-                        || vm.id.to_lowercase().contains(&query)
+                    let profile_id = vm.os_profile.as_deref().unwrap_or(&vm.id);
+                    let info = metadata.get(profile_id);
+                    let mut haystack = format!(
+                        "{} {} {} {}",
+                        vm.display_name(),
+                        vm.id,
+                        vm.os_profile.as_deref().unwrap_or(""),
+                        vm.notes.as_deref().unwrap_or("")
+                    );
+                    if let Some(info) = info {
+                        haystack.push(' ');
+                        haystack.push_str(&info.name);
+                        haystack.push(' ');
+                        haystack.push_str(&info.publisher);
+                        haystack.push(' ');
+                        haystack.push_str(&info.blurb.short);
+                    }
+                    let haystack = haystack.to_lowercase();
+                    terms.iter().all(|term| haystack.contains(term))
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -1142,9 +1184,18 @@ impl App {
         }
     }
 
-    /// Set a status message (auto-clears after 5 seconds)
+    /// Set a status message. Errors are detected from the usual prefixes and
+    /// are kept on screen longer than success/info notices.
     pub fn set_status(&mut self, msg: impl Into<String>) {
-        self.status_message = Some(msg.into());
+        let message = msg.into();
+        let lower = message.to_lowercase();
+        self.status_is_error = lower.starts_with("error")
+            || lower.starts_with("cannot ")
+            || lower.starts_with("failed")
+            || lower.contains(" failed")
+            || lower.contains("permission denied")
+            || lower.contains("not found");
+        self.status_message = Some(message);
         self.status_time = Some(Instant::now());
     }
 
@@ -1158,13 +1209,15 @@ impl App {
     /// Clear status message
     pub fn clear_status(&mut self) {
         self.status_message = None;
+        self.status_is_error = false;
         self.status_time = None;
     }
 
     /// Check and clear status if expired (call in event loop)
     pub fn check_status_expiry(&mut self) {
         if let Some(time) = self.status_time {
-            if time.elapsed().as_secs() >= 5 {
+            let ttl = if self.status_is_error { 30 } else { 5 };
+            if time.elapsed().as_secs() >= ttl {
                 self.clear_status();
             }
         }

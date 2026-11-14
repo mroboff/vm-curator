@@ -143,7 +143,12 @@ fn render_help_bar(app: &App, area: Rect, frame: &mut Frame) {
     // Add status message if present (overrides everything)
     if let Some(ref msg) = app.status_message {
         hints.clear();
-        hints.push(Span::styled(msg.clone(), Style::default().fg(Color::Green)));
+        let color = if app.status_is_error {
+            Color::Red
+        } else {
+            Color::Green
+        };
+        hints.push(Span::styled(msg.clone(), Style::default().fg(color)));
     }
 
     let help = Paragraph::new(Line::from(hints))

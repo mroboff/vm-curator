@@ -15,8 +15,8 @@ pub use lifecycle::{
     detect_qemu_processes, force_stop_vm, generate_mount_tag, launch_vm_sync,
     launch_vm_with_error_check, load_disk_passthrough, load_pci_passthrough, load_shared_folders,
     load_usb_passthrough, save_disk_passthrough, save_shared_folders, save_usb_passthrough,
-    smbd_available, stop_vm_by_pid, DiskPassthrough, LaunchOptions, QemuProcess, ShareMode,
-    SharedFolder, UsbPassthrough, WindowSize, SMB_GUEST_SHARE,
+    smbd_available, stop_vm_by_pid, validate_vm_launch, DiskPassthrough, LaunchOptions,
+    QemuProcess, ShareMode, SharedFolder, UsbPassthrough, WindowSize, SMB_GUEST_SHARE,
 };
 pub use qemu_config::{BootMode, QemuConfig};
 pub use single_gpu_scripts::generate_single_gpu_scripts;

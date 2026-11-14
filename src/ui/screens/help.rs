@@ -6,8 +6,8 @@ use ratatui::{
 /// Render the help screen
 pub fn render(frame: &mut Frame) {
     let area = frame.area();
-    let dialog_width = 55.min(area.width.saturating_sub(4));
-    let dialog_height = 28.min(area.height.saturating_sub(4));
+    let dialog_width = 64.min(area.width.saturating_sub(4));
+    let dialog_height = 34.min(area.height.saturating_sub(4));
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
     frame.render_widget(Clear, dialog_area);
@@ -22,50 +22,43 @@ pub fn render(frame: &mut Frame) {
     frame.render_widget(block, dialog_area);
 
     let help_text = vec![
-        Line::from(Span::styled(
-            "Navigation",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
+        heading("Main menu"),
         Line::from(""),
-        key_line("j / Down", "Move selection down"),
-        key_line("k / Up", "Move selection up"),
-        key_line("Enter", "Launch selected VM / Confirm"),
-        key_line("Esc", "Go back / Cancel"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Actions",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
+        key_line("j / k", "Move selection"),
+        key_line("Enter", "Launch selected VM / confirm"),
         key_line("m", "Open Management menu"),
-        key_line("x", "Stop selected VM (graceful shutdown)"),
-        key_line("c", "Create new VM"),
-        key_line("n", "Virtual Network Manager"),
-        key_line("/", "Search/filter VMs"),
+        key_line("c / i", "Create / import a VM"),
+        key_line("s / n", "Settings / Networks"),
+        key_line("x", "Stop the running VM"),
+        key_line("/", "Search VMs, notes and OS names"),
+        key_line("r", "Refresh the VM list"),
+        key_line("Home / End", "Jump to first / last VM"),
+        key_line("g / G", "Jump to first / last VM"),
+        key_line("PgUp / PgDn", "Scroll the info panel"),
+        Line::from(""),
+        heading("Management menu"),
+        Line::from(""),
+        key_line("j / k", "Move between actions"),
+        key_line("Enter", "Run the selected action"),
+        key_line("1 - 9", "Jump directly to an action"),
+        key_line("Esc", "Back to the VM list"),
+        Line::from(""),
+        heading("Lists and dialogs"),
+        Line::from(""),
+        key_line("s / d / r", "Save / delete / restore or refresh"),
+        key_line("Space", "Toggle a checkbox or radio option"),
+        key_line("Esc", "Cancel / go back"),
         Line::from(""),
         Line::from(Span::styled(
-            "Management Menu",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            "Mouse: click and scroll on the main list; the wheel also works in",
+            Style::default().fg(Color::DarkGray),
         )),
-        Line::from(""),
-        key_line("Network", "Backend, port forwarding"),
-        Line::from(""),
         Line::from(Span::styled(
-            "General",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            "management, snapshots and networks. Other screens are keyboard-first.",
+            Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
-        key_line("?", "Show this help"),
-        key_line("q", "Quit application"),
-        Line::from(""),
+        key_line("q / Ctrl+C", "Quit application"),
         Line::from(Span::styled(
             "Press any key to close",
             Style::default().fg(Color::DarkGray),
@@ -76,9 +69,18 @@ pub fn render(frame: &mut Frame) {
     frame.render_widget(para, inner);
 }
 
+fn heading(text: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
 fn key_line<'a>(key: &'a str, description: &'a str) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("  {:12}", key), Style::default().fg(Color::Green)),
+        Span::styled(format!("  {:14}", key), Style::default().fg(Color::Green)),
         Span::raw(description),
     ])
 }

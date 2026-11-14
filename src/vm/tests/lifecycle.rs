@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn test_validate_launch_script_accepts_valid_bash() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("launch.sh");
+    std::fs::write(&script, "#!/usr/bin/env bash\nqemu-system-x86_64 -m 512\n").unwrap();
+    assert!(validate_launch_script(&script).is_ok());
+}
+
+#[test]
+fn test_validate_launch_script_reports_syntax_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("launch.sh");
+    std::fs::write(
+        &script,
+        "#!/usr/bin/env bash\nVM_CURATOR_VIDEO_DEVICE=virtio-device virtio-vga-gl=(-device virtio-vga-gl)\n",
+    )
+    .unwrap();
+    let error = validate_launch_script(&script).unwrap_err().to_string();
+    assert!(error.contains("syntax error"));
+}
+
+#[test]
 fn test_resolve_backing_path_relative_to_overlay() {
     let disk = Path::new("/vms/test/disk.qcow2");
     assert_eq!(

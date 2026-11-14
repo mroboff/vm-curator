@@ -346,6 +346,38 @@ fn build_launch_invocation(
     Ok(invocation)
 }
 
+/// Check a `launch.sh` for shell syntax errors without starting QEMU.
+///
+/// This catches exactly the kind of corruption that is otherwise only visible
+/// after a failed launch. `bash -n` does not execute the script.
+pub fn validate_launch_script(script_path: &Path) -> Result<()> {
+    let output = Command::new("bash")
+        .arg("-n")
+        .arg(script_path)
+        .output()
+        .with_context(|| format!("Failed to run bash -n on {}", script_path.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("launch.sh has a syntax error:\n{}", stderr.trim_end());
+    }
+    Ok(())
+}
+
+/// Validate a VM before launch: shell syntax plus the existence of its system
+/// disk images. Physical `/dev` devices are checked by the script itself.
+pub fn validate_vm_launch(vm: &DiscoveredVm) -> Result<()> {
+    validate_launch_script(&vm.launch_script)?;
+    for disk in &vm.config.disks {
+        if disk.role == super::qemu_config::DiskRole::System
+            && !disk.is_physical_device()
+            && !disk.path.exists()
+        {
+            bail!("System disk not found: {}", disk.path.display());
+        }
+    }
+    Ok(())
+}
+
 /// Launch a VM and monitor for immediate errors
 ///
 /// This function spawns the VM process and monitors stderr for a brief period
@@ -353,6 +385,18 @@ fn build_launch_invocation(
 /// If the process exits with an error within the monitoring window, we capture it.
 pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) -> LaunchResult {
     let vm_name = vm.display_name();
+
+    // Catch script syntax errors and missing disks before opening a log or
+    // spawning anything. Without this, a corrupted launch.sh (e.g. the old
+    // 3D-toggle newline bug) only surfaced as a cryptic QEMU failure.
+    if let Err(error) = validate_vm_launch(vm) {
+        return LaunchResult {
+            success: false,
+            error: Some(format!("{error:#}")),
+            vm_name,
+            pid: None,
+        };
+    }
 
     // Preflight: a bridge backend needs its bridge to exist NOW, otherwise
     // QEMU fails with a cryptic bridge-helper error. Managed networks
