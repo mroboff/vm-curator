@@ -251,7 +251,14 @@ pub fn load_networks(base_dir: &Path) -> Vec<VirtualNetwork> {
             continue;
         };
         match toml::from_str::<VirtualNetwork>(&content) {
-            Ok(net) => networks.push(net),
+            Ok(net) => match net.validate() {
+                Ok(()) => networks.push(net),
+                Err(error) => log::warn!(
+                    "Skipping invalid network definition {}: {}",
+                    toml_path.display(),
+                    error
+                ),
+            },
             Err(_) => continue,
         }
     }
