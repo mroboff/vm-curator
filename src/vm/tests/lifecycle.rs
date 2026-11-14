@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn test_resolve_backing_path_relative_to_overlay() {
+    let disk = Path::new("/vms/test/disk.qcow2");
+    assert_eq!(
+        resolve_backing_path(disk, "base.qcow2"),
+        PathBuf::from("/vms/test/base.qcow2")
+    );
+    assert_eq!(
+        resolve_backing_path(disk, "/images/base.qcow2"),
+        PathBuf::from("/images/base.qcow2")
+    );
+}
+
+#[test]
+fn test_reset_temp_path_stays_in_disk_directory() {
+    let disk = Path::new("/vms/test/disk.qcow2");
+    let temp = reset_temp_path(disk).unwrap();
+    assert_eq!(temp.parent(), disk.parent());
+    assert_ne!(temp, disk);
+    assert!(temp
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with(".qcow2"));
+}
+
+#[test]
 fn test_replace_display_for_dbus_strips_spice_agent_channel() {
     use crate::vm::create::SPICE_AGENT_ARGS;
 

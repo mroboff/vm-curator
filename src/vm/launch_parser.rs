@@ -94,20 +94,24 @@ fn extract_memory(content: &str) -> Option<u32> {
             continue;
         }
 
-        // Look for -m flag
+        // Look for -m flag. QEMU's default unit is MiB, so a bare
+        // `-m 16` is 16 MiB — not 16 GiB. Treat the suffix explicitly;
+        // retro profiles really do use 8/16/32M.
         if let Some(idx) = line.find("-m ") {
             let rest = &line[idx + 3..];
-            let value: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(mem) = value.parse::<u32>() {
-                // Check for G suffix
-                if rest.contains('G') {
-                    return Some(mem * 1024);
-                }
-                // If less than 64, probably gigabytes
-                if mem < 64 {
-                    return Some(mem * 1024);
-                }
-                return Some(mem);
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(mem) = digits.parse::<u32>() {
+                let suffix = rest[digits.len()..].chars().next();
+                let memory_mb = match suffix {
+                    Some('G' | 'g') => mem.saturating_mul(1024),
+                    Some('K' | 'k') => (mem / 1024).max(1),
+                    Some('T' | 't') => mem.saturating_mul(1024 * 1024),
+                    Some('M' | 'm') | None => mem,
+                    // Unknown suffix: QEMU will reject it, but keep the
+                    // numeric value visible rather than guessing GiB.
+                    Some(_) => mem,
+                };
+                return Some(memory_mb);
             }
         }
     }

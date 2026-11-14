@@ -44,9 +44,17 @@ pub fn list_available_emulators() -> Vec<String> {
         .collect()
 }
 
-/// Check KVM availability
+/// Check KVM availability and whether the current user can actually use it.
+///
+/// `/dev/kvm` existing is not enough: users outside the `kvm` group see the
+/// node but get EACCES on open, which used to make `vm-curator emulators`
+/// report KVM as available right before every launch failed.
 pub fn is_kvm_available() -> bool {
-    Path::new("/dev/kvm").exists()
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/kvm")
+        .is_ok()
 }
 
 /// Get supported display backends for a QEMU emulator

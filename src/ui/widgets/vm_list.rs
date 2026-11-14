@@ -88,6 +88,7 @@ pub struct VmListWidget<'a> {
     pub metadata: &'a crate::metadata::MetadataStore,
     pub running_vms: &'a HashMap<String, u32>,
     pub stopping_vms: &'a HashMap<String, Instant>,
+    pub list_offset: &'a std::cell::Cell<usize>,
 }
 
 impl<'a> VmListWidget<'a> {
@@ -101,6 +102,7 @@ impl<'a> VmListWidget<'a> {
             metadata: &app.metadata,
             running_vms: &app.running_vms,
             stopping_vms: &app.stopping_vms,
+            list_offset: &app.vm_list_offset,
         }
     }
 
@@ -160,6 +162,8 @@ impl<'a> VmListWidget<'a> {
             .highlight_symbol("→ ");
 
         StatefulWidget::render(list, area, buf, &mut state);
+        // Record the real scroll offset so mouse hit-testing can add it.
+        self.list_offset.set(state.offset());
     }
 }
 

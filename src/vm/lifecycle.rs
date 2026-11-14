@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::discovery::DiscoveredVm;
 use super::qemu_config::BootMode;
@@ -20,6 +20,8 @@ pub struct LaunchResult {
     pub error: Option<String>,
     /// VM display name for status messages
     pub vm_name: String,
+    /// PID of the QEMU process when `success` is true.
+    pub pid: Option<u32>,
 }
 
 /// Convert a path to a string, returning an error if the path contains invalid UTF-8
@@ -360,6 +362,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
             success: false,
             error: Some(error),
             vm_name,
+            pid: None,
         };
     }
 
@@ -380,6 +383,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 success: false,
                 error: Some(error),
                 vm_name,
+                pid: None,
             };
         }
     };
@@ -401,6 +405,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 success: false,
                 error: Some(format!("Failed to open launch log: {e}")),
                 vm_name,
+                pid: None,
             };
         }
     };
@@ -417,6 +422,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 success: false,
                 error: Some(format!("Failed to start VM process: {}", e)),
                 vm_name,
+                pid: None,
             };
         }
     };
@@ -470,6 +476,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 success: false,
                 error: Some(format!("{error_msg}{log_hint}")),
                 vm_name,
+                pid: None,
             };
         }
         Ok(None) => {
@@ -480,6 +487,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
                 success: false,
                 error: Some(format!("Failed to check VM status: {}", e)),
                 vm_name,
+                pid: None,
             };
         }
     }
@@ -488,6 +496,7 @@ pub fn launch_vm_with_error_check(vm: &DiscoveredVm, options: &LaunchOptions) ->
         success: true,
         error: None,
         vm_name,
+        pid: Some(child.id()),
     }
 }
 
@@ -606,6 +615,36 @@ fn replace_display_for_dbus(content: &str, replacement: &str) -> String {
     s
 }
 
+/// Resolve a qcow2 backing filename the way QEMU does: relative paths are
+/// relative to the overlay's directory, not to the process working directory.
+fn resolve_backing_path(disk_path: &Path, backing: &str) -> PathBuf {
+    let backing = Path::new(backing);
+    if backing.is_absolute() {
+        backing.to_path_buf()
+    } else {
+        disk_path
+            .parent()
+            .map(|parent| parent.join(backing))
+            .unwrap_or_else(|| backing.to_path_buf())
+    }
+}
+
+/// A hidden temporary overlay in the same directory, so the final rename is atomic.
+fn reset_temp_path(disk_path: &Path) -> Result<PathBuf> {
+    let name = disk_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Disk path has no usable file name")?;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    Ok(disk_path.with_file_name(format!(
+        ".{name}.reset-{}-{nanos}.qcow2",
+        std::process::id()
+    )))
+}
+
 /// Reset a VM by recreating its disk from a backing file or template
 pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
     // Find the primary disk
@@ -628,27 +667,43 @@ pub fn reset_vm(vm: &DiscoveredVm) -> Result<()> {
     let info = super::snapshot::get_disk_info(disk_path).context("Failed to get disk info")?;
 
     if let Some(backing) = &info.backing_file {
-        // Recreate from backing file
-        let backing_path = Path::new(backing);
+        // Recreate from backing file. Build the replacement next to the old
+        // disk, then rename over it only after qemu-img succeeds. Deleting the
+        // old disk first would destroy the VM if create fails (wrong -F,
+        // permissions, no space, etc.).
+        let backing_path = resolve_backing_path(disk_path, backing);
         if !backing_path.exists() {
-            bail!("Backing file not found: {}", backing);
+            bail!("Backing file not found: {}", backing_path.display());
         }
 
-        // Remove old disk
-        std::fs::remove_file(disk_path).context("Failed to remove old disk")?;
+        let temp_path = reset_temp_path(disk_path)?;
+        let backing_str = path_to_str(&backing_path)?;
+        let temp_str = path_to_str(&temp_path)?;
+        let backing_format = info.backing_format.as_deref().unwrap_or("qcow2");
 
-        // Create new disk with backing file
-        let disk_str = path_to_str(disk_path)?;
         let output = Command::new("qemu-img")
             .args([
-                "create", "-f", "qcow2", "-F", "qcow2", "-b", backing, disk_str,
+                "create",
+                "-f",
+                "qcow2",
+                "-F",
+                backing_format,
+                "-b",
+                backing_str,
+                temp_str,
             ])
             .output()
-            .context("Failed to create disk from backing file")?;
+            .context("Failed to run qemu-img create for reset")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = std::fs::remove_file(&temp_path);
             bail!("Failed to recreate disk: {}", stderr);
+        }
+
+        if let Err(error) = std::fs::rename(&temp_path, disk_path) {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(error).context("Failed to install the recreated disk");
         }
     } else {
         // Look for a template or fresh install snapshot

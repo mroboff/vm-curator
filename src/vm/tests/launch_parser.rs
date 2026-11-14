@@ -5,6 +5,15 @@ fn test_extract_memory() {
     assert_eq!(extract_memory("-m 512"), Some(512));
     assert_eq!(extract_memory("-m 2G"), Some(2048));
     assert_eq!(extract_memory("qemu -m 1024 -cpu host"), Some(1024));
+
+    // A bare value is MiB (QEMU's default unit), and an explicit M suffix
+    // must not be mistaken for GiB. DOS/retro profiles use 8/16/32M.
+    assert_eq!(extract_memory("-m 16"), Some(16));
+    assert_eq!(extract_memory("-m 16M"), Some(16));
+    assert_eq!(extract_memory("-m 32m"), Some(32));
+    assert_eq!(extract_memory("-m 512M"), Some(512));
+    assert_eq!(extract_memory("-m 4G"), Some(4096));
+    assert_eq!(extract_memory("-m 1024K"), Some(1));
 }
 
 #[test]

@@ -10,6 +10,7 @@
 //! intentionally excluded from the public library API (see the crate root docs).
 
 use anyhow::Result;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -257,6 +258,9 @@ pub struct App {
     pub filtered_indices: Vec<usize>,
     /// Visual order of VMs (maps visual position to filtered_idx for hierarchy navigation)
     pub visual_order: Vec<usize>,
+    /// Scroll offset of the VM list as chosen by the last render. Needed to map
+    /// mouse clicks after the list has scrolled; `ListState` owns this internally.
+    pub vm_list_offset: Cell<usize>,
     /// Status message
     pub status_message: Option<String>,
     /// When status message was set (for auto-clearing)
@@ -497,6 +501,7 @@ impl App {
             input_mode: InputMode::Normal,
             filtered_indices,
             visual_order,
+            vm_list_offset: Cell::new(0),
             status_message: None,
             status_time: None,
             should_quit: false,
@@ -1242,10 +1247,14 @@ impl App {
     fn match_running_vms(&self, processes: &[QemuProcess]) -> HashMap<String, u32> {
         let mut result = HashMap::new();
         for vm in &self.vms {
+            // `vm.path` may be a symlink while /proc/<pid>/cwd reports the
+            // canonical target. Compare both forms so a symlinked library does
+            // not make a running VM look stopped.
+            let canonical_vm_path = vm.path.canonicalize().ok();
             for proc in processes {
                 if let Some(ref cwd) = proc.cwd {
                     // cwd is available — use it as the authoritative match
-                    if cwd == &vm.path {
+                    if cwd == &vm.path || canonical_vm_path.as_ref() == Some(cwd) {
                         result.insert(vm.id.clone(), proc.pid);
                         break;
                     }

@@ -325,8 +325,9 @@ fn handle_main_menu_click(app: &mut App, click_x: u16, click_y: u16) -> Result<(
             && click_y >= list_inner_y
             && click_y < list_inner_y + list_inner_height
         {
-            // Calculate which row was clicked
-            let clicked_row = (click_y - list_inner_y) as usize;
+            // Calculate which row was clicked. The list may be scrolled, so add
+            // the offset the widget recorded during its last render.
+            let clicked_row = app.vm_list_offset.get() + (click_y - list_inner_y) as usize;
 
             // Map clicked row to visual_order index (accounting for header rows)
             if let Some(visual_idx) = widgets::click_row_to_visual_index(
@@ -442,6 +443,11 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
                     let result = launch_vm_with_error_check(&vm, &options);
 
                     if result.success {
+                        // Status polling runs every 3 s; record the PID now so
+                        // reset/delete/resize cannot race a just-launched VM.
+                        if let Some(pid) = result.pid {
+                            app.running_vms.insert(vm.id.clone(), pid);
+                        }
                         app.set_status(format!("Launched: {}", result.vm_name));
                     } else {
                         // Show error in the error dialog for better visibility
@@ -469,7 +475,9 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
         }
         ConfirmAction::DeleteVm => {
             if let Some(vm) = app.selected_vm().cloned() {
-                if let Err(e) = crate::vm::lifecycle::delete_vm(&vm, false) {
+                if app.running_vms.contains_key(&vm.id) {
+                    app.set_status("Cannot delete a running VM. Shut it down first.");
+                } else if let Err(e) = crate::vm::lifecycle::delete_vm(&vm, false) {
                     app.set_status(format!("Error: {}", e));
                 } else {
                     app.set_status(format!("Deleted: {}", vm.display_name()));
@@ -1780,6 +1788,30 @@ struct GlToggleResult {
     display_swapped_to_sdl: bool,
 }
 
+/// Keep the launch-time window-size override's device in sync with a 3D
+/// toggle. `VM_CURATOR_VIDEO_DEVICE` is what the setup block uses at runtime;
+/// if it still says `virtio-vga`, the override replaces `virtio-vga-gl` with a
+/// non-GL device whenever a default window size is configured.
+fn replace_video_device_var(content: &str, device: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        let indent_len = line.len() - line.trim_start().len();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("VM_CURATOR_VIDEO_DEVICE=") {
+            out.push_str(&line[..indent_len]);
+            out.push_str("VM_CURATOR_VIDEO_DEVICE=");
+            out.push_str(device);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !content.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 /// Toggle para-virtualized 3D acceleration in a VM's launch.sh.
 ///
 /// Enable: replace `-vga <X>` with `-device virtio-vga-gl`, append `,gl=on`
@@ -1796,15 +1828,16 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
         // === Disable 3D ===
         // Replace `-device virtio-vga-gl` with `-vga virtio` (best Linux default
         // when we can't recover the original VGA choice).
-        let device_re = Regex::new(r"-device\s+virtio-vga-gl(?:[,\w=-]*)?")?;
+        let device_re = Regex::new(r"-device[ \t]+virtio-vga-gl(?:[,\w=-]*)?")?;
         let after_device = device_re.replace_all(&content, "-vga virtio").to_string();
         // Strip `,gl=on` from `-display <X>,gl=on`.
-        let display_re = Regex::new(r"(-display\s+[\w-]+),gl=on")?;
-        display_re.replace_all(&after_device, "$1").to_string()
+        let display_re = Regex::new(r"(-display[ \t]+[\w-]+),gl=on")?;
+        let after_display = display_re.replace_all(&after_device, "$1").to_string();
+        replace_video_device_var(&after_display, "virtio-vga")
     } else {
         // === Enable 3D ===
         // Replace `-vga <X>` with `-device virtio-vga-gl`.
-        let vga_re = Regex::new(r"-vga\s+[\w-]+")?;
+        let vga_re = Regex::new(r"-vga[ \t]+[\w-]+")?;
         let after_vga = if vga_re.is_match(&content) {
             vga_re
                 .replace_all(&content, "-device virtio-vga-gl")
@@ -1814,7 +1847,7 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
         };
         // Add `,gl=on` to `-display <X>` if not already there. Swap gtk → sdl
         // for noticeably better 3D performance.
-        let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
+        let display_re = Regex::new(r"-display[ \t]+([\w-]+)(,gl=on)?")?;
         let mut swapped = false;
         let after_display = display_re
             .replace_all(&after_vga, |caps: &regex::Captures| {
@@ -1829,7 +1862,7 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
             })
             .to_string();
         display_swapped_to_sdl = swapped;
-        after_display
+        replace_video_device_var(&after_display, "virtio-vga-gl")
     };
 
     std::fs::write(script_path, new_content)?;
@@ -1844,7 +1877,7 @@ fn update_vm_display(script_path: &std::path::Path, new_display: &str) -> Result
 
     // Regex to match -display with optional gl=on suffix
     // Uses [\w-]+ to match hyphenated backends like spice-app
-    let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
+    let display_re = Regex::new(r"-display[ \t]+([\w-]+)(,gl=on)?")?;
 
     let new_content = if display_re.is_match(&content) {
         // Replace existing -display setting, preserving gl=on if present
@@ -2807,7 +2840,11 @@ fn handle_text_input(app: &mut App, context: TextInputContext, key: KeyEvent) ->
                 TextInputContext::SnapshotName => {
                     if !input.is_empty() {
                         if let Some(vm) = app.selected_vm() {
-                            if let Some(disk) = vm.config.primary_disk() {
+                            if app.running_vms.contains_key(&vm.id) {
+                                app.set_status(
+                                    "Cannot create a snapshot while the VM is running. Shut it down first.",
+                                );
+                            } else if let Some(disk) = vm.config.primary_disk() {
                                 // Spawn background thread for snapshot creation
                                 let disk_path = disk.path.clone();
                                 let name = input.clone();
@@ -3399,5 +3436,33 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn gl_toggle_keeps_window_size_override_in_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("launch.sh");
+        std::fs::write(
+            &script,
+            "VM_CURATOR_VIDEO_DEVICE=virtio-vga\n\
+             VM_CURATOR_VIDEO_ARGS=(-vga virtio)\n\
+             qemu-system-x86_64 \\\n\
+             \x20   \"${VM_CURATOR_VIDEO_ARGS[@]}\" \\\n\
+             \x20   -display gtk\n",
+        )
+        .unwrap();
+
+        toggle_vm_gl_acceleration(&script).unwrap();
+        let enabled = std::fs::read_to_string(&script).unwrap();
+        assert!(enabled.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga-gl"));
+        assert!(enabled.contains("VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)"));
+        assert!(enabled.contains("-display sdl,gl=on"));
+
+        toggle_vm_gl_acceleration(&script).unwrap();
+        let disabled = std::fs::read_to_string(&script).unwrap();
+        assert!(disabled.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga"));
+        assert!(disabled.contains("VM_CURATOR_VIDEO_ARGS=(-vga virtio)"));
+        assert!(disabled.contains("-display sdl"));
+        assert!(!disabled.contains("gl=on"));
     }
 }
