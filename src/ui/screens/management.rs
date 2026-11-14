@@ -37,6 +37,8 @@ pub enum MenuAction {
     ResizeStorage,
     ResetVm,
     DeleteVm,
+    OpenVmFolder,
+    OpenLaunchLog,
     EditRawConfig,
 }
 
@@ -160,6 +162,16 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "Delete VM",
             description: "Permanently remove this VM",
             action: MenuAction::DeleteVm,
+        },
+        MenuItem {
+            name: "Open VM Folder",
+            description: "Open the VM directory in the file manager",
+            action: MenuAction::OpenVmFolder,
+        },
+        MenuItem {
+            name: "Open Launch Log",
+            description: "Open qemu.log from the last launch",
+            action: MenuAction::OpenLaunchLog,
         },
         MenuItem {
             name: "Edit Raw Configuration",

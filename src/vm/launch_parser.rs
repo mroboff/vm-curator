@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use super::qemu_config::*;
 use crate::commands::qemu_img;
@@ -574,6 +575,16 @@ fn resolve_path(path: &str, vm_dir: &Path) -> PathBuf {
     }
 }
 
+/// Cached `qemu-img info` results keyed by path, size and mtime. Discovery
+/// runs on every refresh; probing the same unchanged image each time is a
+/// noticeable startup cost on large libraries.
+type FormatCache = Mutex<HashMap<(PathBuf, u64, u128), DiskFormat>>;
+static FORMAT_CACHE: OnceLock<FormatCache> = OnceLock::new();
+
+fn disk_format_cache() -> &'static FormatCache {
+    FORMAT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Detect disk format using qemu-img info, falling back to extension-based guessing
 fn guess_disk_format(path: &Path) -> DiskFormat {
     // Physical block devices are always raw; don't probe them with qemu-img
@@ -584,14 +595,41 @@ fn guess_disk_format(path: &Path) -> DiskFormat {
 
     // First, try to detect the actual format using qemu-img info
     if path.exists() {
+        let metadata = std::fs::metadata(path).ok();
+        let mtime = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|time| {
+                time.duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_nanos())
+            })
+            .unwrap_or(0);
+        let key = (
+            path.to_path_buf(),
+            metadata.as_ref().map(|m| m.len()).unwrap_or(0),
+            mtime,
+        );
+        if let Some(cached) = disk_format_cache()
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key).cloned())
+        {
+            return cached;
+        }
+
         if let Some(format_str) = qemu_img::detect_disk_format(path) {
-            return match format_str.to_lowercase().as_str() {
+            let format = match format_str.to_lowercase().as_str() {
                 "qcow2" => DiskFormat::Qcow2,
                 "raw" => DiskFormat::Raw,
                 "vmdk" => DiskFormat::Vmdk,
                 "vdi" => DiskFormat::Vdi,
                 other => DiskFormat::Other(other.to_string()),
             };
+            if let Ok(mut cache) = disk_format_cache().lock() {
+                cache.insert(key, format.clone());
+            }
+            return format;
         }
     }
 

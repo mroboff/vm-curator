@@ -11,7 +11,8 @@ use ratatui::{
 };
 
 use crate::app::{
-    App, FileBrowserMode, ImportDiskAction, ImportSource, ImportStep, ImportWizardState,
+    App, BackgroundResult, FileBrowserMode, ImportDiskAction, ImportSource, ImportStep,
+    ImportWizardState,
 };
 use crate::vm::import;
 
@@ -786,32 +787,46 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         KeyCode::Enter => {
-            // Execute import
-            let result = execute_import_from_state(app);
-            match result {
-                Ok(()) => {
-                    let vm_name = app
-                        .import_state
-                        .as_ref()
-                        .map(|s| s.vm_name.clone())
-                        .unwrap_or_default();
-                    app.import_state = None;
-
-                    // Pop the ImportWizard screen
-                    while app.screen == crate::app::Screen::ImportWizard {
-                        app.pop_screen();
+            // Run the import in the background: copying a large disk must not
+            // freeze the TUI. The Working overlay is shown while `loading` is set.
+            let (library_path, vm, vm_name, folder_name, disk_action) = {
+                let Some(state) = app.import_state.as_ref() else {
+                    return Ok(());
+                };
+                let Some(vm) = state.selected_vm.as_ref() else {
+                    return Ok(());
+                };
+                if state.vm_name.trim().is_empty() {
+                    if let Some(state) = app.import_state.as_mut() {
+                        state.error_message = Some("VM name cannot be empty".to_string());
                     }
-
-                    // Refresh VM list
-                    let _ = app.refresh_vms();
-                    app.set_status(format!("Imported: {}", vm_name));
+                    return Ok(());
                 }
-                Err(e) => {
-                    if let Some(ref mut state) = app.import_state {
-                        state.error_message = Some(e.to_string());
+                if state.folder_name.is_empty() {
+                    if let Some(state) = app.import_state.as_mut() {
+                        state.error_message = Some("Folder name cannot be empty".to_string());
                     }
+                    return Ok(());
                 }
-            }
+                (
+                    app.config.vm_library_path.clone(),
+                    vm.clone(),
+                    state.vm_name.clone(),
+                    state.folder_name.clone(),
+                    state.disk_action,
+                )
+            };
+
+            let tx = app.background_tx.clone();
+            app.loading = true;
+            app.set_status(format!("Importing {vm_name}..."));
+
+            std::thread::spawn(move || {
+                let result =
+                    import::execute_import(&library_path, &vm, &vm_name, &folder_name, disk_action)
+                        .map_err(|error| format!("{error:#}"));
+                let _ = tx.send(BackgroundResult::ImportFinished { vm_name, result });
+            });
         }
         _ => {}
     }
@@ -843,36 +858,6 @@ fn handle_review_editing(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         _ => {}
     }
-    Ok(())
-}
-
-/// Execute the import using current wizard state
-fn execute_import_from_state(app: &App) -> Result<()> {
-    let state = app
-        .import_state
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Import wizard not active"))?;
-
-    let vm = state
-        .selected_vm
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("No VM selected"))?;
-
-    if state.vm_name.trim().is_empty() {
-        anyhow::bail!("VM name cannot be empty");
-    }
-    if state.folder_name.is_empty() {
-        anyhow::bail!("Folder name cannot be empty");
-    }
-
-    import::execute_import(
-        &app.config.vm_library_path,
-        vm,
-        &state.vm_name,
-        &state.folder_name,
-        state.disk_action,
-    )?;
-
     Ok(())
 }
 

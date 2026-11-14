@@ -636,6 +636,30 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
 
 /// Render a dimming overlay over the entire screen
 /// Uses a dark background that the popup's Clear widget will cut through
+/// RAII guard that restores the TUI if the inner operation panics.
+struct TerminalReleased;
+
+impl Drop for TerminalReleased {
+    fn drop(&mut self) {
+        use crossterm::event::EnableMouseCapture;
+        use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+        let _ = enable_raw_mode();
+        let _ = crossterm::execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture);
+    }
+}
+
+/// Temporarily leave the alternate screen and raw mode so an interactive
+/// `sudo`/`pkexec` prompt is usable, then restore the TUI.
+fn run_with_terminal_released<T>(operation: impl FnOnce() -> T) -> T {
+    use crossterm::event::DisableMouseCapture;
+    use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+
+    let _ = disable_raw_mode();
+    let _ = crossterm::execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _guard = TerminalReleased;
+    operation()
+}
+
 fn render_dim_overlay(_frame: &mut Frame) {
     // Dimming disabled - causing rendering issues
     // The popup's Clear widget and borders provide sufficient contrast
@@ -1247,6 +1271,27 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                         MenuAction::DeleteVm => {
                             app.push_screen(Screen::Confirm(ConfirmAction::DeleteVm));
                         }
+                        MenuAction::OpenVmFolder => {
+                            if let Some(vm) = app.selected_vm() {
+                                match open_path_external(&vm.path) {
+                                    Ok(()) => app.set_status("Opening VM folder..."),
+                                    Err(error) => app.set_status(error),
+                                }
+                            }
+                        }
+                        MenuAction::OpenLaunchLog => {
+                            if let Some(vm) = app.selected_vm() {
+                                let log = crate::vm::lifecycle::qemu_log_path(&vm.path);
+                                if !log.exists() {
+                                    app.set_status("No qemu.log yet — launch this VM once first");
+                                } else {
+                                    match open_path_external(&log) {
+                                        Ok(()) => app.set_status("Opening qemu.log..."),
+                                        Err(error) => app.set_status(error),
+                                    }
+                                }
+                            }
+                        }
                         MenuAction::EditRawConfig => {
                             app.load_script_into_editor();
                             app.push_screen(Screen::RawScript);
@@ -1258,6 +1303,18 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn open_path_external(path: &std::path::Path) -> std::result::Result<(), String> {
+    let candidates: &[(&str, &[&str])] = &[("xdg-open", &[]), ("gio", &["open"]), ("open", &[])];
+    for (program, prefix) in candidates {
+        let mut command = std::process::Command::new(program);
+        command.args(*prefix).arg(path);
+        if command.spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    Err("No file opener found (tried xdg-open, gio and open)".to_string())
 }
 
 fn open_resize_screen(app: &mut App, screen: Screen) {
@@ -2168,9 +2225,12 @@ fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
 
                 app.set_status("Installing udev rules (you may be prompted for your password)...");
 
-                // We need to drop the terminal temporarily for the password prompt
-                // The install function will handle elevation
-                match crate::hardware::install_udev_rules(&selected_devices) {
+                // sudo/pkexec needs the real terminal; raw mode + alternate screen
+                // would hide or garble the password prompt.
+                let install_result = run_with_terminal_released(|| {
+                    crate::hardware::install_udev_rules(&selected_devices)
+                });
+                match install_result {
                     crate::hardware::UdevInstallResult::Success => {
                         app.set_status(
                             "USB permissions installed! Devices should now work without sudo.",
