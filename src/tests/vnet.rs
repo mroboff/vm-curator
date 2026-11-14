@@ -21,6 +21,29 @@ fn name_validation() {
 }
 
 #[test]
+fn load_networks_rejects_invalid_names() {
+    let base = tempfile::tempdir().unwrap();
+    let valid = lab_nat();
+    save_network(base.path(), &valid).unwrap();
+
+    // A definition whose name would escape the networks directory and make
+    // Start/Stop execute an arbitrary script as root.
+    let mut evil = lab_nat();
+    evil.name = "../../tmp/evil".to_string();
+    let evil_dir = base.path().join("evil");
+    std::fs::create_dir_all(&evil_dir).unwrap();
+    std::fs::write(
+        evil_dir.join("network.toml"),
+        toml::to_string_pretty(&evil).unwrap(),
+    )
+    .unwrap();
+
+    let loaded = load_networks(base.path());
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].name, "lab");
+}
+
+#[test]
 fn defaults_derive_gateway_and_dhcp_range() {
     let net = lab_nat();
     assert_eq!(net.subnet, "192.168.150.0/24");

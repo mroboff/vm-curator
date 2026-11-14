@@ -14,6 +14,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use regex::Regex;
 use std::io::Stdout;
 use std::path::PathBuf;
@@ -230,6 +231,22 @@ fn text_input_contents(context: &TextInputContext, input: &str) -> String {
                 *current_size_bytes as f64 / GIB,
             )
         }
+        TextInputContext::SnapshotName => {
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                format!("{input}_\n\nEnter a name for the new snapshot.")
+            } else {
+                match crate::vm::snapshot::validate_snapshot_name(trimmed) {
+                    Ok(name) if name == trimmed => {
+                        format!("{input}_\n\nSaved as: {name}")
+                    }
+                    Ok(name) => format!(
+                        "{input}_\n\nSaved as: {name}\n(unsafe characters are replaced with '_')"
+                    ),
+                    Err(error) => format!("{input}_\n\n{error}"),
+                }
+            }
+        }
         _ => format!("{input}_"),
     }
 }
@@ -277,16 +294,38 @@ pub fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
 /// Handle mouse input
 fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<()> {
     match mouse.kind {
-        MouseEventKind::ScrollUp => {
-            if app.screen == Screen::MainMenu {
-                app.select_prev();
+        MouseEventKind::ScrollUp => match app.screen {
+            Screen::MainMenu => app.select_prev(),
+            Screen::Management => app.menu_prev(),
+            Screen::Snapshots => {
+                if app.selected_snapshot > 0 {
+                    app.selected_snapshot -= 1;
+                }
             }
-        }
-        MouseEventKind::ScrollDown => {
-            if app.screen == Screen::MainMenu {
-                app.select_next();
+            Screen::NetworkManager => {
+                if app.vnet_selected > 0 {
+                    app.vnet_selected -= 1;
+                }
             }
-        }
+            _ => {}
+        },
+        MouseEventKind::ScrollDown => match app.screen {
+            Screen::MainMenu => app.select_next(),
+            Screen::Management => {
+                app.menu_next(screens::management::menu_item_count(app));
+            }
+            Screen::Snapshots => {
+                if app.selected_snapshot + 1 < app.snapshots.len() {
+                    app.selected_snapshot += 1;
+                }
+            }
+            Screen::NetworkManager => {
+                if app.vnet_selected + 1 < app.vnet_networks.len() {
+                    app.vnet_selected += 1;
+                }
+            }
+            _ => {}
+        },
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => match &app.screen {
             Screen::MainMenu => {
                 handle_main_menu_click(app, mouse.column, mouse.row)?;
@@ -325,8 +364,9 @@ fn handle_main_menu_click(app: &mut App, click_x: u16, click_y: u16) -> Result<(
             && click_y >= list_inner_y
             && click_y < list_inner_y + list_inner_height
         {
-            // Calculate which row was clicked
-            let clicked_row = (click_y - list_inner_y) as usize;
+            // Calculate which row was clicked. The list may be scrolled, so add
+            // the offset the widget recorded during its last render.
+            let clicked_row = app.vm_list_offset.get() + (click_y - list_inner_y) as usize;
 
             // Map clicked row to visual_order index (accounting for header rows)
             if let Some(visual_idx) = widgets::click_row_to_visual_index(
@@ -442,6 +482,11 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
                     let result = launch_vm_with_error_check(&vm, &options);
 
                     if result.success {
+                        // Status polling runs every 3 s; record the PID now so
+                        // reset/delete/resize cannot race a just-launched VM.
+                        if let Some(pid) = result.pid {
+                            app.running_vms.insert(vm.id.clone(), pid);
+                        }
                         app.set_status(format!("Launched: {}", result.vm_name));
                     } else {
                         // Show error in the error dialog for better visibility
@@ -469,7 +514,9 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
         }
         ConfirmAction::DeleteVm => {
             if let Some(vm) = app.selected_vm().cloned() {
-                if let Err(e) = crate::vm::lifecycle::delete_vm(&vm, false) {
+                if app.running_vms.contains_key(&vm.id) {
+                    app.set_status("Cannot delete a running VM. Shut it down first.");
+                } else if let Err(e) = crate::vm::lifecycle::delete_vm(&vm, false) {
                     app.set_status(format!("Error: {}", e));
                 } else {
                     app.set_status(format!("Deleted: {}", vm.display_name()));
@@ -589,6 +636,30 @@ fn execute_confirm_action(app: &mut App, action: ConfirmAction) -> Result<()> {
 
 /// Render a dimming overlay over the entire screen
 /// Uses a dark background that the popup's Clear widget will cut through
+/// RAII guard that restores the TUI if the inner operation panics.
+struct TerminalReleased;
+
+impl Drop for TerminalReleased {
+    fn drop(&mut self) {
+        use crossterm::event::EnableMouseCapture;
+        use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+        let _ = enable_raw_mode();
+        let _ = crossterm::execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture);
+    }
+}
+
+/// Temporarily leave the alternate screen and raw mode so an interactive
+/// `sudo`/`pkexec` prompt is usable, then restore the TUI.
+fn run_with_terminal_released<T>(operation: impl FnOnce() -> T) -> T {
+    use crossterm::event::DisableMouseCapture;
+    use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+
+    let _ = disable_raw_mode();
+    let _ = crossterm::execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _guard = TerminalReleased;
+    operation()
+}
+
 fn render_dim_overlay(_frame: &mut Frame) {
     // Dimming disabled - causing rendering issues
     // The popup's Clear widget and borders provide sufficient contrast
@@ -749,6 +820,42 @@ fn render(app: &App, frame: &mut Frame) {
             screens::network_manager::render(app, frame);
         }
     }
+
+    if app.loading {
+        render_loading_overlay(app, frame);
+    }
+}
+
+/// A small modal shown while a background operation is in progress. Without it
+/// the TUI ignores input but otherwise looks frozen.
+fn render_loading_overlay(app: &App, frame: &mut Frame) {
+    let area = frame.area();
+    let width = 56.min(area.width.saturating_sub(4));
+    let height = 5.min(area.height.saturating_sub(4));
+    let dialog = centered_rect(width, height, area);
+    frame.render_widget(Clear, dialog);
+
+    let message = app
+        .status_message
+        .as_deref()
+        .unwrap_or("Background operation in progress...");
+    let block = Block::default()
+        .title(" Working ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let paragraph = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Please wait...",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(message),
+    ])
+    .block(block)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, dialog);
 }
 
 /// Handle key input
@@ -821,6 +928,17 @@ fn handle_main_menu(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+        KeyCode::Home | KeyCode::Char('g') => app.select_first(),
+        KeyCode::End | KeyCode::Char('G') => app.select_last(),
+        KeyCode::Esc => {
+            if app.status_message.is_some() {
+                app.clear_status();
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => match app.refresh_vms() {
+            Ok(()) => app.set_status(format!("Refreshed: {} VMs", app.vms.len())),
+            Err(e) => app.set_status(format!("Error refreshing VMs: {e}")),
+        },
         KeyCode::PageDown => {
             app.info_scroll = app.info_scroll.saturating_add(5);
         }
@@ -922,6 +1040,44 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                 let menu_items = get_menu_items(vm, &app.config);
                 if let Some(item) = menu_items.get(selected_idx) {
                     match item.action {
+                        MenuAction::ValidateVm => {
+                            if let Some(vm) = app.selected_vm().cloned() {
+                                match crate::vm::validate_vm_launch(&vm) {
+                                    Ok(()) => app.set_status(format!(
+                                        "{}: configuration looks valid",
+                                        vm.display_name()
+                                    )),
+                                    Err(error) => app.show_error(format!(
+                                        "VM validation failed for {}\n\n{error:#}",
+                                        vm.display_name()
+                                    )),
+                                }
+                            }
+                        }
+                        MenuAction::PauseResume => {
+                            if let Some(vm) = app.selected_vm().cloned() {
+                                if !app.running_vms.contains_key(&vm.id) {
+                                    app.set_status("VM is not running");
+                                } else {
+                                    let paused = crate::vm::is_vm_paused(&vm.path);
+                                    let result = if paused {
+                                        crate::vm::resume_vm(&vm.path)
+                                    } else {
+                                        crate::vm::pause_vm(&vm.path)
+                                    };
+                                    match result {
+                                        Ok(()) => app.set_status(if paused {
+                                            "VM resumed"
+                                        } else {
+                                            "VM paused (state kept in memory)"
+                                        }),
+                                        Err(error) => app.set_status(format!(
+                                            "Error changing pause state: {error}"
+                                        )),
+                                    }
+                                }
+                            }
+                        }
                         MenuAction::StopVm => {
                             if let Some(vm) = app.selected_vm().cloned() {
                                 if app.selected_vm_pid().is_some() {
@@ -1115,6 +1271,27 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
                         MenuAction::DeleteVm => {
                             app.push_screen(Screen::Confirm(ConfirmAction::DeleteVm));
                         }
+                        MenuAction::OpenVmFolder => {
+                            if let Some(vm) = app.selected_vm() {
+                                match open_path_external(&vm.path) {
+                                    Ok(()) => app.set_status("Opening VM folder..."),
+                                    Err(error) => app.set_status(error),
+                                }
+                            }
+                        }
+                        MenuAction::OpenLaunchLog => {
+                            if let Some(vm) = app.selected_vm() {
+                                let log = crate::vm::lifecycle::qemu_log_path(&vm.path);
+                                if !log.exists() {
+                                    app.set_status("No qemu.log yet — launch this VM once first");
+                                } else {
+                                    match open_path_external(&log) {
+                                        Ok(()) => app.set_status("Opening qemu.log..."),
+                                        Err(error) => app.set_status(error),
+                                    }
+                                }
+                            }
+                        }
                         MenuAction::EditRawConfig => {
                             app.load_script_into_editor();
                             app.push_screen(Screen::RawScript);
@@ -1126,6 +1303,18 @@ fn handle_management(app: &mut App, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn open_path_external(path: &std::path::Path) -> std::result::Result<(), String> {
+    let candidates: &[(&str, &[&str])] = &[("xdg-open", &[]), ("gio", &["open"]), ("open", &[])];
+    for (program, prefix) in candidates {
+        let mut command = std::process::Command::new(program);
+        command.args(*prefix).arg(path);
+        if command.spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    Err("No file opener found (tried xdg-open, gio and open)".to_string())
 }
 
 fn open_resize_screen(app: &mut App, screen: Screen) {
@@ -1780,6 +1969,30 @@ struct GlToggleResult {
     display_swapped_to_sdl: bool,
 }
 
+/// Keep the launch-time window-size override's device in sync with a 3D
+/// toggle. `VM_CURATOR_VIDEO_DEVICE` is what the setup block uses at runtime;
+/// if it still says `virtio-vga`, the override replaces `virtio-vga-gl` with a
+/// non-GL device whenever a default window size is configured.
+fn replace_video_device_var(content: &str, device: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        let indent_len = line.len() - line.trim_start().len();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("VM_CURATOR_VIDEO_DEVICE=") {
+            out.push_str(&line[..indent_len]);
+            out.push_str("VM_CURATOR_VIDEO_DEVICE=");
+            out.push_str(device);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !content.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 /// Toggle para-virtualized 3D acceleration in a VM's launch.sh.
 ///
 /// Enable: replace `-vga <X>` with `-device virtio-vga-gl`, append `,gl=on`
@@ -1796,15 +2009,16 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
         // === Disable 3D ===
         // Replace `-device virtio-vga-gl` with `-vga virtio` (best Linux default
         // when we can't recover the original VGA choice).
-        let device_re = Regex::new(r"-device\s+virtio-vga-gl(?:[,\w=-]*)?")?;
+        let device_re = Regex::new(r"-device[ \t]+virtio-vga-gl(?:[,\w=-]*)?")?;
         let after_device = device_re.replace_all(&content, "-vga virtio").to_string();
         // Strip `,gl=on` from `-display <X>,gl=on`.
-        let display_re = Regex::new(r"(-display\s+[\w-]+),gl=on")?;
-        display_re.replace_all(&after_device, "$1").to_string()
+        let display_re = Regex::new(r"(-display[ \t]+[\w-]+),gl=on")?;
+        let after_display = display_re.replace_all(&after_device, "$1").to_string();
+        replace_video_device_var(&after_display, "virtio-vga")
     } else {
         // === Enable 3D ===
         // Replace `-vga <X>` with `-device virtio-vga-gl`.
-        let vga_re = Regex::new(r"-vga\s+[\w-]+")?;
+        let vga_re = Regex::new(r"-vga[ \t]+[\w-]+")?;
         let after_vga = if vga_re.is_match(&content) {
             vga_re
                 .replace_all(&content, "-device virtio-vga-gl")
@@ -1814,7 +2028,7 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
         };
         // Add `,gl=on` to `-display <X>` if not already there. Swap gtk → sdl
         // for noticeably better 3D performance.
-        let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
+        let display_re = Regex::new(r"-display[ \t]+([\w-]+)(,gl=on)?")?;
         let mut swapped = false;
         let after_display = display_re
             .replace_all(&after_vga, |caps: &regex::Captures| {
@@ -1829,7 +2043,7 @@ fn toggle_vm_gl_acceleration(script_path: &std::path::Path) -> Result<GlToggleRe
             })
             .to_string();
         display_swapped_to_sdl = swapped;
-        after_display
+        replace_video_device_var(&after_display, "virtio-vga-gl")
     };
 
     std::fs::write(script_path, new_content)?;
@@ -1844,7 +2058,7 @@ fn update_vm_display(script_path: &std::path::Path, new_display: &str) -> Result
 
     // Regex to match -display with optional gl=on suffix
     // Uses [\w-]+ to match hyphenated backends like spice-app
-    let display_re = Regex::new(r"-display\s+([\w-]+)(,gl=on)?")?;
+    let display_re = Regex::new(r"-display[ \t]+([\w-]+)(,gl=on)?")?;
 
     let new_content = if display_re.is_match(&content) {
         // Replace existing -display setting, preserving gl=on if present
@@ -2011,9 +2225,12 @@ fn handle_usb_devices(app: &mut App, key: KeyEvent) -> Result<()> {
 
                 app.set_status("Installing udev rules (you may be prompted for your password)...");
 
-                // We need to drop the terminal temporarily for the password prompt
-                // The install function will handle elevation
-                match crate::hardware::install_udev_rules(&selected_devices) {
+                // sudo/pkexec needs the real terminal; raw mode + alternate screen
+                // would hide or garble the password prompt.
+                let install_result = run_with_terminal_released(|| {
+                    crate::hardware::install_udev_rules(&selected_devices)
+                });
+                match install_result {
                     crate::hardware::UdevInstallResult::Success => {
                         app.set_status(
                             "USB permissions installed! Devices should now work without sudo.",
@@ -2744,10 +2961,10 @@ fn render_text_input(app: &App, context: &TextInputContext, frame: &mut Frame) {
 
     let area = frame.area();
     let dialog_width = 50.min(area.width.saturating_sub(4));
-    let dialog_height = if matches!(context, TextInputContext::ResizeVmDisk { .. }) {
-        9
-    } else {
-        5
+    let dialog_height = match context {
+        TextInputContext::ResizeVmDisk { .. } => 9,
+        TextInputContext::SnapshotName => 7,
+        _ => 5,
     };
 
     let dialog_area = centered_rect(dialog_width, dialog_height, area);
@@ -2807,7 +3024,11 @@ fn handle_text_input(app: &mut App, context: TextInputContext, key: KeyEvent) ->
                 TextInputContext::SnapshotName => {
                     if !input.is_empty() {
                         if let Some(vm) = app.selected_vm() {
-                            if let Some(disk) = vm.config.primary_disk() {
+                            if app.running_vms.contains_key(&vm.id) {
+                                app.set_status(
+                                    "Cannot create a snapshot while the VM is running. Shut it down first.",
+                                );
+                            } else if let Some(disk) = vm.config.primary_disk() {
                                 // Spawn background thread for snapshot creation
                                 let disk_path = disk.path.clone();
                                 let name = input.clone();
@@ -3399,5 +3620,33 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn gl_toggle_keeps_window_size_override_in_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("launch.sh");
+        std::fs::write(
+            &script,
+            "VM_CURATOR_VIDEO_DEVICE=virtio-vga\n\
+             VM_CURATOR_VIDEO_ARGS=(-vga virtio)\n\
+             qemu-system-x86_64 \\\n\
+             \x20   \"${VM_CURATOR_VIDEO_ARGS[@]}\" \\\n\
+             \x20   -display gtk\n",
+        )
+        .unwrap();
+
+        toggle_vm_gl_acceleration(&script).unwrap();
+        let enabled = std::fs::read_to_string(&script).unwrap();
+        assert!(enabled.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga-gl"));
+        assert!(enabled.contains("VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)"));
+        assert!(enabled.contains("-display sdl,gl=on"));
+
+        toggle_vm_gl_acceleration(&script).unwrap();
+        let disabled = std::fs::read_to_string(&script).unwrap();
+        assert!(disabled.contains("VM_CURATOR_VIDEO_DEVICE=virtio-vga"));
+        assert!(disabled.contains("VM_CURATOR_VIDEO_ARGS=(-vga virtio)"));
+        assert!(disabled.contains("-display sdl"));
+        assert!(!disabled.contains("gl=on"));
     }
 }

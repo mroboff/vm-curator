@@ -705,6 +705,8 @@ pub struct ImportWizardState {
     pub vm_name: String,
     pub folder_name: String,
     pub disk_action: ImportDiskAction,
+    /// Which source disks to import; empty means "all" for backwards compatibility.
+    pub disk_selection: Vec<bool>,
     pub field_focus: usize,
     pub error_message: Option<String>,
     pub editing_name: bool,
@@ -722,6 +724,7 @@ impl Default for ImportWizardState {
             vm_name: String::new(),
             folder_name: String::new(),
             disk_action: ImportDiskAction::Symlink,
+            disk_selection: Vec::new(),
             field_focus: 0,
             error_message: None,
             editing_name: false,

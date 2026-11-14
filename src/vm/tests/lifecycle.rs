@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn test_validate_launch_script_accepts_valid_bash() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("launch.sh");
+    std::fs::write(&script, "#!/usr/bin/env bash\nqemu-system-x86_64 -m 512\n").unwrap();
+    assert!(validate_launch_script(&script).is_ok());
+}
+
+#[test]
+fn test_validate_launch_script_reports_syntax_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("launch.sh");
+    std::fs::write(
+        &script,
+        "#!/usr/bin/env bash\nVM_CURATOR_VIDEO_DEVICE=virtio-device virtio-vga-gl=(-device virtio-vga-gl)\n",
+    )
+    .unwrap();
+    let error = validate_launch_script(&script).unwrap_err().to_string();
+    assert!(error.contains("syntax error"));
+}
+
+#[test]
+fn test_resolve_backing_path_relative_to_overlay() {
+    let disk = Path::new("/vms/test/disk.qcow2");
+    assert_eq!(
+        resolve_backing_path(disk, "base.qcow2"),
+        PathBuf::from("/vms/test/base.qcow2")
+    );
+    assert_eq!(
+        resolve_backing_path(disk, "/images/base.qcow2"),
+        PathBuf::from("/images/base.qcow2")
+    );
+}
+
+#[test]
+fn test_reset_temp_path_stays_in_disk_directory() {
+    let disk = Path::new("/vms/test/disk.qcow2");
+    let temp = reset_temp_path(disk).unwrap();
+    assert_eq!(temp.parent(), disk.parent());
+    assert_ne!(temp, disk);
+    assert!(temp
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with(".qcow2"));
+}
+
+#[test]
 fn test_replace_display_for_dbus_strips_spice_agent_channel() {
     use crate::vm::create::SPICE_AGENT_ARGS;
 

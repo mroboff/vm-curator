@@ -30,6 +30,8 @@ struct QemuImgInfo {
     cluster_size: Option<u64>,
     #[serde(rename = "backing-filename")]
     backing_filename: Option<String>,
+    #[serde(rename = "backing-filename-format")]
+    backing_filename_format: Option<String>,
     #[serde(default)]
     snapshots: Vec<QemuSnapshot>,
 }
@@ -251,6 +253,7 @@ pub fn get_disk_info(disk_path: &Path) -> Result<DiskInfo> {
             .unwrap_or_else(|| "unknown".to_string()),
         cluster_size: info.cluster_size.map(format_size),
         backing_file: info.backing_filename,
+        backing_format: info.backing_filename_format,
     })
 }
 
@@ -263,6 +266,9 @@ pub struct DiskInfo {
     pub disk_size: String,
     pub cluster_size: Option<String>,
     pub backing_file: Option<String>,
+    /// Format of the backing file, as reported by `qemu-img info`.
+    /// Required for `qemu-img create -F` when recreating the overlay.
+    pub backing_format: Option<String>,
 }
 
 #[cfg(test)]

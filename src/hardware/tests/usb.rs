@@ -18,6 +18,39 @@ fn test_usb_device_display() {
 }
 
 #[test]
+fn test_generate_udev_rules_matches_product_and_sanitizes_names() {
+    let devices = vec![
+        UsbDevice {
+            vendor_id: 0x046d,
+            product_id: 0xc077,
+            vendor_name: "Logitech".to_string(),
+            product_name: "M105 Mouse".to_string(),
+            bus_num: 1,
+            dev_num: 3,
+            device_class: 0,
+            usb_version: UsbVersion::Usb2,
+        },
+        UsbDevice {
+            vendor_id: 0x046d,
+            product_id: 0xc31c,
+            vendor_name: "Logitech\nSUBSYSTEM==\"usb\", MODE=\"0666\"".to_string(),
+            product_name: "Keyboard".to_string(),
+            bus_num: 1,
+            dev_num: 4,
+            device_class: 0,
+            usb_version: UsbVersion::Usb2,
+        },
+    ];
+
+    let rules = generate_udev_rules(&devices);
+    assert!(rules.contains("ATTR{idVendor}==\"046d\", ATTR{idProduct}==\"c077\""));
+    assert!(rules.contains("ATTR{idVendor}==\"046d\", ATTR{idProduct}==\"c31c\""));
+    assert!(!rules.contains("idVendor}==\"046d\", MODE"));
+    // The injected newline must not create a second active rule line.
+    assert!(!rules.contains("\nSUBSYSTEM==\"usb\", MODE"));
+}
+
+#[test]
 fn test_usb_version_from_speed() {
     assert_eq!(UsbVersion::from_speed("1.5"), UsbVersion::Usb1);
     assert_eq!(UsbVersion::from_speed("12"), UsbVersion::Usb1);

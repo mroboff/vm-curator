@@ -19,6 +19,8 @@ pub struct MenuItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     StopVm,
+    PauseResume,
+    ValidateVm,
     BootOptions,
     Snapshots,
     UsbPassthrough,
@@ -35,6 +37,8 @@ pub enum MenuAction {
     ResizeStorage,
     ResetVm,
     DeleteVm,
+    OpenVmFolder,
+    OpenLaunchLog,
     EditRawConfig,
 }
 
@@ -45,6 +49,11 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "Boot Options",
             description: "Normal, install, or custom ISO boot",
             action: MenuAction::BootOptions,
+        },
+        MenuItem {
+            name: "Check VM",
+            description: "Validate launch.sh syntax and disk paths",
+            action: MenuAction::ValidateVm,
         },
         MenuItem {
             name: "Snapshots",
@@ -131,6 +140,12 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
     ]);
 
     items.push(MenuItem {
+        name: "Pause / Resume VM",
+        description: "Freeze or continue a running VM (QMP)",
+        action: MenuAction::PauseResume,
+    });
+
+    items.push(MenuItem {
         name: "Stop VM",
         description: "Shut down the running VM (ACPI poweroff)",
         action: MenuAction::StopVm,
@@ -147,6 +162,16 @@ pub fn get_menu_items(vm: &DiscoveredVm, config: &Config) -> Vec<MenuItem> {
             name: "Delete VM",
             description: "Permanently remove this VM",
             action: MenuAction::DeleteVm,
+        },
+        MenuItem {
+            name: "Open VM Folder",
+            description: "Open the VM directory in the file manager",
+            action: MenuAction::OpenVmFolder,
+        },
+        MenuItem {
+            name: "Open Launch Log",
+            description: "Open qemu.log from the last launch",
+            action: MenuAction::OpenLaunchLog,
         },
         MenuItem {
             name: "Edit Raw Configuration",

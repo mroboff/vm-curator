@@ -285,7 +285,10 @@ pub enum UdevInstallResult {
     Error(String),
 }
 
-/// Generate udev rules content for USB passthrough
+/// Generate udev rules content for USB passthrough.
+///
+/// Match vendor *and* product: a vendor-only rule with `MODE="0666"` would
+/// make every device from that vendor accessible, not just the selected one.
 pub fn generate_udev_rules(devices: &[UsbDevice]) -> String {
     let mut rules = String::new();
     rules.push_str("# USB Passthrough rules for QEMU (managed by vm-curator)\n");
@@ -293,22 +296,37 @@ pub fn generate_udev_rules(devices: &[UsbDevice]) -> String {
         "# These rules allow non-root users to access USB devices for VM passthrough\n\n",
     );
 
-    // Collect unique vendor IDs to avoid duplicate rules
-    let mut seen_vendors = std::collections::HashSet::new();
-
+    let mut seen = std::collections::HashSet::new();
     for device in devices {
-        if seen_vendors.insert(device.vendor_id) {
-            rules.push_str(&format!(
-                "# {} devices\n",
-                if device.vendor_name.is_empty() {
-                    format!("Vendor {:04x}", device.vendor_id)
-                } else {
-                    device.vendor_name.clone()
-                }
-            ));
+        if !seen.insert((device.vendor_id, device.product_id)) {
+            continue;
+        }
+
+        // USB descriptor strings are attacker-controlled. Keep them out of
+        // rule syntax: a newline in a manufacturer name could inject a rule.
+        let vendor_label: String = if device.vendor_name.is_empty() {
+            format!("Vendor {:04x}", device.vendor_id)
+        } else {
+            device
+                .vendor_name
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect()
+        };
+        rules.push_str(&format!(
+            "# {} ({:04x}:{:04x})\n",
+            vendor_label, device.vendor_id, device.product_id
+        ));
+        if device.product_id == 0 {
+            // No product ID to match; keep the vendor-wide rule as a fallback.
             rules.push_str(&format!(
                 "SUBSYSTEM==\"usb\", ATTR{{idVendor}}==\"{:04x}\", MODE=\"0666\"\n\n",
                 device.vendor_id
+            ));
+        } else {
+            rules.push_str(&format!(
+                "SUBSYSTEM==\"usb\", ATTR{{idVendor}}==\"{:04x}\", ATTR{{idProduct}}==\"{:04x}\", MODE=\"0666\"\n\n",
+                device.vendor_id, device.product_id
             ));
         }
     }

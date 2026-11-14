@@ -10,8 +10,9 @@
 //! intentionally excluded from the public library API (see the crate root docs).
 
 use anyhow::Result;
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
@@ -23,6 +24,7 @@ use crate::metadata::{
     SharedFoldersHelpStore,
 };
 use crate::ui::widgets::build_visual_order;
+use crate::vm::create::CreatedVm;
 use crate::vm::{
     discover_vms, BootMode, DiscoveredVm, LaunchOptions, QemuProcess, ShareMode, SharedFolder,
     Snapshot,
@@ -235,6 +237,8 @@ pub struct App {
     pub vnet_networks: Vec<crate::vnet::VirtualNetwork>,
     /// Selected row in the Networks screen
     pub vnet_selected: usize,
+    /// Last time the Networks screen auto-refreshed active status
+    pub last_vnet_refresh: Option<Instant>,
     /// Create/edit form state for the Networks screen
     pub vnet_editor: Option<VNetEditorState>,
     /// Physical block devices (cached for the disk picker)
@@ -257,8 +261,13 @@ pub struct App {
     pub filtered_indices: Vec<usize>,
     /// Visual order of VMs (maps visual position to filtered_idx for hierarchy navigation)
     pub visual_order: Vec<usize>,
+    /// Scroll offset of the VM list as chosen by the last render. Needed to map
+    /// mouse clicks after the list has scrolled; `ListState` owns this internally.
+    pub vm_list_offset: Cell<usize>,
     /// Status message
     pub status_message: Option<String>,
+    /// Whether the current status message reports an error (rendered red/sticky)
+    pub status_is_error: bool,
     /// When status message was set (for auto-clearing)
     pub status_time: Option<Instant>,
     /// Whether the app should quit
@@ -378,6 +387,17 @@ pub enum BackgroundResult {
         snapshots: Vec<Snapshot>,
         error: Option<String>,
     },
+    /// Result of a background libvirt/Quickemu import
+    ImportFinished {
+        vm_name: String,
+        result: std::result::Result<PathBuf, String>,
+    },
+    /// Result of a background VM creation
+    VmCreated {
+        vm_name: String,
+        auto_launch: bool,
+        result: std::result::Result<CreatedVm, String>,
+    },
 }
 
 impl App {
@@ -474,6 +494,7 @@ impl App {
             selected_usb_devices: Vec::new(),
             vnet_networks: Vec::new(),
             vnet_selected: 0,
+            last_vnet_refresh: None,
             vnet_editor: None,
             block_devices: Vec::new(),
             block_device_selected: 0,
@@ -497,7 +518,9 @@ impl App {
             input_mode: InputMode::Normal,
             filtered_indices,
             visual_order,
+            vm_list_offset: Cell::new(0),
             status_message: None,
+            status_is_error: false,
             status_time: None,
             should_quit: false,
             file_browser_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
@@ -640,6 +663,44 @@ impl App {
         }
     }
 
+    /// Select the VM whose launch script matches `launch_script`.
+    /// Returns false when the VM is not present in the refreshed list.
+    pub fn select_vm_by_launch_script(&mut self, launch_script: &Path) -> bool {
+        let Some(idx) = self
+            .vms
+            .iter()
+            .position(|vm| vm.launch_script == launch_script)
+        else {
+            return false;
+        };
+        let Some(visual_idx) = self
+            .visual_order
+            .iter()
+            .position(|&filtered_idx| self.filtered_indices.get(filtered_idx) == Some(&idx))
+        else {
+            return false;
+        };
+        self.selected_vm = visual_idx;
+        self.info_scroll = 0;
+        true
+    }
+
+    /// Move selection to the first VM
+    pub fn select_first(&mut self) {
+        if !self.visual_order.is_empty() {
+            self.selected_vm = 0;
+            self.info_scroll = 0;
+        }
+    }
+
+    /// Move selection to the last VM
+    pub fn select_last(&mut self) {
+        if !self.visual_order.is_empty() {
+            self.selected_vm = self.visual_order.len() - 1;
+            self.info_scroll = 0;
+        }
+    }
+
     /// Move selection up in VM list (follows visual/hierarchy order)
     pub fn select_prev(&mut self) {
         if !self.visual_order.is_empty() && self.selected_vm > 0 {
@@ -675,14 +736,37 @@ impl App {
         if self.search_query.is_empty() {
             self.filtered_indices = (0..self.vms.len()).collect();
         } else {
-            let query = self.search_query.to_lowercase();
+            let terms: Vec<String> = self
+                .search_query
+                .to_lowercase()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            let metadata = &self.metadata;
             self.filtered_indices = self
                 .vms
                 .iter()
                 .enumerate()
                 .filter(|(_, vm)| {
-                    vm.display_name().to_lowercase().contains(&query)
-                        || vm.id.to_lowercase().contains(&query)
+                    let profile_id = vm.os_profile.as_deref().unwrap_or(&vm.id);
+                    let info = metadata.get(profile_id);
+                    let mut haystack = format!(
+                        "{} {} {} {}",
+                        vm.display_name(),
+                        vm.id,
+                        vm.os_profile.as_deref().unwrap_or(""),
+                        vm.notes.as_deref().unwrap_or("")
+                    );
+                    if let Some(info) = info {
+                        haystack.push(' ');
+                        haystack.push_str(&info.name);
+                        haystack.push(' ');
+                        haystack.push_str(&info.publisher);
+                        haystack.push(' ');
+                        haystack.push_str(&info.blurb.short);
+                    }
+                    let haystack = haystack.to_lowercase();
+                    terms.iter().all(|term| haystack.contains(term))
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -735,6 +819,7 @@ impl App {
     /// Load managed networks and open the Networks screen
     pub fn open_network_manager(&mut self) {
         self.reload_vnet_networks();
+        self.last_vnet_refresh = Some(Instant::now());
         self.vnet_selected = 0;
         self.vnet_editor = None;
         self.push_screen(Screen::NetworkManager);
@@ -1137,9 +1222,18 @@ impl App {
         }
     }
 
-    /// Set a status message (auto-clears after 5 seconds)
+    /// Set a status message. Errors are detected from the usual prefixes and
+    /// are kept on screen longer than success/info notices.
     pub fn set_status(&mut self, msg: impl Into<String>) {
-        self.status_message = Some(msg.into());
+        let message = msg.into();
+        let lower = message.to_lowercase();
+        self.status_is_error = lower.starts_with("error")
+            || lower.starts_with("cannot ")
+            || lower.starts_with("failed")
+            || lower.contains(" failed")
+            || lower.contains("permission denied")
+            || lower.contains("not found");
+        self.status_message = Some(message);
         self.status_time = Some(Instant::now());
     }
 
@@ -1153,13 +1247,15 @@ impl App {
     /// Clear status message
     pub fn clear_status(&mut self) {
         self.status_message = None;
+        self.status_is_error = false;
         self.status_time = None;
     }
 
     /// Check and clear status if expired (call in event loop)
     pub fn check_status_expiry(&mut self) {
         if let Some(time) = self.status_time {
-            if time.elapsed().as_secs() >= 5 {
+            let ttl = if self.status_is_error { 30 } else { 5 };
+            if time.elapsed().as_secs() >= ttl {
                 self.clear_status();
             }
         }
@@ -1215,6 +1311,76 @@ impl App {
                         self.selected_snapshot = 0;
                     }
                 }
+                BackgroundResult::ImportFinished { vm_name, result } => match result {
+                    Ok(_) => {
+                        self.import_state = None;
+                        while matches!(self.screen, Screen::ImportWizard) {
+                            self.pop_screen();
+                        }
+                        match self.refresh_vms() {
+                            Ok(()) => self.set_status(format!("Imported: {vm_name}")),
+                            Err(error) => self.set_status(format!(
+                                "Imported {vm_name}, but refreshing the VM list failed: {error}"
+                            )),
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(state) = self.import_state.as_mut() {
+                            state.error_message = Some(format!("Import failed: {error}"));
+                        } else {
+                            self.show_error(format!("Import failed:\n\n{error}"));
+                        }
+                    }
+                },
+                BackgroundResult::VmCreated {
+                    vm_name,
+                    auto_launch,
+                    result,
+                } => match result {
+                    Ok(created) => {
+                        self.cancel_wizard();
+                        if let Err(error) = self.refresh_vms() {
+                            self.set_status(format!(
+                                "VM created, but refreshing the VM list failed: {error}"
+                            ));
+                            return;
+                        }
+                        if !self.select_vm_by_launch_script(&created.launch_script) {
+                            self.set_status(format!(
+                                "VM created ({vm_name}), but it was not found in the refreshed list"
+                            ));
+                            return;
+                        }
+                        self.set_status(format!("VM created: {vm_name}"));
+
+                        if auto_launch {
+                            self.boot_mode = BootMode::Install;
+                            let Some(vm) = self.selected_vm().cloned() else {
+                                return;
+                            };
+                            let options = self.get_launch_options();
+                            let launch = crate::vm::launch_vm_with_error_check(&vm, &options);
+                            if launch.success {
+                                if let Some(pid) = launch.pid {
+                                    self.running_vms.insert(vm.id.clone(), pid);
+                                }
+                                self.set_status(format!("Launched: {vm_name}"));
+                            } else {
+                                self.show_error(format!(
+                                    "VM created, but launch failed:\n\n{}",
+                                    launch.error.unwrap_or_else(|| "Unknown error".to_string())
+                                ));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(state) = self.wizard_state.as_mut() {
+                            state.error_message = Some(format!("Failed to create VM: {error}"));
+                        } else {
+                            self.show_error(format!("Failed to create VM:\n\n{error}"));
+                        }
+                    }
+                },
             }
         }
     }
@@ -1232,6 +1398,20 @@ impl App {
             self.stopping_vms
                 .retain(|id, _| self.running_vms.contains_key(id));
         }
+
+        // Networks can be started/stopped from an external terminal; refresh
+        // the Active/Inactive column while the screen is open.
+        if self.screen == Screen::NetworkManager {
+            let now = Instant::now();
+            let due = self
+                .last_vnet_refresh
+                .map(|last| now.duration_since(last).as_secs() >= 2)
+                .unwrap_or(true);
+            if due {
+                self.reload_vnet_networks();
+                self.last_vnet_refresh = Some(now);
+            }
+        }
     }
 
     /// Match QEMU processes against known VMs using the process working directory.
@@ -1242,10 +1422,14 @@ impl App {
     fn match_running_vms(&self, processes: &[QemuProcess]) -> HashMap<String, u32> {
         let mut result = HashMap::new();
         for vm in &self.vms {
+            // `vm.path` may be a symlink while /proc/<pid>/cwd reports the
+            // canonical target. Compare both forms so a symlinked library does
+            // not make a running VM look stopped.
+            let canonical_vm_path = vm.path.canonicalize().ok();
             for proc in processes {
                 if let Some(ref cwd) = proc.cwd {
                     // cwd is available — use it as the authoritative match
-                    if cwd == &vm.path {
+                    if cwd == &vm.path || canonical_vm_path.as_ref() == Some(cwd) {
                         result.insert(vm.id.clone(), proc.pid);
                         break;
                     }
