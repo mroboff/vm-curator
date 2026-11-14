@@ -207,6 +207,27 @@ fn extract_vga(content: &str) -> Option<VgaType> {
                 return Some(VgaType::from_str(&vga));
             }
         }
+
+        // vm-curator's 3D and window-size paths use `-device <vga>` instead of
+        // `-vga <type>`. Without this, a virtio-vga-gl VM looks like the
+        // default `std` in `vm-curator info` and the configuration screen.
+        if let Some(idx) = line.find("-device ") {
+            let rest = &line[idx + 8..];
+            let device: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != '\\' && *c != ',' && *c != ')')
+                .collect();
+            let mapped = match device.as_str() {
+                "VGA" => Some(VgaType::Std),
+                "virtio-vga" | "virtio-vga-gl" => Some(VgaType::Virtio),
+                "qxl-vga" => Some(VgaType::Qxl),
+                "vmware-svga" => Some(VgaType::Vmware),
+                _ => None,
+            };
+            if mapped.is_some() {
+                return mapped;
+            }
+        }
     }
     None
 }

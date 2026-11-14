@@ -36,6 +36,12 @@ fn test_extract_vga() {
         extract_vga("VM_CURATOR_VIDEO_ARGS=(-vga std)"),
         Some(VgaType::Std)
     );
+    assert_eq!(
+        extract_vga("VM_CURATOR_VIDEO_ARGS=(-device virtio-vga-gl)"),
+        Some(VgaType::Virtio)
+    );
+    assert_eq!(extract_vga("-device qxl-vga,id=video0"), Some(VgaType::Qxl));
+    assert_eq!(extract_vga("-device VGA"), Some(VgaType::Std));
 }
 
 #[test]
