@@ -288,6 +288,41 @@ fn test_parse_libvirt_xml_multiple_disks_skips_sourceless() {
 }
 
 #[test]
+fn test_parse_libvirt_xml_skips_cdrom_with_source() {
+    // A CD-ROM with an ISO source must not be imported as a writable VM disk.
+    // This used to make the ISO the primary disk (or copy it as a phantom disk).
+    let xml = r#"
+<domain type='kvm'>
+  <name>cdrom-test</name>
+  <memory unit='KiB'>1048576</memory>
+  <vcpu>2</vcpu>
+  <os>
+    <type arch='x86_64'>hvm</type>
+  </os>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='cdrom'>
+      <source file='/images/install.iso'/>
+      <target dev='sda' bus='sata'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <source file='/images/system.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+  </devices>
+</domain>
+"#;
+
+    let vm = parse_libvirt_xml_str(xml, Path::new("/test.xml")).unwrap();
+    assert_eq!(vm.disk_paths, vec![PathBuf::from("/images/system.qcow2")]);
+    assert_eq!(vm.qemu_config.disk_interface, "virtio");
+    assert!(vm
+        .import_notes
+        .iter()
+        .any(|note| note.contains("Skipped cdrom device")));
+}
+
+#[test]
 fn test_parse_libvirt_xml_with_tpm() {
     let xml = r#"
 <domain type='kvm'>
@@ -311,6 +346,76 @@ fn test_parse_libvirt_xml_with_tpm() {
     assert!(vm.qemu_config.tpm);
     assert!(vm.qemu_config.uefi);
     assert_eq!(vm.qemu_config.memory_mb, 4096);
+}
+
+#[test]
+fn test_execute_import_refuses_when_no_disk_exists() -> Result<()> {
+    let library = tempfile::tempdir()?;
+    let vm = ImportableVm {
+        name: "No Disks".to_string(),
+        config_path: PathBuf::from("/nonexistent/no-disks.xml"),
+        source: ImportSource::Libvirt,
+        qemu_config: WizardQemuConfig::default(),
+        disk_paths: vec![PathBuf::from("/nonexistent/disk.qcow2")],
+        detected_os_profile: None,
+        import_notes: vec!["Disk 1 does not exist".to_string()],
+        disks_readable: vec![false],
+    };
+
+    let error = execute_import(
+        library.path(),
+        &vm,
+        "No Disks",
+        "no-disks",
+        ImportDiskAction::Copy,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("No existing disk images"));
+    assert!(!library.path().join("no-disks").exists());
+    Ok(())
+}
+
+#[test]
+fn test_execute_import_attaches_extra_disks() -> Result<()> {
+    let source_dir = tempfile::tempdir()?;
+    let library = tempfile::tempdir()?;
+    let first = source_dir.path().join("system.img");
+    let second = source_dir.path().join("data.img");
+    std::fs::write(&first, b"system disk")?;
+    std::fs::write(&second, b"data disk")?;
+
+    let vm = ImportableVm {
+        name: "Two Disks".to_string(),
+        config_path: source_dir.path().join("two.conf"),
+        source: ImportSource::Libvirt,
+        qemu_config: WizardQemuConfig::default(),
+        disk_paths: vec![first, second],
+        detected_os_profile: None,
+        import_notes: Vec::new(),
+        disks_readable: vec![true, true],
+    };
+
+    let vm_dir = execute_import(
+        library.path(),
+        &vm,
+        "Two Disks",
+        "two-disks",
+        ImportDiskAction::Copy,
+    )?;
+    let launch_script = std::fs::read_to_string(vm_dir.join("launch.sh"))?;
+
+    assert!(launch_script.contains("EXTRA_DISKS_ARGS"));
+    assert!(launch_script.contains("two-disks-disk2.raw"));
+    assert!(launch_script.contains("index=1"));
+    assert!(launch_script.contains("\"${EXTRA_DISKS_ARGS[@]}\""));
+
+    let syntax = std::process::Command::new("bash")
+        .arg("-n")
+        .arg(vm_dir.join("launch.sh"))
+        .status()?;
+    assert!(syntax.success(), "generated launch.sh must parse");
+    Ok(())
 }
 
 #[test]

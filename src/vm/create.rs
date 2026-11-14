@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Shell-escape a string for safe interpolation in bash scripts.
 /// This handles special characters that could cause command injection.
-fn shell_escape(s: &str) -> String {
+pub(crate) fn shell_escape(s: &str) -> String {
     // If the string contains only safe characters, return as-is
     if s.chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/')

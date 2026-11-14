@@ -9,7 +9,9 @@ use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 
-use crate::wizard_types::{ImportDiskAction, ImportSource, ImportableVm, WizardQemuConfig};
+use crate::wizard_types::{
+    DiskImageFormat, ImportDiskAction, ImportSource, ImportableVm, WizardQemuConfig,
+};
 
 // =========================================================================
 // libvirt XML Parsing
@@ -69,6 +71,7 @@ struct LibvirtParse {
     // Current <disk> being parsed
     in_disk: bool,
     current_disk_bus: String,
+    current_disk_device: String,
     current_disk_source: PathBuf,
 
     // Current <interface> being parsed
@@ -140,6 +143,7 @@ impl LibvirtParse {
             "disk" => {
                 self.in_disk = true;
                 self.current_disk_bus.clear();
+                self.current_disk_device = find_attr(e, b"device").unwrap_or_default();
                 self.current_disk_source = PathBuf::new();
             }
             "interface" => {
@@ -227,8 +231,19 @@ impl LibvirtParse {
     fn handle_end(&mut self, tag: &str) {
         if tag == "disk" && self.in_disk {
             if !self.current_disk_source.as_os_str().is_empty() {
-                self.disk_paths.push(self.current_disk_source.clone());
-                self.disk_buses.push(self.current_disk_bus.clone());
+                // libvirt marks CD-ROMs/floppies with device='cdrom'/'floppy'.
+                // They are media, not VM system/data disks: importing one as a
+                // disk can make an ISO the primary boot device.
+                if matches!(self.current_disk_device.as_str(), "" | "disk") {
+                    self.disk_paths.push(self.current_disk_source.clone());
+                    self.disk_buses.push(self.current_disk_bus.clone());
+                } else {
+                    self.import_notes.push(format!(
+                        "Skipped {} device: {}",
+                        self.current_disk_device,
+                        self.current_disk_source.display()
+                    ));
+                }
             }
             self.in_disk = false;
         }
@@ -702,6 +717,58 @@ pub fn parse_config_file(path: &Path) -> Result<ImportableVm> {
 // Import Execution
 // =========================================================================
 
+const EXTRA_DISKS_MARKER_START: &str =
+    "# >>> Imported additional disks (managed by vm-curator) >>>";
+const EXTRA_DISKS_MARKER_END: &str = "# <<< Imported additional disks <<<";
+
+/// QEMU `if=` value safe for extra disks. Imported bus names can include
+/// `usb`, which is not a valid `-drive if=` value.
+fn extra_disk_interface(interface: &str) -> &str {
+    match interface {
+        "virtio" | "ide" | "scsi" => interface,
+        _ => "virtio",
+    }
+}
+
+/// Build the managed section that attaches disks after the first one.
+fn extra_disks_section(disks: &[(String, DiskImageFormat)], interface: &str) -> String {
+    if disks.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::new();
+    section.push_str(EXTRA_DISKS_MARKER_START);
+    section.push('\n');
+    section.push_str("EXTRA_DISKS_ARGS=(\n");
+    for (i, (filename, format)) in disks.iter().enumerate() {
+        section.push_str("    -drive\n");
+        section.push_str(&format!(
+            "    file=\"$VM_DIR\"/{},format={},if={},index={},media=disk\n",
+            crate::vm::create::shell_escape(filename),
+            format.as_str(),
+            interface,
+            i + 1
+        ));
+    }
+    section.push_str(")\n");
+    section.push_str(EXTRA_DISKS_MARKER_END);
+    section.push('\n');
+    section
+}
+
+/// Append imported disks 2..N to every QEMU invocation in the generated script.
+fn attach_extra_disks(
+    script: &str,
+    disks: &[(String, DiskImageFormat)],
+    interface: &str,
+) -> String {
+    let section = extra_disks_section(disks, interface);
+    if section.is_empty() {
+        return script.to_string();
+    }
+    crate::vm::lifecycle::insert_args_section(script, &section, "\"${EXTRA_DISKS_ARGS[@]}\"")
+}
+
 /// Execute the import: create VM directory, handle disks, generate launch script
 pub fn execute_import(
     library_path: &Path,
@@ -715,20 +782,36 @@ pub fn execute_import(
         write_launch_script, write_vm_metadata,
     };
 
+    // Refuse to create a VM whose launch script points at a disk that does not
+    // exist. A config-only import is better served by the creation wizard.
+    if !vm.disk_paths.iter().any(|path| path.exists()) {
+        bail!(
+            "No existing disk images to import. Copy the VM's disk next to its \
+             config (or fix the paths in the config) and try again."
+        );
+    }
+
     let vm_dir = create_vm_directory(library_path, folder_name)?;
 
-    // Handle each disk
-    let mut disk_filenames: Vec<String> = Vec::new();
-    for (i, disk_path) in vm.disk_paths.iter().enumerate() {
+    // Handle each disk. Name disks by import order, not by their index in the
+    // source XML: a missing first disk must not make the second disk `-disk2`.
+    let mut disk_entries: Vec<(String, DiskImageFormat)> = Vec::new();
+    for disk_path in &vm.disk_paths {
         if !disk_path.exists() {
             continue;
         }
 
         let disk_format = detect_existing_disk_image_format(disk_path);
-        let disk_filename = if i == 0 {
+        let disk_index = disk_entries.len();
+        let disk_filename = if disk_index == 0 {
             format!("{}.{}", folder_name, disk_format.extension())
         } else {
-            format!("{}-disk{}.{}", folder_name, i + 1, disk_format.extension())
+            format!(
+                "{}-disk{}.{}",
+                folder_name,
+                disk_index + 1,
+                disk_format.extension()
+            )
         };
 
         let dest = vm_dir.join(&disk_filename);
@@ -770,21 +853,26 @@ pub fn execute_import(
             }
         }
 
-        disk_filenames.push(disk_filename);
+        disk_entries.push((disk_filename, disk_format));
     }
 
-    // Generate launch script using the first disk
-    let default_disk = format!("{}.qcow2", folder_name);
-    let primary_disk = disk_filenames.first().unwrap_or(&default_disk);
+    let (primary_disk, extra_disks) = disk_entries
+        .split_first()
+        .context("No usable disk images to import")?;
 
     let script_content = generate_launch_script_with_os(
         vm_name,
-        primary_disk.as_str(),
+        primary_disk.0.as_str(),
         None,
         false,
         &vm.qemu_config,
         vm.detected_os_profile.as_deref(),
         None,
+    );
+    let script_content = attach_extra_disks(
+        &script_content,
+        extra_disks,
+        extra_disk_interface(&vm.qemu_config.disk_interface),
     );
 
     write_launch_script(&vm_dir, &script_content)?;
