@@ -286,6 +286,7 @@ fn render_step_warnings(state: &ImportWizardState, frame: &mut Frame, area: Rect
 
 /// Step 4: Configure disk handling
 fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area: Rect) {
+    let disk_selected = |index: usize| state.disk_selection.get(index).copied().unwrap_or(true);
     let block = Block::default()
         .title(" Import VM - Disk Handling ")
         .borders(Borders::ALL)
@@ -327,7 +328,11 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
             let status = if readable { "" } else { " (not readable!)" };
 
             content_lines.push(Line::from(vec![
-                Span::styled("  Disk: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    if disk_selected(i) { "  [x] " } else { "  [ ] " },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(format!("{}. ", i + 1), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{} ({}){}", disk.display(), size_str, status),
                     Style::default().fg(if readable { Color::White } else { Color::Red }),
@@ -395,7 +400,7 @@ fn render_step_configure_disk(state: &ImportWizardState, frame: &mut Frame, area
         .wrap(Wrap { trim: false });
     frame.render_widget(warning, chunks[3]);
 
-    let help = Paragraph::new("[Enter] Continue  [Esc] Back")
+    let help = Paragraph::new("[1-9] Toggle disk  [Enter] Continue  [Esc] Back")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
     frame.render_widget(help, chunks[4]);
@@ -672,6 +677,7 @@ fn handle_select_vm(app: &mut App, key: KeyEvent) -> Result<()> {
                         &crate::app::CreateWizardState::generate_folder_name(&vm.name),
                     );
                     state.selected_vm = Some(vm.clone());
+                    state.disk_selection = vec![true; vm.disk_paths.len()];
                     state.error_message = None;
                     state.field_focus = 0;
 
@@ -743,6 +749,19 @@ fn handle_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
         }
+        KeyCode::Char(digit @ '1'..='9') => {
+            if let Some(ref mut state) = app.import_state {
+                let index = digit as usize - '1' as usize;
+                if let Some(ref vm) = state.selected_vm {
+                    if index < vm.disk_paths.len() {
+                        if state.disk_selection.is_empty() {
+                            state.disk_selection = vec![true; vm.disk_paths.len()];
+                        }
+                        state.disk_selection[index] = !state.disk_selection[index];
+                    }
+                }
+            }
+        }
         KeyCode::Enter | KeyCode::Char(' ') => {
             if let Some(ref mut state) = app.import_state {
                 // Select disk action based on focus
@@ -755,6 +774,20 @@ fn handle_configure_disk(app: &mut App, key: KeyEvent) -> Result<()> {
 
                 // If Enter (not space), advance to review
                 if key.code == KeyCode::Enter {
+                    let any_disk = state
+                        .selected_vm
+                        .as_ref()
+                        .map(|vm| {
+                            vm.disk_paths.iter().enumerate().any(|(index, _)| {
+                                state.disk_selection.get(index).copied().unwrap_or(true)
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !any_disk {
+                        state.error_message =
+                            Some("Select at least one disk to import".to_string());
+                        return Ok(());
+                    }
                     state.step = ImportStep::ReviewAndImport;
                     state.field_focus = 0;
                     state.error_message = None;
@@ -810,7 +843,30 @@ fn handle_review(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
                 (
                     app.config.vm_library_path.clone(),
-                    vm.clone(),
+                    {
+                        let mut selected_vm = vm.clone();
+                        if !state.disk_selection.is_empty() {
+                            selected_vm.disk_paths = selected_vm
+                                .disk_paths
+                                .into_iter()
+                                .enumerate()
+                                .filter(|(index, _)| {
+                                    state.disk_selection.get(*index).copied().unwrap_or(true)
+                                })
+                                .map(|(_, path)| path)
+                                .collect();
+                            selected_vm.disks_readable = selected_vm
+                                .disks_readable
+                                .into_iter()
+                                .enumerate()
+                                .filter(|(index, _)| {
+                                    state.disk_selection.get(*index).copied().unwrap_or(true)
+                                })
+                                .map(|(_, readable)| readable)
+                                .collect();
+                        }
+                        selected_vm
+                    },
                     state.vm_name.clone(),
                     state.folder_name.clone(),
                     state.disk_action,
