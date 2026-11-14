@@ -190,3 +190,22 @@ impl HierarchyConfig {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_hierarchy_parses() {
+        let hierarchy = HierarchyConfig::load_embedded();
+        assert!(
+            hierarchy.families.len() >= 10,
+            "hierarchy.toml should define the OS families, got {}",
+            hierarchy.families.len()
+        );
+        assert!(!hierarchy.subcategories.is_empty());
+        assert_eq!(hierarchy.categorize("windows-95").0, "microsoft");
+        assert_eq!(hierarchy.categorize("linux-debian").0, "linux");
+        assert_eq!(hierarchy.categorize("not-a-known-os").0, "other");
+    }
+}

@@ -199,3 +199,20 @@ fn guess_os_details(vm_id: &str) -> (String, String) {
         ("Unknown".to_string(), "Unknown".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_metadata_parses() {
+        let store = MetadataStore::load_embedded();
+        assert!(
+            store.entries.len() > 100,
+            "defaults.toml should contain the full OS database, got {}",
+            store.entries.len()
+        );
+        assert!(store.get("windows-95").is_some());
+        assert!(store.get("linux-debian").is_some());
+    }
+}
